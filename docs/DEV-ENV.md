@@ -131,10 +131,17 @@ BASE=http://<LMBY_DEV_IP>:8099 CHROME='/path/to/chrome' node scripts/dev/browser
 # M0 界面验收（登录/初始化/个人中心/主题，26 项）
 # M1 界面验收（媒体库/扫描进度/条目表，18 项）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m1-ui-test.mjs
+
+# M2 条目编辑（字段锁定）界面验收（37 项，会截图到 shots-item-edit/）
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/item-edit-ui-test.mjs
+
+# M2 字段锁定的真库验收（42 项）——改字段 → 锁住 → 重扫，
+# 验「锁住的没被覆盖、没锁的被 nfo 改写」（对照组），跑完自动还原
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-item-edit.sh
 ```
 
-两个脚本都是**无依赖**的（`smoke-test.sh` 只用 curl + jq；`browser-test.mjs` 只用 Node 内置
-`WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
+这几个脚本都是**无依赖**的（`smoke-test.sh` / `verify-item-edit.sh` 只用 curl + jq；两个界面脚本只用
+Node 内置 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
 
 ### 匹配打分器验收（M2）
 

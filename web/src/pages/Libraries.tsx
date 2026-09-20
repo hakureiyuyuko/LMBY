@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { Item, LibrarySummary, ScanIssue, ScanProgress } from '../api';
 
@@ -406,7 +407,13 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
                 {items.map((it) => (
                   <tr key={it.id}>
                     <td className="faint">{kindLabels[it.kind] ?? it.kind}</td>
-                    <td>{it.title || <span className="faint">（无标题，待刮削）</span>}</td>
+                    <td>
+                      {it.title ? (
+                        <Link to={`/items/${it.id}`}>{it.title}</Link>
+                      ) : (
+                        <span className="faint">（无标题，待刮削）</span>
+                      )}
+                    </td>
                     <td className="faint">{it.year ?? ''}</td>
                     <td className="faint">
                       {it.seasonNumber !== undefined && it.seasonNumber !== null ? `S${it.seasonNumber}` : ''}

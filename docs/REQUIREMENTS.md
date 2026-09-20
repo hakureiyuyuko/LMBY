@@ -96,7 +96,12 @@ TV/Show (2020)/Season 01/season.nfo + season01-poster.jpg + S01E02 - X.mkv + S01
   真实库里那些已存在的 `poster.jpg` / `S01E01-thumb.jpg` / `Backdrops/` 就是权威。
 - 缩放输出不预生成：请求带 `w/h` 才缩，结果按内容寻址落 `DataDir/images/cache`（不看就删），
   回源下到的原图落 `DataDir/images/remote`（那是数据，不参与缓存清理）。
-- 手改字段写入 `locked_fields`，重新刮削不覆盖。
+- 手改字段写入 `locked_fields`，重新刮削/重扫不覆盖（界面：`/items/{id}` 条目编辑页，逐字段可锁）。
+  锁定的执行力在 `store.ApplyItemMeta` 的 SQL 里（`locked_fields ? '字段名'`）：
+  nfo 重读、TMDB 刮削、人工指定候选三条自动路径都绕不过去；
+  人工编辑本身走 `store.UpdateItemFields`，语义是「写什么就是什么」（空值也真的落库，
+  与自动流程的「空值不覆盖」相反）。字段名（`title`/`providerIds`/…）是接口、界面与
+  `locked_fields` 三处的共同契约，只在 `store` 的字段表里定义一次。
 - 出图走 `GET /api/v1/items/{id}/images/{kind}?w=&h=&format=webp&quality=`。
 
 ### 3.4 迁移导入器（决策 C）

@@ -332,14 +332,7 @@ func (h *Handler) search(ctx context.Context, itemKind, query string) ([]provide
 // `coalesce(nullif($n,”), 原值)` 语义，空值就等于「不动」。
 // 这样「空值不覆盖」这条规则只在一个地方实现，nfo 导入与刮削共用。
 func itemMeta(it *store.Item, d Detail) store.ItemMeta {
-	locked := func(name string) bool {
-		for _, f := range it.LockedFields {
-			if f == name {
-				return true
-			}
-		}
-		return false
-	}
+	locked := func(name string) bool { return store.FieldLocked(it.LockedFields, name) }
 
 	var m store.ItemMeta
 
@@ -348,7 +341,7 @@ func itemMeta(it *store.Item, d Detail) store.ItemMeta {
 		mv := d.Movie
 		if !locked(FieldTitle) {
 			m.Title = mv.Title
-			m.SortTitle = sortTitle(mv.Title)
+			m.SortTitle = store.SortTitle(mv.Title)
 		}
 		if !locked(FieldOriginalTitle) {
 			m.OriginalTitle = mv.OriginalTitle
@@ -388,7 +381,7 @@ func itemMeta(it *store.Item, d Detail) store.ItemMeta {
 		sv := d.Series
 		if !locked(FieldTitle) {
 			m.Title = sv.Name
-			m.SortTitle = sortTitle(sv.Name)
+			m.SortTitle = store.SortTitle(sv.Name)
 		}
 		if !locked(FieldOriginalTitle) {
 			m.OriginalTitle = sv.OriginalName
@@ -657,18 +650,6 @@ func numOr(v *int32, def int32) int32 {
 		return def
 	}
 	return *v
-}
-
-// sortTitle 生成排序标题：去掉开头的冠词，让《The Matrix》排在 M 而不是 T。
-func sortTitle(s string) string {
-	t := strings.ToLower(strings.TrimSpace(s))
-	for _, article := range []string{"the ", "a ", "an "} {
-		if strings.HasPrefix(t, article) {
-			t = t[len(article):]
-			break
-		}
-	}
-	return strings.TrimSpace(strings.TrimLeft(t, " ._-·、|"))
 }
 
 // parseDate 解析 TMDB 的 YYYY-MM-DD；拿不到就返回 nil（空值不覆盖已有的首播日期）。

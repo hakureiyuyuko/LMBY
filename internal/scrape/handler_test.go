@@ -853,14 +853,35 @@ func TestMarkUnmatched(t *testing.T) {
 	}
 }
 
-func TestSortTitleAndTicks(t *testing.T) {
-	if got := sortTitle("The Matrix"); got != "matrix" {
-		t.Errorf("sortTitle(The Matrix) = %q, 期望 matrix", got)
-	}
-	if got := sortTitle("  言叶之庭  "); got != "言叶之庭" {
-		t.Errorf("sortTitle(言叶之庭) = %q", got)
-	}
+func TestRuntimeTicks(t *testing.T) {
 	if got := runtimeTicks(46); got != 27_600_000_000 {
 		t.Errorf("runtimeTicks(46) = %d", got)
+	}
+}
+
+// TestFieldNamesMatchStore 刮削的字段锁常量必须与 store 里那张可编辑字段表同名。
+//
+// 两边一旦错位（"providers" vs "providerIds"），后果是「界面上锁了、刮削照样覆盖」，
+// 而且不会报任何错 —— 只能靠这条测试挡住。
+func TestFieldNamesMatchStore(t *testing.T) {
+	// 刮削会按这些名字判断「这个字段被锁了吗」
+	scrapeKnows := []string{
+		FieldTitle, FieldOriginalTitle, FieldYear, FieldOverview, FieldTagline,
+		FieldRuntime, FieldRating, FieldOfficialRating, FieldGenres, FieldStudios,
+		FieldProviderIDs, FieldPremiereDate,
+	}
+	storeNames := map[string]bool{}
+	for _, f := range store.ItemFields() {
+		storeNames[f.Name] = true
+	}
+	if len(storeNames) != len(scrapeKnows) {
+		t.Fatalf("store 有 %d 个可编辑字段，刮削判 %d 个：%v",
+			len(storeNames), len(scrapeKnows), store.ItemFieldNames())
+	}
+	for _, name := range scrapeKnows {
+		if !storeNames[name] {
+			t.Errorf("刮削用的字段名 %q 在 store 的可编辑字段表里不存在（%v）",
+				name, store.ItemFieldNames())
+		}
 	}
 }

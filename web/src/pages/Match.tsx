@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { Item, LibrarySummary, MatchCandidate, MatchDetail } from '../api';
 
@@ -275,6 +276,9 @@ function MatchPanel({
           {searching ? '搜索中…' : '搜索'}
         </button>
         <div className="spacer" />
+        <Link className="btn btn-sm btn-ghost" to={`/items/${itemId}`}>
+          编辑字段与锁定
+        </Link>
         <button type="button" className="btn btn-ghost" disabled={busy} onClick={onSkip}>
           标记不需要匹配
         </button>

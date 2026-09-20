@@ -158,6 +158,16 @@ export const api = {
         (matchState.length > 0 ? `&matchState=${encodeURIComponent(matchState.join(','))}` : ''),
     ),
 
+  // ---------------------------------------------------------------- 条目详情与人工编辑
+  item: (id: number) => request<ItemDetail>(`/api/v1/items/${id}`),
+  updateItem: (id: number, body: { fields?: Record<string, unknown>; lockedFields?: string[] }) =>
+    request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', ...json(body) }),
+  rescrapeItem: (id: number, force = true) =>
+    request<{ taskId: number; enqueued: boolean; force: boolean }>(`/api/v1/items/${id}/scrape`, {
+      method: 'POST',
+      ...json({ force }),
+    }),
+
   // ---------------------------------------------------------------- 人工匹配
   itemMatch: (id: number) => request<MatchDetail>(`/api/v1/items/${id}/match`),
   applyMatch: (id: number, providerId: number) =>
@@ -296,6 +306,39 @@ export interface Item {
   matchScore?: number;
   metadataSource?: string;
   scrapeError?: string;
+}
+
+/** 后端返回的完整条目（GET /api/v1/items/{id} 里的 item）。 */
+export interface FullItem extends Item {
+  libraryId: number;
+  originalTitle?: string;
+  sortTitle?: string;
+  tagline?: string;
+  runtimeTicks?: number;
+  communityRating?: number;
+  officialRating?: string;
+  studios?: string[];
+  providerIds?: Record<string, string>;
+  premiereDate?: string;
+  lockedFields?: string[];
+  lastScrapedAt?: string;
+  updatedAt?: string;
+}
+
+/** 一个可编辑字段的形态（后端 store 的字段表）。 */
+export interface ItemFieldInfo {
+  name: string;
+  kind: 'text' | 'int' | 'float' | 'list' | 'map' | 'date';
+  /** 界面上的单位（目前只有时长的 minutes）。 */
+  unit?: string;
+  locked: boolean;
+}
+
+/** 条目详情（编辑界面的数据源）。 */
+export interface ItemDetail {
+  item: FullItem;
+  fields: ItemFieldInfo[];
+  scrapeConfigured: boolean;
 }
 
 /** 人工匹配：一个候选（含打分明细）。 */

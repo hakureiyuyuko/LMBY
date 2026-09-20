@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
 import { Account } from './pages/Account';
 import { Home } from './pages/Home';
+import { ItemEdit } from './pages/Item';
 import { Libraries } from './pages/Libraries';
 import { Login } from './pages/Login';
 import { Match } from './pages/Match';
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
         <Route path="/libraries" element={<Libraries />} />
+        <Route path="/items/:id" element={<ItemEdit />} />
         <Route path="/match" element={<Match />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<NotFound />} />

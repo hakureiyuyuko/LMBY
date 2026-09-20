@@ -30,6 +30,7 @@ type Item struct {
 	SortTitle     string            `json:"sortTitle,omitempty"`
 	OriginalTitle string            `json:"originalTitle,omitempty"`
 	Year          *int32            `json:"year,omitempty"`
+	PremiereDate  *time.Time        `json:"premiereDate,omitempty"`
 	Overview      string            `json:"overview,omitempty"`
 	Tagline       string            `json:"tagline,omitempty"`
 	RuntimeTicks  *int64            `json:"runtimeTicks,omitempty"`
@@ -117,28 +118,43 @@ func (s *Store) InsertItem(ctx context.Context, in NewItem) (int64, error) {
 	return id, nil
 }
 
-// ApplyItemMeta 写入元数据（供 nfo 导入与将来的刮削使用）。
-func (s *Store) ApplyItemMeta(ctx context.Context, itemID int64, m ItemMeta) error {
-	_, err := s.pool.Exec(ctx,
-		`update media_items set
-		   title          = coalesce(nullif($2, ''), title),
-		   sort_title     = coalesce(nullif($3, ''), sort_title),
-		   original_title = coalesce(nullif($4, ''), original_title),
-		   year           = coalesce($5, year),
-		   overview       = coalesce(nullif($6, ''), overview),
-		   tagline        = coalesce(nullif($7, ''), tagline),
-		   runtime_ticks  = coalesce($8, runtime_ticks),
-		   community_rating = coalesce($9, community_rating),
-		   official_rating = coalesce(nullif($10, ''), official_rating),
-		   genres         = case when jsonb_array_length($11::jsonb) > 0 then $11::jsonb else genres end,
+// applyItemMetaSQL 是写入元数据的语句（供 nfo 导入、刮削与人工指定候选使用）。
+//
+// 两条语义都**只在这里实现一次**：
+//
+//  1. **字段锁定**：`locked_fields ? '<字段名>'` 为真时保持原值。
+//     调用方不止一处（nfo 重读、自动刮削、人工指定候选），分散判断迟早会漏一个 ——
+//     漏掉的后果是「用户手改并锁住的数据被悄悄覆盖」，而这从数据上看不出来。
+//     所以执行点放在 SQL 里，谁调用都绕不过去。
+//  2. **空值不覆盖**：coalesce(nullif(...)) —— 调用方只填自己知道的字段。
+//     与人工编辑（UpdateItemFields：写什么就是什么）正好相反，两者不要混用。
+//
+// tags 没有对应的可锁字段（界面上不开放编辑），因此没有锁判断。
+const applyItemMetaSQL = `update media_items set
+		   title          = case when locked_fields ? 'title' then title else coalesce(nullif($2, ''), title) end,
+		   sort_title     = case when locked_fields ? 'title' then sort_title else coalesce(nullif($3, ''), sort_title) end,
+		   original_title = case when locked_fields ? 'originalTitle' then original_title else coalesce(nullif($4, ''), original_title) end,
+		   year           = case when locked_fields ? 'year' then year else coalesce($5, year) end,
+		   overview       = case when locked_fields ? 'overview' then overview else coalesce(nullif($6, ''), overview) end,
+		   tagline        = case when locked_fields ? 'tagline' then tagline else coalesce(nullif($7, ''), tagline) end,
+		   runtime_ticks  = case when locked_fields ? 'runtime' then runtime_ticks else coalesce($8, runtime_ticks) end,
+		   community_rating = case when locked_fields ? 'rating' then community_rating else coalesce($9, community_rating) end,
+		   official_rating = case when locked_fields ? 'officialRating' then official_rating else coalesce(nullif($10, ''), official_rating) end,
+		   genres         = case when locked_fields ? 'genres' then genres when jsonb_array_length($11::jsonb) > 0 then $11::jsonb else genres end,
 		   tags           = case when jsonb_array_length($12::jsonb) > 0 then $12::jsonb else tags end,
-		   studios        = case when jsonb_array_length($13::jsonb) > 0 then $13::jsonb else studios end,
-		   provider_ids   = case when $14::jsonb <> '{}'::jsonb then $14::jsonb else provider_ids end,
-		   premiere_date  = coalesce($15, premiere_date),
+		   studios        = case when locked_fields ? 'studios' then studios when jsonb_array_length($13::jsonb) > 0 then $13::jsonb else studios end,
+		   provider_ids   = case when locked_fields ? 'providerIds' then provider_ids when $14::jsonb <> '{}'::jsonb then $14::jsonb else provider_ids end,
+		   premiere_date  = case when locked_fields ? 'premiereDate' then premiere_date else coalesce($15, premiere_date) end,
 		   match_state    = coalesce(nullif($16, ''), match_state),
 		   metadata_source = coalesce(nullif($17, ''), metadata_source),
 		   updated_at     = now()
-		 where id = $1`,
+		 where id = $1`
+
+// ApplyItemMeta 写入元数据（供 nfo 导入、刮削与人工指定候选使用）。
+//
+// 值合并与字段锁定的规则见 applyItemMetaSQL 的注释。
+func (s *Store) ApplyItemMeta(ctx context.Context, itemID int64, m ItemMeta) error {
+	_, err := s.pool.Exec(ctx, applyItemMetaSQL,
 		itemID, m.Title, m.SortTitle, m.OriginalTitle, m.Year, m.Overview, m.Tagline,
 		m.RuntimeTicks, m.Rating, m.OfficialRating,
 		jsonArray(m.Genres), jsonArray(m.Tags), jsonArray(m.Studios),
@@ -252,17 +268,17 @@ func (s *Store) GetItem(ctx context.Context, id int64) (*Item, error) {
 	var it Item
 	err := s.pool.QueryRow(ctx,
 		`select id, library_id, kind, parent_id, series_id, season_number, episode_number,
-		        episode_end, extra_type, title, sort_title, original_title, year, overview,
-		        tagline, runtime_ticks, community_rating, official_rating,
+		        episode_end, extra_type, title, sort_title, original_title, year, premiere_date,
+		        overview, tagline, runtime_ticks, community_rating, official_rating,
 		        genres, tags, studios, provider_ids, file_tech, match_state,
 		        match_score, metadata_source, locked_fields, scrape_error, last_scraped_at,
 		        updated_at
 		 from media_items where id = $1 and deleted_at is null`, id).
 		Scan(&it.ID, &it.LibraryID, &it.Kind, &it.ParentID, &it.SeriesID, &it.SeasonNum,
 			&it.EpisodeNum, &it.EpisodeEnd, &it.ExtraType, &it.Title, &it.SortTitle,
-			&it.OriginalTitle, &it.Year, &it.Overview, &it.Tagline, &it.RuntimeTicks,
-			&it.Rating, &it.OfficialRated, &it.Genres, &it.Tags, &it.Studios,
-			&it.ProviderIDs, &it.FileTech, &it.MatchState, &it.MatchScore,
+			&it.OriginalTitle, &it.Year, &it.PremiereDate, &it.Overview, &it.Tagline,
+			&it.RuntimeTicks, &it.Rating, &it.OfficialRated, &it.Genres, &it.Tags,
+			&it.Studios, &it.ProviderIDs, &it.FileTech, &it.MatchState, &it.MatchScore,
 			&it.MetadataSource, &it.LockedFields, &it.ScrapeError, &it.LastScrapedAt,
 			&it.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {

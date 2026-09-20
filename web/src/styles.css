@@ -595,3 +595,67 @@ th {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* 条目编辑（字段锁定） */
+
+.item-head {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.item-poster {
+  flex: none;
+  width: 150px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+}
+
+.item-head-body {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.item-head-body h2 {
+  margin-top: 0;
+}
+
+.edit-table td {
+  vertical-align: top;
+}
+
+.edit-table input[type='text'],
+.edit-table textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.edit-table textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.edit-table input[type='text']:focus,
+.edit-table textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 已锁定的字段在左侧打一条色条：一眼能看出哪些格子重扫也不会被动 */
+.row-locked td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.lock-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}

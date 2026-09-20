@@ -33,6 +33,11 @@ const (
 // 前者说「数据从哪来」，后者说「自动流程还要不要动它」。
 const (
 	MetadataSourceNFO = "nfo"
+	// MetadataSourceManual 表示元数据是人在界面上写的（逐字段编辑）。
+	//
+	// 它与 match_state=manual 是两个概念：后者是「人工指定过 provider 条目/字段被锁，
+	// 自动流程别动它」，前者只是回答「这一格的值是谁写的」。
+	MetadataSourceManual = "manual"
 )
 
 // MatchOutcome 是一次刮削的结局，落到 media_items 的刮削相关字段上。
@@ -144,9 +149,9 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 	if len(topKinds) > 0 {
 		tag, err := s.pool.Exec(ctx,
 			`insert into tasks (kind, payload, dedupe_key, priority)
-			 select $2, jsonb_build_object('itemId', i.id), 'item:' || i.id, 10
-			 from media_items i
-			 where i.library_id = $1 and i.deleted_at is null
+				 select $2, jsonb_build_object('itemId', i.id), 'item:' || i.id, $5
+				 from media_items i
+				 where i.library_id = $1 and i.deleted_at is null
 			   and i.kind = any($3)
 			   and i.match_state <> 'manual'
 			   -- nfo 优先：已有 nfo 元数据的条目默认不刮（force 才覆盖）。
@@ -154,7 +159,7 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 			   -- 「nfo 导入写得早、状态没跟上」的历史数据就漏了。
 			   and ($4 or (i.metadata_source <> 'nfo' and i.match_state in ('local', 'failed', 'review')))
 			 on conflict do nothing`,
-			libraryID, TaskKindScrape, topKinds, force)
+			libraryID, TaskKindScrape, topKinds, force, ScrapeTaskPriority)
 		if err != nil {
 			return total, fmt.Errorf("批量入队刮削任务失败: %w", err)
 		}
@@ -164,7 +169,7 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 	if len(extraKinds) > 0 {
 		tag, err := s.pool.Exec(ctx,
 			`insert into tasks (kind, payload, dedupe_key, priority)
-			 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, 10
+			 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, $5
 			 from media_items e
 			 join media_items s on s.id = e.series_id
 			 where e.library_id = $1 and e.deleted_at is null
@@ -176,7 +181,7 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 			   and e.match_state <> 'manual'
 			   and ($4 or (e.metadata_source <> 'nfo' and e.match_state in ('local', 'failed', 'review')))
 			 on conflict do nothing`,
-			libraryID, TaskKindScrape, extraKinds, force)
+			libraryID, TaskKindScrape, extraKinds, force, ScrapeTaskPriority)
 		if err != nil {
 			return total, fmt.Errorf("批量入队季/集刮削任务失败: %w", err)
 		}
@@ -193,14 +198,14 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 func (s *Store) EnqueueSeriesScrapes(ctx context.Context, seriesID int64) (int64, error) {
 	tag, err := s.pool.Exec(ctx,
 		`insert into tasks (kind, payload, dedupe_key, priority)
-		 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, 10
-		 from media_items e
-		 where e.series_id = $1 and e.deleted_at is null
-		   and e.kind in ('season', 'episode')
-		   and e.match_state <> 'manual'
-		   and e.metadata_source <> 'nfo'
-		   and e.match_state in ('local', 'failed', 'review')
-		 on conflict do nothing`, seriesID, TaskKindScrape)
+			 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, $3
+			 from media_items e
+			 where e.series_id = $1 and e.deleted_at is null
+			   and e.kind in ('season', 'episode')
+			   and e.match_state <> 'manual'
+			   and e.metadata_source <> 'nfo'
+			   and e.match_state in ('local', 'failed', 'review')
+			 on conflict do nothing`, seriesID, TaskKindScrape, ScrapeTaskPriority)
 	if err != nil {
 		return 0, fmt.Errorf("入队剧集下的季/集失败: %w", err)
 	}

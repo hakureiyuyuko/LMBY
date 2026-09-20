@@ -77,6 +77,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
 	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
 
+	// ---- 条目详情与人工编辑（字段锁定）----
+	mux.Handle("GET /api/v1/items/{id}", s.requireAuth(s.handleGetItem))
+	mux.Handle("PATCH /api/v1/items/{id}", s.requireAuth(s.handleUpdateItem))
+	mux.Handle("POST /api/v1/items/{id}/scrape", s.requireAuth(s.handleEnqueueItemScrape))
+
 	// ---- 图片 ----
 	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))
 	mux.Handle("GET /api/v1/items/{id}/images/{kind}", s.requireAuth(s.handleItemImage))

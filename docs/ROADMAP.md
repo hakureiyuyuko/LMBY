@@ -104,7 +104,7 @@
 > 界面上的探测进度与队列水位；TMDB provider + `provider_cache` jsonb 缓存 + 限流退避；
 > **匹配打分器 `internal/match`（含 `lmby match` 命令行工具）**；
 > **刮削处理器 `internal/scrape`（含 `lmby scrape` 与刮削接口）**。
-> 待完成：字段锁定的编辑界面、搜索、GUI 其余部分（详情页/条目编辑/设置页填凭据）。
+> 待完成：搜索、GUI 其余部分（详情页/海报墙、批量匹配、设置页填 TMDB 凭据）。
 
 **参考**：`MediaBrowser.Providers/{Movies,Manager}/*`、`MediaBrowser.LocalMetadata/Parsers/*`、`MediaBrowser.XbmcMetadata/*`（导入参考）
 
@@ -138,11 +138,15 @@
       待确认 / 没找到 两个标签、候选并列对比（**海报 + 分数 + 打分明细**）、
       换个词重搜、标记「不需要匹配」；应用后状态标 `manual`（人工结果优先）。
       截图：`docs/images/manual-match.png`
-- [ ] 元数据写入语义：**只写 PG**（不生成 XML、无导出）+ 字段锁定（后端已生效，差一个编辑界面）
-- [ ] GUI 其余部分：详情页（海报墙 + 剧集视图）、条目编辑（标题/简介/年份/流派/海报选择）、批量匹配、设置页里填 TMDB 凭据
+- [x] 元数据写入语义：**只写 PG**（不生成 XML、无导出）+ **字段锁定 + 条目编辑界面**
+      （`web/src/pages/Item.tsx`、`GET|PATCH /api/v1/items/{id}`、`POST /api/v1/items/{id}/scrape`）：
+      逐字段编辑/清空、逐字段加锁；锁定的**执行力在 SQL 里**
+      （`applyItemMetaSQL`），nfo 重读与 TMDB 刮削都绕不过去，见下方验收记录
+- [ ] GUI 其余部分：详情页（海报墙 + 剧集视图）、批量匹配、设置页里填 TMDB 凭据
 - [ ] 搜索：`pg_trgm` GIN + `tsvector`（中文 bigram，不引 zhparser）
-- [ ] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%（`scripts/dev/match-sample.sh`
-      实测 10 条样本 9 条 auto、0 条误配）；人工匹配可修正；重复刮削零 API 调用（缓存命中）；手改字段不被覆盖
+- [x] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%（`scripts/dev/match-sample.sh`
+      实测 10 条样本 9 条 auto、0 条误配）；人工匹配可修正；重复刮削零 API 调用（缓存命中）；
+      手改字段不被覆盖（`scripts/dev/verify-item-edit.sh` 42 项断言，含对照组）
 
 ### M2 刮削处理器的验收（2026-09-20，真库全量实跑）
 
@@ -202,6 +206,50 @@ GET  /api/v1/libraries/{id}/items?matchState=review,failed   列表支持按状�
 | 标记不需要匹配 | 状态 `manual` + 原因写进 `scrape_error`（自制片、样品片不会再挂在待处理里）|
 | 页面渲染 | 无头 Chrome 截图确认：导航/标签/卡片/候选面板（含海报）/打分明细都正常，亮色主题 |
 | 回归 | 媒体库页照常（条目列表 + 分页 + 探测进度 + 扫描记录）|
+
+### M2 条目编辑 / 字段锁定的验收（2026-09-20，真库实跑）
+
+界面：`web/src/pages/Item.tsx`（路由 `/items/{id}`，从媒体库条目表或人工匹配面板点进去）。
+接口：
+
+```
+GET   /api/v1/items/{id}          条目详情（元数据 + 12 个可编辑字段的形态与锁定状态）
+PATCH /api/v1/items/{id}          {"fields":{...},"lockedFields":[...]} 逐字段写入 + 整份锁定集合
+POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（解锁后想取回 TMDB 的值时用）
+```
+
+两条语义是**刻意相反**的，界面上也照实写出来：
+
+- **人工编辑**：写什么就是什么（空串 / null 真的落库）——“我就是要清空这一格”
+- **自动流程**（nfo 重读、TMDB 刮削、人工指定候选，都走 `ApplyItemMeta`）：空值不覆盖，
+  且**跳过 `locked_fields` 里的字段**
+
+字段锁定的执行力放在 **SQL 里**（`applyItemMetaSQL` 的 `case when locked_fields ? 'title' then title else …`），
+不放在调用方：调用方有三处，分散判断迟早漏一个，而漏掉的后果是「人工改的数据被悄悄覆盖」——
+这种事故从数据上看不出来。两条离线单测钉住它：每个可编辑字段都必须有对应的锁判断；
+`internal/scrape` 的字段常量必须与 store 的字段表同名（不能一个写 `providerIds`、一个判 `providers`）。
+
+| 项 | 结果 |
+|---|---|
+| 真库验收 `scripts/dev/verify-item-edit.sh` | **42 项断言全绿**（改字段 → 锁简介 → `refreshMetadata` 重扫 → 还原）|
+| 锁定生效 | 重扫读了 **479 份 nfo**，锁住的简介**没被覆盖** |
+| **对照组（关键）** | 同一次重扫里**没锁的标题被 nfo 改回去了** —— 证明这次重扫真的重写了字段，而不是「什么都没读所以什么都没变」|
+| 单条重刮 | 对 nfo 条目入队 → 队列跑完，状态/标题/简介一字不变（nfo 优先，处理器直接跳过）|
+| 参数校验 | 未知字段名（`providers`）/ 类型不对 / 评分越界 / 清空标题 / 空 body / 未登录 → 400/401，且错误信息列出可用字段名 |
+| 还原 | 标题、简介、provider_ids、锁定集合、匹配状态、元数据来源全部还原回跑之前的值 |
+| 界面验收 `scripts/dev/item-edit-ui-test.mjs` | **37 项断言全绿**（无头 Chrome）：改简介并保存、非法输入被挡在保存之前、勾锁后行上出现色条与「已锁定 1 个字段」、切主题不丢表单状态、全部解锁、最后还原 |
+| 截图 | `docs/images/item-edit.png`（暗色，简介已锁）|
+
+几个设计点：
+
+- **状态不动，锁定逐字段表达**：改一格不等于「整条交给人工」，所以编辑本身不改 `match_state`
+  （只有从 `review` / `failed` 上编辑时才顺手标 `manual` —— 那正是这两种状态在等的处理）；
+  「哪些字段不能被覆盖」完全由 `locked_fields` 表达
+- **`sort_title` 跟着标题派生**，不单独编辑：否则改完标题，列表里的排序位置还是旧的
+- **`runtime` 按分钟填**（库里是 100ns 的 tick，与 ffprobe 同一个单位），换算只在一处发生
+- **单条重刮的 dedupe key 与批量入队相同**（`item:<id>`）：已经在队列里时把它升级成 force，
+  而不是再排一条 —— 否则用户点了「重新刮削」会觉得没反应
+- 媒体库条目表里的标题现在是链接；人工匹配面板里也有「编辑字段与锁定」入口
 
 ### M2 图片管线的验收（2026-09-20，真库 + 合成库实跑）
 
