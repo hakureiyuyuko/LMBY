@@ -38,9 +38,13 @@ func (h *Handler) Kind() string { return store.TaskKindProbe }
 
 // probeTimeout 是单个文件的探测上限。
 //
-// 网络存储上个别文件会因为随机寻道慢得离谱（实测网盘上单文件可能十几秒），
-// 但不能让一个文件把 worker 占住几十分钟。超时后标记失败且不重试。
-const probeTimeout = 2 * time.Minute
+// 容错考虑两件事：
+//  1. 网络存储上单文件可能要十几秒（随机寻道），这里给足余量；
+//  2. 并发探测多个文件时，存储的随机读会被互相拖累 ——
+//     实测同一文件单跑 10 秒，8 路并发时能超过 2 分钟。
+// 所以上限取 5 分钟，并建议网络存储上把 `[tasks] workers` 降到 2~4。
+// 超时后标记失败且不重试（重试也是同样结果，只会白占 worker）。
+const probeTimeout = 5 * time.Minute
 
 // Handle 实现 worker.Handler。
 //
@@ -80,7 +84,7 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			h.log.Warn("探测超时，标记失败", "fileId", f.ID, "path", f.Path)
-			return h.st.MarkFileProbeFailed(ctx, f.ID, "探测超时（超过 2 分钟）")
+			return h.st.MarkFileProbeFailed(ctx, f.ID, "探测超时（超过 5 分钟）")
 		}
 		if errors.Is(err, ErrUnsupported) {
 			h.log.Warn("文件无法解析，标记探测失败",
