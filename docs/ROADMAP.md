@@ -97,12 +97,13 @@
 
 ---
 
-## M2 — 元数据与刮削 🚧（前半段已完成：任务队列 + 流信息探测）
+## M2 — 元数据与刮削 🚧（任务队列 + 探测 + provider + 匹配打分器已完成）
 
 > 已完成：PostgreSQL 任务队列（`internal/store/tasks.go` + `internal/worker`）、
 > ffprobe 流信息探测（`internal/probe`，9 个真实夹具单测）、批量入队/重置接口、
-> 界面上的探测进度与队列水位。
-> 待完成：TMDB provider、匹配打分、限流与缓存、人工匹配界面、字段锁定（需用户提供 API Key）。
+> 界面上的探测进度与队列水位；TMDB provider + `provider_cache` jsonb 缓存 + 限流退避；
+> **匹配打分器 `internal/match`（含 `lmby match` 命令行工具）**。
+> 待完成：刮削任务处理器、图片管线、字段锁定、人工匹配界面、搜索。
 
 **参考**：`MediaBrowser.Providers/{Movies,Manager}/*`、`MediaBrowser.LocalMetadata/Parsers/*`、`MediaBrowser.XbmcMetadata/*`（导入参考）
 
@@ -111,15 +112,51 @@
 - [x] **流信息探测**：ffprobe 归一化（容器/编码/profile/分辨率/位深/帧率/HDR/杜比视界/
       音轨/图形字幕/章节）、批量入队、单文件超时、时长回填条目
 - [x] 扫描结束后自动入队探测；界面显示探测进度与可手动补跑/重置
-- [ ] `Provider` 接口 + 注册表（配置驱动启用与优先级）
-- [ ] **TMDB provider**：search / movie / tv / season / episode / credits / images / external_ids / alternative_titles，语言参数化
-- [ ] 限流器（令牌桶 + 可配并发）+ 429/5xx 指数退避 + `provider_cache` jsonb 缓存
-- [ ] 匹配打分器：标题相似度（中文 bigram / 英文归一）、年份、类型、集数-时长吻合、别名命中 → 阈值以上自动 / 以下进人工队列
+- [x] `Provider` 接口（`internal/provider`，语义固定为「按标题+年份搜索 → 按 id 取详情」）
+- [ ] provider 注册表（按配置启用与排序）—— 现在只有 TMDB 一个源，等接入第二个源（TVDB/Bangumi）时再加
+- [x] **TMDB provider**：search / movie / tv / season / episode / credits / images / external_ids / alternative_titles，语言参数化
+- [x] 限流器（令牌桶 + 可配并发）+ 429/5xx 指数退避 + `provider_cache` jsonb 缓存
+- [x] **匹配打分器**（`internal/match`，纯标准库、可离线单测）：
+      标题相似度（二元组 / 分词 / 包含 / 分文字体系加权，取最大值；繁简与日文旧字体折叠、
+      丢掉连接性助词）+ 年份 + 类型过滤 + 集数-时长结构 + 别名命中，
+      每项都带权重与说明文字（界面要拿它解释「为什么是这个分」）；
+      阈值以上自动、以下进人工队列，**并且要求明显领先第二名**（同名重制版的保险）
+- [ ] 刮削任务处理器（挂到已有队列；`worker.Handler` 接口已预留）——
+      **两条来自实盘的硬要求**：必须取详情（含 `alternative_titles`）再决定；不要给 TMDB 搜索传 year（硬过滤会筛掉正确答案）
 - [ ] 图片管线：按需下载到缓存目录（hash 去重）+ 尺寸/格式元数据 + `GET /items/{id}/images/{kind}?w=&h=&format=webp` 缩放输出 + 本地图片优先覆盖顺序
 - [ ] 元数据写入语义：**只写 PG**（不生成 XML、无导出）+ 字段锁定（手改字段重扫不覆盖）
 - [ ] GUI：详情页（海报墙 + 剧集视图）、条目编辑（标题/简介/年份/流派/海报选择）、**人工匹配**（搜索候选→指定→应用）、批量匹配
 - [ ] 搜索：`pg_trgm` GIN + `tsvector`（中文 bigram，不引 zhparser）
-- [ ] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%；人工匹配可修正；重复刮削零 API 调用（缓存命中）；手改字段不被覆盖
+- [ ] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%（`scripts/dev/match-sample.sh`
+      实测 10 条样本 9 条 auto、0 条误配）；人工匹配可修正；重复刮削零 API 调用（缓存命中）；手改字段不被覆盖
+
+### M2 匹配打分器的验收（2026-09-20，开发容器实测）
+
+工具：`scripts/dev/container-verify.sh`（编译+单测）+ `scripts/dev/match-sample.sh`（拿真库抽样实盘跑）
+
+| 项 | 结果 |
+|---|---|
+| 单测 | `internal/match` 18 项全绿，其中 3 条固定语料是**真实 TMDB 命中**（31911 / 97525 / 198375） |
+| 真实库实盘 | 2 部剧集 + 8 部随机电影 → **9 条 auto**（其中 7 条满分 1.000）、1 条 review、**0 条误配** |
+| 危险样本 | 《钢之炼金术师 FULLMETAL ALCHEMIST》(2009) vs 2003 版：1.000 / 0.545，领先 0.455 —— 同名重制版自动避开 |
+| 别名命中 | 《孔中窥见真理之貌》(2013)：只搜标题只拿到 **0.309**（TMDB 主标题是《偷窺孔》），`--deep` 取回 `alternative_titles` 后命中《孔中窥见真理之貌OVA》→ **0.918 auto** |
+| 没有年份时 | 《钢之炼金术师》无年份、候选里同时有本体与 FA：领先只有 0.10 < 阈值 0.12 → **review 而不是 auto**（安全网生效） |
+| 非作品文件 | 库里的 `特效内封PGS字幕测试片`、`HEVC 4K … DEMO Mont Blanc` 搜不到候选 → reject，不进人工队列 |
+
+**两条实盘结论（刮削处理器必须照做）**：
+
+1. **必须取详情（含 `alternative_titles`）再决定**：本地中文译名与 TMDB 主标题差得远的不少，
+   只看 search 的主标题会漏配（《孔中窥见真理之貌》/《偷窺孔》就是一例）。
+2. **不要给 TMDB 搜索传 `year`**：TMDB 的 `year` / `first_air_date_year` 是硬过滤，
+   而本地年份可能来自某一季、或干脆解析错了，硬过滤会把正确答案直接筛掉。
+   年份交给打分器判（差得多的直接 0 分）。已在 `scripts/dev/match-sample.sh` 与 `lmby match` 里按这个原则做。
+
+**已知不够好的地方**（不阻塞，先记下）：
+
+- 标题相似度对「续作/剧场版」这类前缀关系会给到 0.85~0.92，单靠标题压不住，
+  真正把关的是年份与领先幅度。所以**本地年份解析得准不准，直接决定匹配质量**。
+- 打分器现在只有两个信号源（年份、集数/时长）。Jellyfin 那样接入「演职员/外部 id」
+  交叉验证会更稳，留到有人工匹配界面之后再说。
 
 ### M2 前半段的验收（2026-09-20）
 

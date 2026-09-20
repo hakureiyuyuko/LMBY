@@ -59,6 +59,8 @@ func run(args []string) error {
 		return cmdUser(args)
 	case "provider":
 		return cmdProvider(args)
+	case "match":
+		return cmdMatch(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -80,6 +82,9 @@ func usage() {
   lmby user add <用户名> [--admin]                 创建账号
   lmby user passwd <用户名>                        重置口令
   lmby user ls                                    列出账号
+  lmby match   [--kind tv|movie] --title <本地标题> [--year 2009]   用真实
+               TMDB 候选验证匹配打分器（--deep 会再取详情，把集数/时长
+               也拉进来参与打分）
   lmby version                                     打印版本
   lmby help                                        打印本帮助
 
@@ -217,6 +222,14 @@ func splitFlagsAndPositionals(args []string) (flags, positional []string) {
 		// 会被当成位置参数，把「tv」拼进搜索关键词里（已踩过）。
 		"--kind": true, "-kind": true,
 		"--year": true, "-year": true,
+		// match 子命令的开关
+		"--title": true, "-title": true,
+		"--orig-title": true, "-orig-title": true,
+		"--aliases": true, "-aliases": true,
+		"--season": true, "-season": true,
+		"--episodes": true, "-episodes": true,
+		"--runtime": true, "-runtime": true,
+		"--top": true, "-top": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]

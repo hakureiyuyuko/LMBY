@@ -64,6 +64,37 @@ ssh root@<LMBY_DEV_IP> '
 >    —— 结果是跑了半天旧逻辑才发现。所以在第 3 步里**必须先 md5 比对上传包**，
 >    解包后再 `grep` 一个刚改的标记确认拿到的确实是新代码。
 >    用 `tar tvzf` 读回来 grep 那个字符串是最直接的确认方式。
+> 3. **往 ssh 命令行里塞引号在 PowerShell 下必翻车**：`$(...)`、`\"`、甚至
+>    `grep -c "x" file` 都会被本机 shell 先吃掉（`grep` 会拿到三个参数、把 `x` 当文件名）。
+>    一律改成「本地写 .sh → 上传 → bash 执行」：
+>    `node ssh.mjs exec "tr -d '\r' < /root/x.sh > /tmp/x.sh && bash /tmp/x.sh"`。
+> 4. **sftp 上传后立刻比对 md5 可能读到半截文件**：`fastPut` 回调返回后本机进程就退出了，
+>    远端落盘还剩一点尾巴。要么把「上传 + 校验」放在同一次会话里，要么中间
+>    `Start-Sleep -Seconds 2`。（本次出现过「md5 不一致 → 隔几秒再比就一致」的假警报。）
+
+## 容器内编译与验收（本机没装 Go）
+
+所有编译、vet、单测都在容器里跑，不要在本机折腾工具链：
+
+```powershell
+# Windows 侧：打包（注意排除 .git 与 web/node_modules）
+tar czf $env:TEMP\lmby-src.tgz --exclude=./.git --exclude=./web/node_modules -C . .
+
+node ssh.mjs put $env:TEMP\lmby-src.tgz /root/lmby-src.tgz
+node ssh.mjs put scripts/dev/container-verify.sh /root/cv.sh
+Start-Sleep -Seconds 2
+node ssh.mjs exec "tr -d '\r' < /root/cv.sh > /tmp/cv.sh && bash /tmp/cv.sh"
+```
+
+`scripts/dev/container-verify.sh` 一次做完：解包 → 校验新代码标记 → gofmt → `go build`（产物
+`/tmp/lmby.new`）→ `go vet` → `go test`。gofmt 真的改过的文件会复制到 `/root/fmt-pull/`，
+可以用 `node ssh.mjs get` 拉回本地（**CI 的 lint 任务是跑 golangci-lint 的，格式化不过就是红**）。
+
+> `ssh.mjs` 是本机自用的小工具（本机没 plink/sshpass，带密码 SSH 只能靠 `npm i ssh2` 写一个），
+> 支持 `exec` / `put` / `get`，口令从环境变量 `SSH_PASS` 进，不落盘。
+
+`node ssh.mjs` 那条命令的细节见 `docs/DEV-ENV.md` 上方的四个坑；其中\#3（引号）与\#4（md5）
+是 2026-09-20 这轮新踩的。
 
 ## 验收脚本
 
@@ -85,6 +116,17 @@ BASE=http://127.0.0.1:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m1-u
 
 两个脚本都是**无依赖**的（`smoke-test.sh` 只用 curl + jq；`browser-test.mjs` 只用 Node 内置
 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
+
+### 匹配打分器验收（M2）
+
+```bash
+# 拿真实库里的条目对着真 TMDB 跑一遍，统计自动匹配率（就是 DoD 里那条 ≥ 90%）
+bash scripts/dev/match-sample.sh          # 2 部剧集 + 10 部随机电影
+DEEP=1 bash scripts/dev/match-sample.sh 3 # 额外取详情（含 alternative_titles），能救回中文译名与主标题差得远的情况
+```
+
+前置：`/tmp/lmby.new` 是最新编译产物（`container-verify.sh` 会生成）。
+脚本直接读 `media_items` 随机抽样，人工只需扫一眼榜首对不对。
 
 ### M1 新增：数据库侧校验
 
@@ -138,12 +180,32 @@ lmby user ls --config /etc/lmby/config.toml
 口令来源优先级：`--password` < 环境变量 `LMBY_PASSWORD` < 标准输入（避免落进 shell 历史与 `ps`）。
 旗标位置不敏感（`user add devtest --admin` 与 `user add --admin devtest` 都行）。
 
+## 匹配打分器 CLI
+
+调阈值、看候选排序、解释「为什么匹配到这一条」都靠它（对着真 TMDB）：
+
+```bash
+# 剧集：本地标题/年份/季号/集数都喂进去，看候选排序与每项明细
+/tmp/lmby.new match --kind tv --title "钢之炼金术师 FULLMETAL ALCHEMIST" \
+                    --year 2009 --season 1 --episodes 64 --top 3
+
+# --deep：对每个候选取详情（含 alternative_titles），把集数与单集时长也拉进来参与打分
+/tmp/lmby.new match --kind movie --title "孔中窥见真理之貌" --year 2013 --deep
+
+# --json：给脚本用（其余日志一律走 stderr，stdout 只放数据）
+/tmp/lmby.new match --kind movie --title "言叶之庭" --year 2013 --json
+```
+
+输出里每一行明细就是一项打分：`title / year / structure`，各带权重、得分与说明文字。
+直接打 `lmby match`（不带参数）会打用法。
+
 ## 环境相关的注意事项
 
 1. **`truncate users cascade` 可以重置到「首次安装」状态**，用于重复验证初始化向导。
 2. 容器 root 的口令登录默认被 sshd 拒绝，需要 `/etc/ssh/sshd_config.d/99-lmby.conf`
    里显式打开 `PermitRootLogin yes`。
 3. Windows 侧没有 plink/sshpass，带口令的非交互 SSH 走 Node + `ssh2`（密码经环境变量传入）。
+   上传后要校验 md5，但**别在同一秒就比**（sftp 落盘有尾巴）。
 4. 前台跑的构建/安装在一次会话结束后可能被回收 —— 长任务用 `nohup ... &` 放后台并轮询日志。
 5. 工具调用有 120 秒上限：浏览器端到端脚本要控制在 100 秒内（把「等待扫描跑完」这类
    长等待移出去，改为在数据库侧校验）。

@@ -42,6 +42,7 @@ func (h *Handler) Kind() string { return store.TaskKindProbe }
 //  1. 网络存储上单文件可能要十几秒（随机寻道），这里给足余量；
 //  2. 并发探测多个文件时，存储的随机读会被互相拖累 ——
 //     实测同一文件单跑 10 秒，8 路并发时能超过 2 分钟。
+//
 // 所以上限取 5 分钟，并建议网络存储上把 `[tasks] workers` 降到 2~4。
 // 超时后标记失败且不重试（重试也是同样结果，只会白占 worker）。
 const probeTimeout = 5 * time.Minute
