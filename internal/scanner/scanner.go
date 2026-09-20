@@ -462,7 +462,7 @@ func (w *walker) handleVideo(ctx context.Context, dir, path string, d fs.DirEntr
 				// 目录级 nfo（tvshow.nfo / season.nfo）也要认领：
 				// 它本来是在 ensureItem 里读的，而那条路只在新建/变更时走 ——
 				// 重扫时文件没变，用户手改了 tvshow.nfo 就永远不生效。
-				w.refreshDirMetadata(ctx, ex.ItemID, path, dir)
+				w.refreshDirMetadata(ctx, ex.ItemID, dir)
 			}
 			return
 		}
@@ -819,7 +819,7 @@ func (w *walker) applyNFO(ctx context.Context, md *metadata.Metadata, nfoPath st
 //
 // 它靠「文件所属条目的 parent/series 指针」找剧集与季，不靠标题匹配 ——
 // 元数据刮过之后标题可能与扫描时不一致，按标题查会查不到。
-func (w *walker) refreshDirMetadata(ctx context.Context, itemID int64, path, dir string) {
+func (w *walker) refreshDirMetadata(ctx context.Context, itemID int64, dir string) {
 	if w.dirMetaChecked[itemID] {
 		return
 	}
