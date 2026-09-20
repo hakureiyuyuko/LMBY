@@ -29,6 +29,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/auth"
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
+	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
@@ -423,16 +424,23 @@ func cmdServe(args []string) error {
 
 	pool := worker.New(st, log, cfg.Tasks.Workers)
 	pool.Register(probe.NewHandler(st, cfg.FFmpeg.ProbePath, log))
-	// 刮削处理器只在配了元数据源时注册：没配却把任务排上队，
-	// 只会得到一列「没有对应的任务处理器」的失败记录。
-	if cached, _ := buildTMDBProvider(cfg, st, log); cached != nil {
+	// 元数据源（TMDB）在刮削与图片回源两处都要用，所以只构造一次。
+	cached, _ := buildTMDBProvider(cfg, st, log)
+	if cached != nil {
 		pool.Register(scrape.NewHandler(st, cached, log))
 	} else {
-		log.Warn("未配置 TMDB 凭据：元数据刮削不可用（扫描、探测与浏览不受影响）")
+		log.Warn("未配置 TMDB 凭据：元数据刮削与图片回源不可用（扫描、探测与浏览不受影响）")
 	}
 	go pool.Run(ctx)
 
-	srv := api.New(cfg, st, log, ff)
+	// 图片管线：本地图只读，回源图与缩放缓存落在数据目录
+	imgSvc, err := images.NewService(st, cached, cfg.ImagesCacheDir(), cfg.Images.MaxCacheMB, log)
+	if err != nil {
+		return err
+	}
+	log.Info("图片管线就绪", "cacheDir", cfg.ImagesCacheDir(), "maxCacheMB", cfg.Images.MaxCacheMB)
+
+	srv := api.New(cfg, st, log, ff, imgSvc)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {

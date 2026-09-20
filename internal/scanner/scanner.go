@@ -955,7 +955,7 @@ func (w *walker) linkImages(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			if err := w.st.UpsertImage(ctx, itemID, kind, img.path, img.size, img.mtime); err != nil {
+			if err := w.st.UpsertImage(ctx, itemID, kind, img.path, store.ImageSourceLocal, 0, 0, img.size, img.mtime); err != nil {
 				w.issue("warning", img.path, "登记图片失败: "+err.Error())
 				continue
 			}

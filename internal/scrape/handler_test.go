@@ -150,6 +150,10 @@ func (f *fakeProvider) Images(context.Context, string, int, string) ([]provider.
 	return nil, nil
 }
 
+func (f *fakeProvider) ImageURL(path, size string) string {
+	return "https://img.example/" + size + path
+}
+
 func (f *fakeProvider) Credits(context.Context, string, int) (*provider.Credits, error) {
 	return nil, nil
 }

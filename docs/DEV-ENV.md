@@ -251,7 +251,29 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 ```
 
 未配 TMDB 凭据时入队接口回 **409**，且服务启动时不会注册刮削处理器
-（日志里会有一行「未配置 TMDB 凭据：元数据刮削不可用」）—— 不让任务白排队。
+（日志里会有一行「未配置 TMDB 凭据：元数据刮削与图片回源不可用」）—— 不让任务白排队。
+
+## 图片接口
+
+覆盖顺序：**媒体目录里的本地图 > 用户手选（UI 未做）> TMDB 下载缓存**。
+本地图能直接用就直接送原文件；要缩放才落缓存（`<data_dir>/images/cache`，默认上限 512MB），
+回源下到的原图落 `<data_dir>/images/remote`（算数据，不参与清理）。
+
+```
+GET /api/v1/items/{id}/images                      → 列出这个条目有哪些图（本地/回源、尺寸、URL）
+GET /api/v1/items/{id}/images/{kind}?w=&h=&format=&q=  → 输出图（kind: poster|fanart|logo|banner|thumb...）
+```
+
+`w`/`h` 是「等比缩放进这个框」，不放大；`format=jpeg|png` 默认尽量保持原格式；
+带 ETag 与 `Cache-Control: private, max-age=3600`，重复请求会走 304。
+
+配置（config.toml）：
+
+```toml
+[images]
+cache_dir = "/var/lib/lmby/images"  # 默认 <data_dir>/images
+max_cache_mb = 512
+```
 
 ### 手改 nfo 之后怎么让它生效
 

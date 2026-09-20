@@ -61,6 +61,9 @@ func NewCached(inner Client, st CacheStore, ttl TTLOptions) *Cached {
 // Name 实现 Client。
 func (c *Cached) Name() string { return c.inner.Name() }
 
+// ImageURL 实现 Client：直通底层（图片 URL 不是数据，没什么可缓存的）。
+func (c *Cached) ImageURL(path, size string) string { return c.inner.ImageURL(path, size) }
+
 // Stats 返回缓存命中/未命中计数（便于观察与调优）。
 func (c *Cached) Stats() (hits, misses int64) {
 	return c.hits.Load(), c.misses.Load()

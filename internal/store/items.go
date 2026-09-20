@@ -429,51 +429,6 @@ func (s *Store) ListPendingProbeFiles(ctx context.Context, limit int) ([]Library
 	return out, rows.Err()
 }
 
-// ---------------------------------------------------------------- 图片
-
-// UpsertImage 登记一张图片（只存路径与元信息，二进制永不入库）。
-func (s *Store) UpsertImage(ctx context.Context, itemID int64, kind, path string, size, mtimeNS int64) error {
-	_, err := s.pool.Exec(ctx,
-		`insert into images (item_id, kind, path, size_bytes, mtime_ns)
-		 values ($1, $2, $3, $4, $5)
-		 on conflict (item_id, kind, path) do update
-		   set size_bytes = excluded.size_bytes, mtime_ns = excluded.mtime_ns`,
-		itemID, kind, path, size, mtimeNS)
-	if err != nil {
-		return fmt.Errorf("登记图片失败: %w", err)
-	}
-	return nil
-}
-
-// DeleteImagesExcept 删除某个条目下不在给定路径集合中、且来自本地文件的图片记录。
-//
-// 只删 source='local'：远程下载图与用户上传图不能因为「本轮扫描没看到」而被清掉。
-func (s *Store) DeleteImagesExcept(ctx context.Context, itemID int64, keepPaths []string) (int64, error) {
-	if keepPaths == nil {
-		keepPaths = []string{}
-	}
-	tag, err := s.pool.Exec(ctx,
-		`delete from images
-		 where item_id = $1 and source = 'local' and not (path = any($2))`, itemID, keepPaths)
-	if err != nil {
-		return 0, fmt.Errorf("清理图片记录失败: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
-// CountImages 统计图片数（库列表展示用）。
-func (s *Store) CountImages(ctx context.Context, libraryID int64) (int64, error) {
-	var n int64
-	err := s.pool.QueryRow(ctx,
-		`select count(*) from images g
-		 join media_items i on i.id = g.item_id
-		 where i.library_id = $1`, libraryID).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("统计图片失败: %w", err)
-	}
-	return n, nil
-}
-
 // ---------------------------------------------------------------- JSON 小工具
 
 func jsonArray(v []string) string {

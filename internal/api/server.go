@@ -8,6 +8,7 @@ import (
 
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
+	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
@@ -18,18 +19,20 @@ type Server struct {
 	store   *store.Store
 	log     *slog.Logger
 	ffmpeg  ffmpeg.Info
+	images  *images.Service
 	started time.Time
 	limiter *loginLimiter
 	scans   *scan.Manager
 }
 
 // New 构造 Server。
-func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info) *Server {
+func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service) *Server {
 	return &Server{
 		cfg:     cfg,
 		store:   st,
 		log:     log,
 		ffmpeg:  ff,
+		images:  img,
 		started: time.Now(),
 		limiter: newLoginLimiter(8, 15*time.Minute),
 		scans:   scan.NewManager(st, log),
@@ -68,6 +71,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/libraries/{id}/scan", s.requireAuth(s.handleCancelScan))
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
 	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
+
+	// ---- 图片 ----
+	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))
+	mux.Handle("GET /api/v1/items/{id}/images/{kind}", s.requireAuth(s.handleItemImage))
 
 	// ---- 后台任务队列（探测 / 刮削）----
 	mux.Handle("GET /api/v1/tasks", s.requireAuth(s.handleTaskStats))

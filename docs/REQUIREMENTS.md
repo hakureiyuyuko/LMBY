@@ -91,6 +91,11 @@ TV/Show (2020)/Season 01/season.nfo + season01-poster.jpg + S01E02 - X.mkv + S01
 - **唯一数据源是 PG**。**不生成、不导出任何 XML/nfo**（用户已确认：无导出功能）。
 - 图片二进制不入库：`images` 表只存 `path/source/width/height/hash/lang`。
 - 覆盖顺序：**媒体同目录本地图片 > 用户手动选择 > TMDB 下载缓存**。
+- 本地图片只读不写：LMBY 不往媒体目录写任何东西。用户已明确「以后图片也像 nfo 一样
+  存在视频文件旁边」—— 那是同一个模型（媒体目录里的东西优先），写回能力到时候再加；
+  真实库里那些已存在的 `poster.jpg` / `S01E01-thumb.jpg` / `Backdrops/` 就是权威。
+- 缩放输出不预生成：请求带 `w/h` 才缩，结果按内容寻址落 `DataDir/images/cache`（不看就删），
+  回源下到的原图落 `DataDir/images/remote`（那是数据，不参与缓存清理）。
 - 手改字段写入 `locked_fields`，重新刮削不覆盖。
 - 出图走 `GET /api/v1/items/{id}/images/{kind}?w=&h=&format=webp&quality=`。
 

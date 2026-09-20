@@ -40,6 +40,9 @@ type Client interface {
 
 	Images(ctx context.Context, kind string, id int, lang string) ([]Image, error)
 	Credits(ctx context.Context, kind string, id int) (*Credits, error)
+	// ImageURL 把 provider 给的图片路径拼成可下载的绝对 URL。
+	// size 用 provider 自己的尺寸代号（如 TMDB 的 w500 / original）。
+	ImageURL(path, size string) string
 }
 
 // SearchOptions 是搜索条件。

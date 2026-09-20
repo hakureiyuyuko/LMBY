@@ -33,8 +33,15 @@ auto_migrate = true
 path = "ffmpeg"
 probe_path = "ffprobe"
 
-[tasks]
-# 后台任务队列（探测 / 刮削）的并发 worker 数。
+[images]
+# 图片缓存目录，默认 <data_dir>/images。
+#   cache/  —— 缩放产物，纯缓存，超过上限按最旧优先清理
+#   remote/ —— 本地没有图时从 TMDB 下到的原图（算数据，不参与清理）
+# 媒体目录里的本地图只读不写，不在这个目录下。
+# cache_dir = "/var/lib/lmby/images"
+max_cache_mb = 512
+
+[tasks]# 后台任务队列（探测 / 刮削）的并发 worker 数。
 #
 # ⚠️ 网络存储上不要贪多：实测同一文件单跑 10 秒，8 路并发能把云盘的随机读
 # 拖到 2 分钟以上（互相拖累，总吞吐反而下降）。网盘/SMB 建议 2~4，

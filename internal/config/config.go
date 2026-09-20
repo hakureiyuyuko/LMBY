@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,27 @@ type Config struct {
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
+	Images   ImagesConfig   `toml:"images"`
+}
+
+// ImagesConfig 是图片管线配置。
+//
+// 与「元数据只写 PG」不同，图片是二进制：库里只存路径与尺寸，
+// 文件本体分两处 —— 媒体目录里的本地图（权威，只读）+ LMBY 数据目录下的
+// 回源图与缩放缓存。
+type ImagesConfig struct {
+	// CacheDir 是回源图与缩放结果的落盘目录，默认 <data_dir>/images。
+	CacheDir string `toml:"cache_dir"`
+	// MaxCacheMB 是缩放缓存上限（MB），默认 512。回源原图算数据，不参与清理。
+	MaxCacheMB int `toml:"max_cache_mb"`
+}
+
+// ImagesCacheDir 返回解析过默认值的图片目录。
+func (c *Config) ImagesCacheDir() string {
+	if strings.TrimSpace(c.Images.CacheDir) != "" {
+		return c.Images.CacheDir
+	}
+	return filepath.Join(c.DataDir, "images")
 }
 
 // TMDBConfig 是 TMDB 刮削源配置。
@@ -97,6 +119,9 @@ func Default() *Config {
 		TMDB: TMDBConfig{
 			Language:         "zh-CN",
 			FallbackLanguage: "en-US",
+		},
+		Images: ImagesConfig{
+			MaxCacheMB: 512,
 		},
 	}
 }
