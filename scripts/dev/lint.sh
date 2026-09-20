@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 在容器里跑与 CI 同版本的 golangci-lint。
 #
-# 为什么要在本地容器里跑一遍：CI 的 lint 任务曾经因为 `.golangci.yml` 是 v1 格式、
+# 为什么要在容器里跑一遍：CI 的 lint 任务曾经因为 `.golangci.yml` 是 v1 格式、
 # 而 action 装的是 v2，直接「加载配置失败」退出 —— 从 M0 开始就一直是红的，
 # 但没人注意。所以改完 lint 相关的东西，先在容器里真跑一次再推。
 #
@@ -26,6 +26,16 @@ fi
 
 cd "$DST" || exit 1
 "$LINT" --version
+
+# 这一步别省：action 会先跑 config verify，
+# 而配置不合 schema 时 `run` 可能什么都不报就直接过了
+# （v1→v2 的 issues.exclude-rules 就是这么踩到的）。
+echo "== 校验 .golangci.yml =="
+if ! "$LINT" config verify; then
+  echo "!! 配置不合 v2 schema —— CI 会在 config verify 这一步就挂掉"
+  exit 3
+fi
+
 echo "== 开始检查 =="
 "$LINT" run "$@"
 code=$?

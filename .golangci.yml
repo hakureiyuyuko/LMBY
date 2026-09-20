@@ -2,8 +2,13 @@
 #
 # ⚠️ v2 起这条 `version` 字段是必须的：CI 里 golangci-lint-action 装的是 v2，
 # 而 v1 格式的配置在 v2 下会直接报
-# 「can't load config: unsupported version of the configuration」并退出 —— 
+# 「can't load config: unsupported version of the configuration」并退出 ——
 # 也就是说 lint 任务会从头到尾一次都没真正跑过检查。
+#
+# ⚠️ 改完一定要 `golangci-lint config verify`（action 会先跑这一步，
+# 报错信息只在 verify 里出现，`run` 可能什么都不说就跑过了）：
+#   - `issues.exclude-rules` 在 v2 已不允许，要挪到 `linters.exclusions.rules`
+#   - `linters-settings` 要挪到 `linters.settings`
 version: "2"
 
 run:
@@ -27,13 +32,14 @@ linters:
           disabled: true
     misspell:
       locale: US
+  exclusions:
+    rules:
+      # 测试里允许宽松一些
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unparam
 
 issues:
-  exclude-rules:
-    # 测试里允许宽松一些
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unparam
   max-issues-per-linter: 0
   max-same-issues: 0
