@@ -32,6 +32,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
+	"github.com/hakureiyuyuko/lmby/internal/scrape"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 	"github.com/hakureiyuyuko/lmby/internal/version"
 	"github.com/hakureiyuyuko/lmby/internal/worker"
@@ -61,6 +62,8 @@ func run(args []string) error {
 		return cmdProvider(args)
 	case "match":
 		return cmdMatch(args)
+	case "scrape":
+		return cmdScrape(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -85,6 +88,8 @@ func usage() {
   lmby match   [--kind tv|movie] --title <本地标题> [--year 2009]   用真实
                TMDB 候选验证匹配打分器（--deep 会再取详情，把集数/时长
                也拉进来参与打分）
+  lmby scrape  enqueue|run|status|reset                             元数据刮削
+               （run = 入队并就地跑完，便于验收；详见 lmby scrape）
   lmby version                                     打印版本
   lmby help                                        打印本帮助
 
@@ -230,6 +235,9 @@ func splitFlagsAndPositionals(args []string) (flags, positional []string) {
 		"--episodes": true, "-episodes": true,
 		"--runtime": true, "-runtime": true,
 		"--top": true, "-top": true,
+		// scrape 子命令的开关
+		"--library": true, "-library": true,
+		"--limit": true, "-limit": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -415,6 +423,13 @@ func cmdServe(args []string) error {
 
 	pool := worker.New(st, log, cfg.Tasks.Workers)
 	pool.Register(probe.NewHandler(st, cfg.FFmpeg.ProbePath, log))
+	// 刮削处理器只在配了元数据源时注册：没配却把任务排上队，
+	// 只会得到一列「没有对应的任务处理器」的失败记录。
+	if cached, _ := buildTMDBProvider(cfg, st, log); cached != nil {
+		pool.Register(scrape.NewHandler(st, cached, log))
+	} else {
+		log.Warn("未配置 TMDB 凭据：元数据刮削不可用（扫描、探测与浏览不受影响）")
+	}
 	go pool.Run(ctx)
 
 	srv := api.New(cfg, st, log, ff)

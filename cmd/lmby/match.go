@@ -5,16 +5,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/match"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
+	"github.com/hakureiyuyuko/lmby/internal/scrape"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
@@ -127,7 +126,7 @@ func cmdMatch(args []string) error {
 	}
 
 	if *deep {
-		enrichCandidates(ctx, cached, *kind, cfg.TMDB.Language, cands, local.SeasonNumber, log)
+		scrape.Enrich(ctx, cached, *kind, cands, local.SeasonNumber, log)
 	}
 
 	ranked := match.DefaultScorer().Rank(local, cands)
@@ -179,68 +178,6 @@ func cmdMatch(args []string) error {
 		}
 	}
 	return nil
-}
-
-// enrichCandidates 给候选补上只在详情接口里才有的结构信号。
-//
-// 剧集：先从 series.seasons 拿对应季的集数；单集时长要再请求一次那一季
-// （一次返回整季，不逐集请求）。电影：时长直接来自详情。
-//
-// 只对已经截断到前几名的候选做 —— 搜索能返回 20 条，值得细看的通常没那么多。
-// 后续刮削处理器要做同样的事，届时应当把这套逻辑挪到能共用的地方。
-func enrichCandidates(
-	ctx context.Context,
-	client provider.Client,
-	kind, lang string,
-	cands []match.Candidate,
-	season int,
-	log *slog.Logger,
-) {
-	for i := range cands {
-		switch kind {
-		case provider.KindMovie:
-			m, err := client.Movie(ctx, cands[i].ID, lang)
-			if err != nil {
-				log.Warn("取电影详情失败", "tmdb", cands[i].ID, "err", err)
-				continue
-			}
-			cands[i].RuntimeMinutes = m.RuntimeMinutes
-			cands[i].AltTitles = m.AlternativeTitles
-
-		default:
-			s, err := client.Series(ctx, cands[i].ID, lang)
-			if err != nil {
-				log.Warn("取剧集详情失败", "tmdb", cands[i].ID, "err", err)
-				continue
-			}
-			cands[i].AltTitles = s.AlternativeTitles
-			for _, se := range s.Seasons {
-				cands[i].SeasonEpisodes = append(cands[i].SeasonEpisodes, match.SeasonEpisodes{
-					Season:   se.SeasonNumber,
-					Episodes: se.EpisodeCount,
-				})
-			}
-
-			want := season
-			if want <= 0 {
-				want = 1
-			}
-			det, err := client.Season(ctx, cands[i].ID, want, lang)
-			if err != nil || len(det.Episodes) == 0 {
-				continue
-			}
-			var runtimes []int
-			for _, ep := range det.Episodes {
-				if ep.RuntimeMin > 0 {
-					runtimes = append(runtimes, ep.RuntimeMin)
-				}
-			}
-			if len(runtimes) > 0 {
-				sort.Ints(runtimes)
-				cands[i].RuntimeMinutes = runtimes[len(runtimes)/2]
-			}
-		}
-	}
 }
 
 // splitList 把逗号（中英文都认）分隔的列表切开并去掉空项。

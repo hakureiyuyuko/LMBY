@@ -200,7 +200,6 @@ lmby user ls --config /etc/lmby/config.toml
 旗标位置不敏感（`user add devtest --admin` 与 `user add --admin devtest` 都行）。
 
 ## 匹配打分器 CLI
-
 调阈值、看候选排序、解释「为什么匹配到这一条」都靠它（对着真 TMDB）：
 
 ```bash
@@ -217,6 +216,37 @@ lmby user ls --config /etc/lmby/config.toml
 
 输出里每一行明细就是一项打分：`title / year / structure`，各带权重、得分与说明文字。
 直接打 `lmby match`（不带参数）会打用法。
+
+## 刮削 CLI 与接口
+
+```bash
+# 入队（--force 连已匹配的重刮，--kind 限 movie/series，--library 限某个库）
+lmby scrape enqueue --library 1
+
+# 入队并就地跑完（不依赖服务进程，验收时用这个盯单条结果）
+lmby scrape run --limit 12
+
+# 看队列水位 + 各库的匹配状态分布
+lmby scrape status
+lmby scrape status --json
+
+# TMDB 短暂不可用导致一批失败后，重置重试
+lmby scrape reset --library 1
+```
+
+`scrape run` 结束时会打「缓存命中 / 回源」计数 —— 重跑时回源应当为 0
+（这是 DoD 里「重复刮削零 API 调用」的观测量）。
+
+服务侧对应三个接口（需要登录）：
+
+```
+POST /api/v1/libraries/{id}/scrape         body: {"force": false, "kind": "movie"}  → 入队
+GET  /api/v1/libraries/{id}/scrape                                              → 刮削进度
+POST /api/v1/libraries/{id}/scrape/reset                                        → 重置失败项并入队
+```
+
+未配 TMDB 凭据时入队接口回 **409**，且服务启动时不会注册刮削处理器
+（日志里会有一行「未配置 TMDB 凭据：元数据刮削不可用」）—— 不让任务白排队。
 
 ## 环境相关的注意事项
 

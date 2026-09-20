@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Item 是媒体库里的一个条目。字段很多，但都是「元数据的自然形状」，
@@ -38,7 +39,15 @@ type Item struct {
 	ProviderIDs   map[string]string `json:"providerIds"`
 	FileTech      map[string]any    `json:"fileTech"`
 	MatchState    string            `json:"matchState"`
-	UpdatedAt     time.Time         `json:"updatedAt"`
+
+	// 刮削相关。MatchScore 是匹配打分的总分（0~1），
+	// LockedFields 里列出的字段名在重扫时不允许被覆盖。
+	MatchScore     *float64   `json:"matchScore,omitempty"`
+	MetadataSource string     `json:"metadataSource,omitempty"`
+	LockedFields   []string   `json:"lockedFields"`
+	ScrapeError    string     `json:"scrapeError,omitempty"`
+	LastScrapedAt  *time.Time `json:"lastScrapedAt,omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // NewItem 是插入条目时需要的最小信息集。
@@ -129,6 +138,15 @@ func (s *Store) ApplyItemMeta(ctx context.Context, itemID int64, m ItemMeta) err
 		jsonArray(m.Genres), jsonArray(m.Tags), jsonArray(m.Studios),
 		jsonMap(m.ProviderIDs), m.PremiereDate, m.MatchState)
 	if err != nil {
+		// 唯一约束冲突（介质库里有同名同年条目）要能被上层识别。
+		//
+		// 场景：刮削把条目改名成了 TMDB 的规范标题，而库里已经有一条同名同年的
+		// （同一个作品被扫成了两个条目）。这是「需要人工确认是否重复」的业务结论，
+		// 不是可以重试的环境问题 —— 不区分的话任务会白白重试到 max_attempts。
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("%w: %w", ErrAlreadyExists, err)
+		}
 		return fmt.Errorf("写入条目元数据失败: %w", err)
 	}
 	return nil
@@ -221,6 +239,33 @@ func (s *Store) FindExtraID(ctx context.Context, parentID int64, title string) (
 		return 0, fmt.Errorf("查询花絮条目失败: %w", err)
 	}
 	return id, nil
+}
+
+// GetItem 按 id 读取一个条目（包含刮削相关的字段，供刮削处理器与编辑界面使用）。
+func (s *Store) GetItem(ctx context.Context, id int64) (*Item, error) {
+	var it Item
+	err := s.pool.QueryRow(ctx,
+		`select id, library_id, kind, parent_id, series_id, season_number, episode_number,
+		        episode_end, extra_type, title, sort_title, original_title, year, overview,
+		        tagline, runtime_ticks, community_rating, official_rating,
+		        genres, tags, studios, provider_ids, file_tech, match_state,
+		        match_score, metadata_source, locked_fields, scrape_error, last_scraped_at,
+		        updated_at
+		 from media_items where id = $1 and deleted_at is null`, id).
+		Scan(&it.ID, &it.LibraryID, &it.Kind, &it.ParentID, &it.SeriesID, &it.SeasonNum,
+			&it.EpisodeNum, &it.EpisodeEnd, &it.ExtraType, &it.Title, &it.SortTitle,
+			&it.OriginalTitle, &it.Year, &it.Overview, &it.Tagline, &it.RuntimeTicks,
+			&it.Rating, &it.OfficialRated, &it.Genres, &it.Tags, &it.Studios,
+			&it.ProviderIDs, &it.FileTech, &it.MatchState, &it.MatchScore,
+			&it.MetadataSource, &it.LockedFields, &it.ScrapeError, &it.LastScrapedAt,
+			&it.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("查询条目 %d 失败: %w", id, err)
+	}
+	return &it, nil
 }
 
 // ListItems 分页列出一个库的条目。
