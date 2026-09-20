@@ -229,6 +229,8 @@ async function main() {
   );
   await evaluate(`(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    // 下面是脚本**自己通过初始化向导创建的一次性测试账号**的口令：
+    // 测试库用完即弃，不是任何真实账号的凭据。
     const pw = 'lmby-gui-pass-1';
     [2, 3].forEach((i) => {
       const el = document.querySelectorAll('.center-card input')[i];

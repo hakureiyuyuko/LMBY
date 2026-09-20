@@ -13,7 +13,11 @@ const log = (m) => appendFileSync(REPORT, m + '\n');
 const CHROME = process.env.CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const BASE = process.env.BASE || 'http://127.0.0.1:8099';
 const USER = process.env.LMBY_USER || 'devtest';
-const PASS = process.env.LMBY_PASS || 'devtest-pass-1';
+// 口令必须从环境变量传入：这是公开仓库，不应携带任何可用凭据。
+const PASS = process.env.LMBY_PASS;
+if (!PASS) {
+  throw new Error('请通过环境变量提供测试账号口令：LMBY_PASS=xxx（配合 LMBY_USER）');
+}
 const OUT = 'shots-m1';
 const PORT = 9445;
 
