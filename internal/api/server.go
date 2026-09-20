@@ -8,6 +8,7 @@ import (
 
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
+	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
@@ -19,6 +20,7 @@ type Server struct {
 	ffmpeg  ffmpeg.Info
 	started time.Time
 	limiter *loginLimiter
+	scans   *scan.Manager
 }
 
 // New 构造 Server。
@@ -30,8 +32,12 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info) 
 		ffmpeg:  ff,
 		started: time.Now(),
 		limiter: newLoginLimiter(8, 15*time.Minute),
+		scans:   scan.NewManager(st, log),
 	}
 }
+
+// Scans 暴露扫描管理器（供 main 在启动时做残留清理等）。
+func (s *Server) Scans() *scan.Manager { return s.scans }
 
 // Handler 返回完整的 http.Handler。
 func (s *Server) Handler() http.Handler {
@@ -51,6 +57,20 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/auth/password", s.requireAuth(s.handleChangePassword))
 	mux.Handle("GET /api/v1/auth/sessions", s.requireAuth(s.handleListSessions))
 	mux.Handle("DELETE /api/v1/auth/sessions/{id}", s.requireAuth(s.handleRevokeSession))
+
+	// ---- 媒体库与扫描 ----
+	mux.Handle("GET /api/v1/libraries", s.requireAuth(s.handleListLibraries))
+	mux.Handle("POST /api/v1/libraries", s.requireAuth(s.handleCreateLibrary))
+	mux.Handle("GET /api/v1/libraries/{id}", s.requireAuth(s.handleGetLibrary))
+	mux.Handle("PATCH /api/v1/libraries/{id}", s.requireAuth(s.handleUpdateLibrary))
+	mux.Handle("DELETE /api/v1/libraries/{id}", s.requireAuth(s.handleDeleteLibrary))
+	mux.Handle("POST /api/v1/libraries/{id}/scan", s.requireAuth(s.handleStartScan))
+	mux.Handle("DELETE /api/v1/libraries/{id}/scan", s.requireAuth(s.handleCancelScan))
+	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
+	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
+
+	// ---- 实时事件（SSE）----
+	mux.Handle("GET /api/v1/events", s.requireAuth(s.handleEvents))
 
 	// ---- 前端静态资源（必须最后注册，作为兜底）----
 	mux.Handle("/", s.staticHandler())

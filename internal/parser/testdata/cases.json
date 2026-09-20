@@ -1,0 +1,250 @@
+{
+  "_comment": "解析器测试语料。路径来自真实媒体库 \\\\<MEDIA_SERVER>\\<MEDIA_SHARE>（见 docs/LIBRARY-NOTES.md），期望值是逐条人工核对的结论，不是从实现里回抄的。want 里缺省的字段不参与断言。",
+  "videos": [
+    {
+      "name": "Emby 风格：SxxExx 纯编号，标题来自父目录",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/钢之炼金术师 FULLMETAL ALCHEMIST (2009)/Season 1/S01E01.mkv",
+      "hint": { "parentTitle": "钢之炼金术师 FULLMETAL ALCHEMIST", "parentYear": 2009, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "钢之炼金术师 FULLMETAL ALCHEMIST", "year": 2009, "season": 1, "episode": 1, "episodeEnd": 0 }
+    },
+    {
+      "name": "三位数集号",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/黑色五叶草 (2017)/Season 1/S01E129.mkv",
+      "hint": { "parentTitle": "黑色五叶草", "parentYear": 2017, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "黑色五叶草", "year": 2017, "season": 1, "episode": 129 }
+    },
+    {
+      "name": "季目录里的 mp4",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/数码宝贝大冒险 (2020)/Season 1/S01E50.mp4",
+      "hint": { "parentTitle": "数码宝贝大冒险", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "数码宝贝大冒险", "season": 1, "episode": 50 }
+    },
+    {
+      "name": "第 7 季",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/我的英雄学院 (2016)/Season 7/S07E05.mkv",
+      "hint": { "parentTitle": "我的英雄学院", "parentYear": 2016, "parentSeason": 7 },
+      "want": { "kind": "episode", "title": "我的英雄学院", "season": 7, "episode": 5 }
+    },
+    {
+      "name": "剧集名含全角斜杠",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/大欺诈师／GREAT PRETENDER (2020)/Season 1/S01E13.mkv",
+      "hint": { "parentTitle": "大欺诈师／GREAT PRETENDER", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "大欺诈师／GREAT PRETENDER", "year": 2020, "season": 1, "episode": 13 }
+    },
+    {
+      "name": "剧集名含全角冒号",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/银河机攻队：庄严王子 (2013)/Season 1/S01E19.mkv",
+      "hint": { "parentTitle": "银河机攻队：庄严王子", "parentYear": 2013, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "银河机攻队：庄严王子", "season": 1, "episode": 19 }
+    },
+    {
+      "name": "剧集名以连字符结尾",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/86-不存在的战区- (2021)/Season 1/S01E01.mkv",
+      "hint": { "parentTitle": "86-不存在的战区-", "parentYear": 2021, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "86-不存在的战区-", "year": 2021, "season": 1, "episode": 1 }
+    },
+    {
+      "name": "剧集名含全角波浪号与感叹号",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/ENDRO～！ (2019)/Season 1/S01E01.mkv",
+      "hint": { "parentTitle": "ENDRO～！", "parentYear": 2019, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "ENDRO～！", "year": 2019, "season": 1, "episode": 1 }
+    },
+    {
+      "name": "剧集名含中文书名号（库内真实名称）",
+      "path": "/mnt/media/「Z」折纸Se丶/「完结动画」/LoveLive! 虹之咲学园偶像同好会「四格漫」 (2023)/Season 1/S01E01.mkv",
+      "hint": { "parentTitle": "LoveLive! 虹之咲学园偶像同好会「四格漫」", "parentYear": 2023, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "LoveLive! 虹之咲学园偶像同好会「四格漫」", "year": 2023, "season": 1, "episode": 1 }
+    },
+    {
+      "name": "集标题跟在季集号之后",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/S01E02 - 某集标题.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "某集标题", "season": 1, "episode": 2 }
+    },
+    {
+      "name": "季目录内的前导集号（无 S/E 标记）",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/02 - 另一种写法.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "另一种写法", "year": 2020, "season": 1, "episode": 2 }
+    },
+    {
+      "name": "发布组风格命名，残留分辨率标记",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/Show.S01E03.1080p.WEB-DL.AAC.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "Show", "season": 1, "episode": 3, "resolution": "1080P" }
+    },
+    {
+      "name": "第N集写法，季号取自父目录",
+      "path": "/mnt/media/TV/Show (2020)/Season 02/第3集.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 2 },
+      "want": { "kind": "episode", "title": "Show", "season": 2, "episode": 3 }
+    },
+    {
+      "name": "1x05 写法",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/Show - 1x05 - Title.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "Title", "season": 1, "episode": 5 }
+    },
+    {
+      "name": "Season N Episode M 写法（无父目录提示）",
+      "path": "/mnt/media/TV/Show/Season 1 Episode 5.mkv",
+      "hint": {},
+      "want": { "kind": "episode", "season": 1, "episode": 5 }
+    },
+    {
+      "name": "双集连播",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/S01E01E02 连播.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "episode", "title": "连播", "season": 1, "episode": 1, "episodeEnd": 2 }
+    },
+    {
+      "name": "特典季 S00",
+      "path": "/mnt/media/TV/Show (2020)/Specials/S00E01 特别篇.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentIsSpecials": true },
+      "want": { "kind": "episode", "title": "特别篇", "season": 0, "episode": 1 }
+    },
+    {
+      "name": "特典季目录但文件名只有编号（前导集号）",
+      "path": "/mnt/media/TV/Show (2020)/Specials/01.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentIsSpecials": true },
+      "want": { "kind": "episode", "title": "Show", "season": 0, "episode": 1 }
+    },
+    {
+      "name": "本库规范：技术标记 + 书名号（AVC 1080P）",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/AVC 演示片/AVC 1080P YUV420P8 30fps 45Mbps《东芝 - 炫Dazzle》.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "东芝 - 炫Dazzle", "year": 0, "season": -1, "codec": "AVC", "resolution": "1080P", "chroma": "YUV420P8", "frameRate": "30fps", "bitrate": "45Mbps" }
+    },
+    {
+      "name": "书名号内含「第3话」不能被当成集号",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/AVC 演示片/AVC 4K YUV420P8 120fps 15Mbps《LoveLive!Superstar!! - 第3话插入歌》.mp4",
+      "hint": {},
+      "want": { "kind": "movie", "title": "LoveLive!Superstar!! - 第3话插入歌", "season": -1, "resolution": "4K", "frameRate": "120fps" }
+    },
+    {
+      "name": "书名号内含「杜比视界」不能被当规格删掉",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/HDR 演示片/HEVC 4K HDR YUV420P10 60fps 50Mbps《杜比视界测试》.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "杜比视界测试", "codec": "HEVC", "resolution": "4K", "chroma": "YUV420P10", "frameRate": "60fps" }
+    },
+    {
+      "name": "10bit 色彩标记",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/HEVC 演示片/HEVC 1080P YUV420P10 24fps 20Mbps《天晴烂漫》.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "天晴烂漫", "codec": "HEVC", "chroma": "YUV420P10", "frameRate": "24fps", "bitrate": "20Mbps" }
+    },
+    {
+      "name": "RV40 / rmvb 老格式",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/RM 演示片/RV40 720P YUV420P8 25fps 1.5Mbps《满汉全席》.rmvb",
+      "hint": {},
+      "want": { "kind": "movie", "title": "满汉全席", "codec": "RV40", "resolution": "720P", "bitrate": "1.5Mbps" }
+    },
+    {
+      "name": "AV1",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/AV1 演示片/AV1 4K YUV420P10 60fps 30Mbps《某科学的超电磁炮OP2》.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "某科学的超电磁炮OP2", "codec": "AV1", "resolution": "4K" }
+    },
+    {
+      "name": "书名号内带年份，应提取为 Year 并从标题里去掉",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/※问题专项/内封PGS字幕测试《黑侠 (1996)》16：9.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "黑侠", "year": 1996 }
+    },
+    {
+      "name": "无书名号、无季集标记的中文测试片",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/※问题专项/电视／盒子CPU性能测试片.mkv",
+      "hint": {},
+      "want": { "kind": "movie", "title": "电视／盒子CPU性能测试片", "year": 0 }
+    },
+    {
+      "name": "电影：目录与文件同名带年份",
+      "path": "/mnt/media/「Z」折纸Se丶/「高清电影」/言叶之庭 (2013)/言叶之庭 (2013).mkv",
+      "hint": { "parentTitle": "言叶之庭", "parentYear": 2013 },
+      "want": { "kind": "movie", "title": "言叶之庭", "year": 2013, "season": -1 }
+    },
+    {
+      "name": "电影：年份与技术标记用点分隔",
+      "path": "/mnt/media/「Z」折纸Se丶/「高清电影」/某电影 (2024)/某电影.2024.2160p.HEVC.mkv",
+      "hint": { "parentTitle": "某电影", "parentYear": 2024 },
+      "want": { "kind": "movie", "title": "某电影", "year": 2024, "codec": "HEVC", "resolution": "2160P" }
+    },
+    {
+      "name": "电影：多版本（- 2160p）",
+      "path": "/mnt/media/Movies/Arrival (2016)/Arrival (2016) - 2160p.mkv",
+      "hint": { "parentTitle": "Arrival", "parentYear": 2016 },
+      "want": { "kind": "movie", "title": "Arrival", "year": 2016, "resolution": "2160P" }
+    },
+    {
+      "name": "电影：导演剪辑版（保留版本信息）",
+      "path": "/mnt/media/Movies/Arrival (2016)/Arrival (2016).Director's Cut.mkv",
+      "hint": { "parentTitle": "Arrival", "parentYear": 2016 },
+      "want": { "kind": "movie", "title": "Arrival", "year": 2016, "edition": "Director's Cut" }
+    },
+    {
+      "name": "电影：分片文件（cd1）应回退到父目录标题",
+      "path": "/mnt/media/Movies/Blade Runner 2049 (2017)/cd1.mkv",
+      "hint": { "parentTitle": "Blade Runner 2049", "parentYear": 2017 },
+      "want": { "kind": "movie", "title": "Blade Runner 2049", "year": 2017 }
+    },
+    {
+      "name": "花絮：Extras 目录",
+      "path": "/mnt/media/TV/Show (2020)/Extras/behind the scenes.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "isExtraDir": true },
+      "want": { "kind": "extra", "extraType": "behindthescenes" }
+    },
+    {
+      "name": "花絮：集目录下的 trailer，保留季集号",
+      "path": "/mnt/media/TV/Show (2020)/Season 01/S01E01 - trailer.mkv",
+      "hint": { "parentTitle": "Show", "parentYear": 2020, "parentSeason": 1 },
+      "want": { "kind": "extra", "extraType": "trailer", "season": 1, "episode": 1 }
+    },
+    {
+      "name": "花絮：中文「预告片」目录",
+      "path": "/mnt/media/电影 (2020)/预告片/正式预告.mkv",
+      "hint": { "parentTitle": "电影", "parentYear": 2020, "isExtraDir": true },
+      "want": { "kind": "extra", "extraType": "trailer", "title": "正式预告" }
+    },
+    {
+      "name": "疑难：下载残留式的杂乱文件名（只要求不崩且归为电影）",
+      "path": "/mnt/media/「W」未来Se丶/「基准测试」/AVI 演示片/021114_001 021114-001未公开影像～仅凭口吻就能让人发狂～朝比奈舞.avi",
+      "hint": {},
+      "want": { "kind": "movie", "season": -1 }
+    }
+  ],
+  "dirs": [
+    { "name": "分类目录：高清电影", "dir": "「高清电影」", "want": { "isCategory": true, "category": "高清电影" } },
+    { "name": "分类目录：基准测试", "dir": "「基准测试」", "want": { "isCategory": true, "category": "基准测试" } },
+    { "name": "分类目录：日式直角引号", "dir": "『华语』", "want": { "isCategory": true, "category": "华语" } },
+    { "name": "括号不成对的目录（媒体库根名字）不应被当成分类", "dir": "「Z」折纸Se丶", "want": { "isCategory": false, "title": "「Z」折纸Se丶" } },
+    { "name": "季目录：Season 1", "dir": "Season 1", "want": { "isSeason": true, "season": 1 } },
+    { "name": "季目录：Season 07", "dir": "Season 07", "want": { "isSeason": true, "season": 7 } },
+    { "name": "季目录：Specials", "dir": "Specials", "want": { "isSeason": true, "season": 0 } },
+    { "name": "季目录：第2季", "dir": "第2季", "want": { "isSeason": true, "season": 2 } },
+    { "name": "作品目录：名称 (年份)", "dir": "钢之炼金术师 FULLMETAL ALCHEMIST (2009)", "want": { "title": "钢之炼金术师 FULLMETAL ALCHEMIST", "year": 2009 } },
+    { "name": "作品目录：全角斜杠", "dir": "大欺诈师／GREAT PRETENDER (2020)", "want": { "title": "大欺诈师／GREAT PRETENDER", "year": 2020 } },
+    { "name": "作品目录：结尾连字符", "dir": "86-不存在的战区- (2021)", "want": { "title": "86-不存在的战区-", "year": 2021 } },
+    { "name": "作品目录：全角波浪号", "dir": "ENDRO～！ (2019)", "want": { "title": "ENDRO～！", "year": 2019 } },
+    { "name": "图片目录：Backdrops 整棵跳过", "dir": "Backdrops", "want": { "isImageDir": true } },
+    { "name": "花絮目录：Extras", "dir": "Extras", "want": { "isExtra": true, "extraType": "other" } },
+    { "name": "花絮目录：behind the scenes", "dir": "behind the scenes", "want": { "isExtra": true, "extraType": "behindthescenes" } },
+    { "name": "花絮目录：预告片", "dir": "预告片", "want": { "isExtra": true, "extraType": "trailer" } },
+    { "name": "花絮目录：特典", "dir": "特典", "want": { "isSeason": true, "season": 0 } }
+  ],
+  "files": [
+    { "name": "视频：mkv", "file": "S01E01.mkv", "want": { "isVideo": true } },
+    { "name": "视频：mp4", "file": "S01E01.mp4", "want": { "isVideo": true } },
+    { "name": "视频：rmvb", "file": "演示片.rmvb", "want": { "isVideo": true } },
+    { "name": "视频：iso 原盘", "file": "Movie.iso", "want": { "isVideo": true } },
+    { "name": "字幕：ass 不应被忽略（要登记为外挂字幕）", "file": "S01E01.ass", "want": { "isSubtitle": true, "ignore": false } },
+    { "name": "字幕：sup 图形字幕", "file": "外部特效字幕渲染测试.sup", "want": { "isSubtitle": true, "ignore": false } },
+    { "name": "图片：jpg（归类为图片，不属于忽略列表 —— 图片走专门的登记路径）", "file": "poster.jpg", "want": { "isImage": true, "ignore": false } },
+    { "name": "图片：png", "file": "clearlogo.png", "want": { "isImage": true, "ignore": false } },
+    { "name": "音频：flac", "file": "01 - Track.flac", "want": { "isAudio": true, "ignore": false } },
+    { "name": "忽略：nfo", "file": "tvshow.nfo", "want": { "ignore": true } },
+    { "name": "忽略：下载器临时文件", "file": "movie.mkv.!qB", "want": { "ignore": true } },
+    { "name": "忽略：U 盘自动运行文件（库里真实存在）", "file": "autorun.inf", "want": { "ignore": true } },
+    { "name": "忽略：图标文件（库里真实存在）", "file": "External USB 3.0.ico", "want": { "ignore": true } },
+    { "name": "忽略：macOS 元数据", "file": ".DS_Store", "want": { "ignore": true } }
+  ]
+}

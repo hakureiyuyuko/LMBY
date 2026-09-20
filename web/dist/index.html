@@ -1,26 +1,32 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>LMBY</title>
+    <script>
+      // 关键：在首屏绘制之前就把主题定下来，避免暗色用户看到一帧白屏（FOUC）。
+      // 优先级：用户上次显式选择 > 系统偏好。
+      (function () {
+        try {
+          var saved = localStorage.getItem('lmby-theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-CTO5EDu5.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DlNJg1ZI.css">
   </head>
   <body>
-    <!--
-      占位页（必须入库）。
-      仓库里保留它是为了让 `go build` 在没有构建前端时也能通过 ——
-      go:embed 至少要匹配到一个文件。
-
-      执行 `cd web && npm run build` 后，本文件会被真实的 Vite 产物覆盖。
-      提交前可用 `task web:restore-placeholder` 把它恢复成占位页。
-    -->
-    <main style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 5rem auto; line-height: 1.7; padding: 0 1.5rem">
-      <h1>LMBY</h1>
-      <p>前端尚未构建。请在 <code>web/</code> 目录执行：</p>
-      <pre style="background: #f4f6f9; padding: 12px 14px; border-radius: 8px">npm install
-npm run build</pre>
-      <p>或者直接运行仓库根目录的 <code>task build</code>（会先建前端再编译后端）。</p>
-      <p>后端接口此刻是可用的：<a href="/healthz">/healthz</a></p>
-    </main>
+    <div id="root"></div>
   </body>
 </html>

@@ -75,25 +75,24 @@ export function Home() {
       </div>
 
       <div className="card">
-        <h2>M0 已完成</h2>
-        <p className="hint">骨架阶段的交付内容。</p>
+        <h2>M1 已完成</h2>
+        <p className="hint">媒体库与扫描阶段的交付内容。</p>
         <ul className="muted" style={{ margin: 0, paddingLeft: 20 }}>
-          <li>单二进制 + PostgreSQL，迁移内嵌在程序里，启动自动应用</li>
-          <li>账号体系：初始化向导、登录/登出、argon2id 口令、可撤销会话</li>
-          <li>个人中心：改口令（改完踢掉其它设备）、显示名、我的设备、主题偏好</li>
-          <li>明暗主题：首屏即生效，localStorage 落盘，默认跟随系统</li>
-          <li>登录失败限流、结构化日志、/healthz 健康检查</li>
+          <li>库与多根路径管理，建库时校验路径可达性</li>
+          <li>命名解析器：Emby 约定 + 本库「编码 分辨率 色彩 帧率 码率《标题》」规范</li>
+          <li>增量扫描：指纹比对、移动识别（保留条目与进度）、软删除</li>
+          <li>本地 nfo 导入（只读，不生成 XML）+ 图片归属登记（不入库二进制）</li>
+          <li>SSE 实时扫描进度、扫描问题清单</li>
         </ul>
       </div>
 
       <div className="card">
-        <h2>下一步：M1 媒体库与扫描</h2>
+        <h2>下一步：M2 元数据与刮削</h2>
         <p className="hint">路线图见仓库 docs/ROADMAP.md。</p>
         <ul className="muted" style={{ margin: 0, paddingLeft: 20 }}>
-          <li>库与多根路径管理</li>
-          <li>文件遍历 + 指纹增量 + 移动识别</li>
-          <li>与 Emby 兼容的命名解析（含 150+ 条真实命名语料库）</li>
-          <li>ffprobe 探测、本地 .nfo 与图片登记</li>
+          <li>TMDB provider、匹配打分、限流与缓存</li>
+          <li>持久化任务队列 + worker（ffprobe 探测也接在这里）</li>
+          <li>人工匹配界面与字段锁定</li>
         </ul>
       </div>
     </>

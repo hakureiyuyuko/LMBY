@@ -9,6 +9,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -47,6 +48,8 @@ func run(args []string) error {
 		return cmdServe(args)
 	case "migrate":
 		return cmdMigrate(args)
+	case "user":
+		return cmdUser(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -65,12 +68,181 @@ func usage() {
 用法:
   lmby serve   [--config 路径] [--migrate=false]   启动服务（默认命令）
   lmby migrate [--config 路径]                     仅应用数据库迁移
+  lmby user add <用户名> [--admin]                 创建账号
+  lmby user passwd <用户名>                        重置口令
+  lmby user ls                                    列出账号
   lmby version                                     打印版本
   lmby help                                        打印本帮助
+
+口令来源（按优先级）：--password 参数 < 环境变量 LMBY_PASSWORD < 标准输入。
+避免把口令写在命令行上（ps 与 shell 历史里都会留下痕迹）。
 
 配置优先级：默认值 < 配置文件 < 环境变量（LMBY_*）
 默认配置文件查找顺序：/etc/lmby/config.toml、./config.toml
 `)
+}
+
+// cmdUser 提供最小可用的账号管理能力。
+//
+// 为什么需要它：初始化向导只能建第一个账号，而后台部署、
+// 自动化测试、忘记口令的救援都需要一个命令行入口。
+func cmdUser(args []string) error {
+	if len(args) == 0 {
+		usage()
+		return errors.New("缺少子命令（add / passwd / ls）")
+	}
+	sub := args[0]
+	flagArgs, posArgs := splitFlagsAndPositionals(args[1:])
+	fs := flag.NewFlagSet("user "+sub, flag.ContinueOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	password := fs.String("password", "", "口令（建议改用环境变量 LMBY_PASSWORD 或标准输入）")
+	admin := fs.Bool("admin", false, "是否管理员")
+	displayName := fs.String("display-name", "", "显示名")
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	log := newLogger(cfg.LogLevel)
+	ctx := context.Background()
+
+	st, err := store.Open(ctx, cfg.Database.DSN, cfg.Database.MaxConns)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	switch sub {
+	case "ls":
+		users, err := st.ListUsers(ctx)
+		if err != nil {
+			return err
+		}
+		if len(users) == 0 {
+			fmt.Println("（没有任何账号）")
+			return nil
+		}
+		fmt.Printf("%-6s %-20s %-6s %-8s %s\n", "ID", "用户名", "管理员", "已禁用", "显示名")
+		for _, u := range users {
+			fmt.Printf("%-6d %-20s %-6v %-8v %s\n", u.ID, u.Username, u.IsAdmin, u.IsDisabled, u.DisplayName)
+		}
+		return nil
+
+	case "add":
+		if len(posArgs) < 1 {
+			return errors.New("用法: lmby user add [--admin] <用户名>")
+		}
+		username := strings.TrimSpace(posArgs[0])
+		pw, err := readPassword(*password)
+		if err != nil {
+			return err
+		}
+		hash, err := auth.HashPassword(pw, auth.DefaultParams)
+		if err != nil {
+			return err
+		}
+		name := strings.TrimSpace(*displayName)
+		if name == "" {
+			name = username
+		}
+		u, err := st.CreateUser(ctx, username, name, hash, *admin)
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return fmt.Errorf("用户名 %s 已存在", username)
+		}
+		if err != nil {
+			return err
+		}
+		log.Info("已创建账号", "id", u.ID, "username", u.Username, "admin", u.IsAdmin)
+		if !u.IsAdmin {
+			fmt.Println("提示：这是普通账号；需要管理员请加 --admin")
+		}
+		return nil
+
+	case "passwd":
+		if len(posArgs) < 1 {
+			return errors.New("用法: lmby user passwd <用户名>")
+		}
+		username := strings.TrimSpace(posArgs[0])
+		pw, err := readPassword(*password)
+		if err != nil {
+			return err
+		}
+		u, err := st.GetUserByUsername(ctx, username)
+		if err != nil {
+			return fmt.Errorf("找不到账号 %s", username)
+		}
+		hash, err := auth.HashPassword(pw, auth.DefaultParams)
+		if err != nil {
+			return err
+		}
+		if err := st.UpdateUserPassword(ctx, u.ID, hash); err != nil {
+			return err
+		}
+		// 口令变了，旧会话必须失效
+		if n, err := st.RevokeOtherSessions(ctx, u.ID, ""); err == nil && n > 0 {
+			log.Info("已撤销该账号的全部会话", "count", n)
+		}
+		log.Info("已重置口令", "username", u.Username)
+		return nil
+
+	default:
+		usage()
+		return fmt.Errorf("未知子命令 %q", sub)
+	}
+}
+
+// splitFlagsAndPositionals 把参数拆成「旗标」与「位置参数」两部分。
+//
+// Go 的 flag 包遇到第一个非旗标参数就会停止解析，
+// 于是 `user add devtest --admin` 里的 --admin 会被当成位置参数丢掉。
+// 命令行工具不该对顺序这么敏感，所以这里手动拆一次。
+func splitFlagsAndPositionals(args []string) (flags, positional []string) {
+	valueFlags := map[string]bool{
+		"--config": true, "-config": true,
+		"--password": true, "-password": true,
+		"--display-name": true, "-display-name": true,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		name, hasValue := a, false
+		if eq := strings.Index(a, "="); eq >= 0 {
+			name, hasValue = a[:eq], true
+		}
+		if !hasValue && valueFlags[name] && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return flags, positional
+}
+
+// readPassword 按 参数 > 环境变量 > 标准输入 的顺序取口令。
+func readPassword(flagValue string) (string, error) {
+	if pw := strings.TrimSpace(flagValue); pw != "" {
+		return pw, nil
+	}
+	if pw := strings.TrimSpace(os.Getenv("LMBY_PASSWORD")); pw != "" {
+		return pw, nil
+	}
+	fmt.Fprint(os.Stderr, "请输入口令: ")
+	r := bufio.NewReader(os.Stdin)
+	line, err := r.ReadString('\n')
+	if err != nil && line == "" {
+		return "", fmt.Errorf("读取口令失败: %w", err)
+	}
+	pw := strings.TrimSpace(line)
+	if pw == "" {
+		return "", errors.New("口令不能为空")
+	}
+	return pw, nil
 }
 
 func newLogger(level string) *slog.Logger {
@@ -91,6 +263,8 @@ func newLogger(level string) *slog.Logger {
 func cmdMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	configPath := fs.String("config", "", "配置文件路径")
+	acceptChecksums := fs.Bool("accept-checksum-changes", false,
+		"接受「已应用过的迁移文件被修改」并重新登记校验和（仅在刚发布就写错时使用）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -108,11 +282,14 @@ func cmdMigrate(args []string) error {
 	}
 	defer st.Close()
 
-	applied, err := store.Migrate(ctx, st)
+	res, err := store.Migrate(ctx, st, store.MigrateOptions{AcceptChecksumChanges: *acceptChecksums})
 	if err != nil {
 		return err
 	}
-	for _, m := range applied {
+	for _, m := range res.Reconciled {
+		log.Warn("已重新登记被修改的历史迁移的校验和", "version", m.Version, "name", m.Name)
+	}
+	for _, m := range res.Applied {
 		log.Info("已应用迁移", "version", m.Version, "name", m.Name)
 	}
 
@@ -156,12 +333,12 @@ func cmdServe(args []string) error {
 	defer st.Close()
 
 	if cfg.Database.AutoMigrate && *runMigrate {
-		applied, err := store.Migrate(ctx, st)
+		res, err := store.Migrate(ctx, st, store.MigrateOptions{})
 		if err != nil {
 			return err
 		}
-		if len(applied) > 0 {
-			log.Info("数据库迁移完成", "applied", len(applied))
+		if len(res.Applied) > 0 {
+			log.Info("数据库迁移完成", "applied", len(res.Applied))
 		}
 	}
 
@@ -187,6 +364,14 @@ func cmdServe(args []string) error {
 	}
 
 	srv := api.New(cfg, st, log, ff)
+
+	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
+	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {
+		log.Warn("清理中断的扫描记录失败", "err", err)
+	} else if n > 0 {
+		log.Info("已清理中断的扫描记录", "count", n)
+	}
+
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),

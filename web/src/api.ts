@@ -135,4 +135,109 @@ export const api = {
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+
+  // ---------------------------------------------------------------- 媒体库
+  libraries: () => request<{ libraries: LibrarySummary[] }>('/api/v1/libraries'),
+  library: (id: number) => request<LibraryDetail>(`/api/v1/libraries/${id}`),
+  createLibrary: (name: string, kind: string, paths: string[]) =>
+    request<LibrarySummary>('/api/v1/libraries', { method: 'POST', ...json({ name, kind, paths }) }),
+  deleteLibrary: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'DELETE' }),
+
+  startScan: (id: number) =>
+    request<{ scanRunId: number }>(`/api/v1/libraries/${id}/scan`, { method: 'POST' }),
+  cancelScan: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/libraries/${id}/scan`, { method: 'DELETE' }),
+  scanStatus: (id: number) =>
+    request<{ running: boolean; progress: ScanProgress | null; lastScan: ScanRun | null; issues: ScanIssue[] }>(
+      `/api/v1/libraries/${id}/scan`,
+    ),
+  items: (id: number, kind = '', limit = 100, offset = 0) =>
+    request<ItemsPage>(
+      `/api/v1/libraries/${id}/items?kind=${encodeURIComponent(kind)}&limit=${limit}&offset=${offset}`,
+    ),
 };
+
+// ---------------------------------------------------------------- 媒体库类型
+
+export interface LibraryPath {
+  id: number;
+  libraryId: number;
+  path: string;
+  readonly: boolean;
+  sortOrder: number;
+}
+
+export interface LibrarySummary {
+  id: number;
+  name: string;
+  kind: string;
+  paths: LibraryPath[];
+  counts: Record<string, number>;
+  imageCount: number;
+  scanRunning: boolean;
+}
+
+export interface ScanRun {
+  id: number;
+  state: 'running' | 'done' | 'failed' | 'canceled';
+  trigger: string;
+  startedAt: string;
+  finishedAt?: string;
+  stats: Record<string, number>;
+  error?: string;
+}
+
+export interface ScanIssue {
+  id: number;
+  severity: string;
+  path: string;
+  message: string;
+  at: string;
+}
+
+export interface ScanProgress {
+  phase: string;
+  scanRunId: number;
+  libraryId: number;
+  videos: number;
+  newFiles: number;
+  changedFiles: number;
+  movedFiles: number;
+  deletedFiles: number;
+  unchanged: number;
+  itemsNew: number;
+  images: number;
+  issues: number;
+  currentPath: string;
+  elapsedMs: number;
+  at: string;
+}
+
+export interface LibraryDetail {
+  library: LibrarySummary;
+  lastScan: ScanRun | null;
+  issues: ScanIssue[];
+  progress: ScanProgress | null;
+}
+
+export interface Item {
+  id: number;
+  kind: string;
+  title: string;
+  year?: number;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  episodeEnd?: number;
+  overview?: string;
+  fileTech?: Record<string, unknown>;
+  genres?: string[];
+  matchState?: string;
+}
+
+export interface ItemsPage {
+  items: Item[];
+  total: number;
+  limit: number;
+  offset: number;
+}

@@ -12,6 +12,9 @@ export function Layout() {
           LMBY <small>Light 的 Emby</small>
         </div>
         <nav className="nav">
+          <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
+            媒体库
+          </NavLink>
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
             概览
           </NavLink>
@@ -31,7 +34,7 @@ export function Layout() {
         <Outlet />
       </main>
 
-      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M0 骨架</footer>
+      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M1 媒体库与扫描</footer>
     </div>
   );
 }
