@@ -156,6 +156,19 @@ export const api = {
     request<ItemsPage>(
       `/api/v1/libraries/${id}/items?kind=${encodeURIComponent(kind)}&limit=${limit}&offset=${offset}`,
     ),
+
+  // ---------------------------------------------------------------- 后台任务
+  tasks: () =>
+    request<{ stats: TaskStats; byKind: Record<string, number>; recent: TaskInfo[] }>('/api/v1/tasks'),
+  enqueueProbes: (id: number) =>
+    request<{ enqueued: number; probe: ProbeProgress }>(`/api/v1/libraries/${id}/probe`, {
+      method: 'POST',
+    }),
+  resetFailedProbes: (id: number) =>
+    request<{ reset: number; enqueued: number; probe: ProbeProgress }>(
+      `/api/v1/libraries/${id}/probe/reset`,
+      { method: 'POST' },
+    ),
 };
 
 // ---------------------------------------------------------------- 媒体库类型
@@ -219,6 +232,34 @@ export interface LibraryDetail {
   lastScan: ScanRun | null;
   issues: ScanIssue[];
   progress: ScanProgress | null;
+  probe: ProbeProgress;
+}
+
+/** 流信息探测进度。 */
+export interface ProbeProgress {
+  pending: number;
+  ok: number;
+  failed: number;
+}
+
+/** 后台任务队列水位。 */
+export interface TaskStats {
+  pending: number;
+  running: number;
+  done: number;
+  failed: number;
+  canceled: number;
+  oldestPendingSeconds: number;
+}
+
+export interface TaskInfo {
+  id: number;
+  kind: string;
+  state: string;
+  attempts: number;
+  maxAttempts: number;
+  lastError?: string;
+  lockedBy?: string;
 }
 
 export interface Item {

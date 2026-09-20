@@ -97,20 +97,44 @@
 
 ---
 
-## M2 — 元数据与刮削（2 周）
+## M2 — 元数据与刮削 🚧（前半段已完成：任务队列 + 流信息探测）
+
+> 已完成：PostgreSQL 任务队列（`internal/store/tasks.go` + `internal/worker`）、
+> ffprobe 流信息探测（`internal/probe`，9 个真实夹具单测）、批量入队/重置接口、
+> 界面上的探测进度与队列水位。
+> 待完成：TMDB provider、匹配打分、限流与缓存、人工匹配界面、字段锁定（需用户提供 API Key）。
 
 **参考**：`MediaBrowser.Providers/{Movies,Manager}/*`、`MediaBrowser.LocalMetadata/Parsers/*`、`MediaBrowser.XbmcMetadata/*`（导入参考）
 
+- [x] **PG 任务队列**：`for update skip locked` 抢占、幂等入队（部分唯一索引）、
+      优先级、指数退避（30s→2m→8m）、启动/定时回收卡住的任务、历史自动清理、worker 数可配
+- [x] **流信息探测**：ffprobe 归一化（容器/编码/profile/分辨率/位深/帧率/HDR/杜比视界/
+      音轨/图形字幕/章节）、批量入队、单文件超时、时长回填条目
+- [x] 扫描结束后自动入队探测；界面显示探测进度与可手动补跑/重置
 - [ ] `Provider` 接口 + 注册表（配置驱动启用与优先级）
 - [ ] **TMDB provider**：search / movie / tv / season / episode / credits / images / external_ids / alternative_titles，语言参数化
 - [ ] 限流器（令牌桶 + 可配并发）+ 429/5xx 指数退避 + `provider_cache` jsonb 缓存
 - [ ] 匹配打分器：标题相似度（中文 bigram / 英文归一）、年份、类型、集数-时长吻合、别名命中 → 阈值以上自动 / 以下进人工队列
-- [ ] PG 任务队列：批量入队、优先级、暂停/取消/重试、失败原因可视化、进程重启续跑
 - [ ] 图片管线：按需下载到缓存目录（hash 去重）+ 尺寸/格式元数据 + `GET /items/{id}/images/{kind}?w=&h=&format=webp` 缩放输出 + 本地图片优先覆盖顺序
 - [ ] 元数据写入语义：**只写 PG**（不生成 XML、无导出）+ 字段锁定（手改字段重扫不覆盖）
 - [ ] GUI：详情页（海报墙 + 剧集视图）、条目编辑（标题/简介/年份/流派/海报选择）、**人工匹配**（搜索候选→指定→应用）、批量匹配
 - [ ] 搜索：`pg_trgm` GIN + `tsvector`（中文 bigram，不引 zhparser）
 - [ ] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%；人工匹配可修正；重复刮削零 API 调用（缓存命中）；手改字段不被覆盖
+
+### M2 前半段的验收（2026-09-20）
+
+| 项 | 结果 |
+|---|---|
+| 队列实测回收 | 每次 `systemctl restart` 都看到「已回收上次中断的任务 count=4」—— 否则这些任务要白等 30 分钟 |
+| 探测落库 | 编码/位深/profile/分辨率/HDR/音轨/图形字幕/章节全部写进 `media_files` 的 jsonb |
+| 探测单测 | `internal/probe` 9 个**真实 ffprobe 夹具**（HEVC 10bit + 双 ASS + 章节、AV1 无音轨、H.264 4:4:4 10bit + PCM、老 AVI、杜比视界、HDR10、TrueHD、PGS 图形字幕、误落进来的 jpg）全绿 |
+| 数据库侧校验 | `scripts/dev/verify-probe.sql`（12 组只读查询）|
+
+**吞吐现实提醒**：测试库后面是网盘，ffprobe 大量随机寻道（MKV 的 cues、MP4 的 moov），
+单文件实测几秒到十几秒。已做三件事缓解：
+`-probesize 10M -analyzeduration 10M` 限制读入量（也避免 AVI 无索引时全文件扫描）、
+单文件 2 分钟超时（超时标记失败且不重试，不会死循环）、worker 数配置化。
+**探测是后台任务，慢不阻塞扫描与浏览** —— 这正是把它放进队列而不是内联在扫描里的原因。
 
 ---
 

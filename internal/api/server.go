@@ -69,6 +69,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
 	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
 
+	// ---- 后台任务队列（探测 / 后续的刮削）----
+	mux.Handle("GET /api/v1/tasks", s.requireAuth(s.handleTaskStats))
+	mux.Handle("POST /api/v1/libraries/{id}/probe", s.requireAuth(s.handleEnqueueProbes))
+	mux.Handle("POST /api/v1/libraries/{id}/probe/reset", s.requireAuth(s.handleResetFailedProbes))
+
 	// ---- 实时事件（SSE）----
 	mux.Handle("GET /api/v1/events", s.requireAuth(s.handleEvents))
 

@@ -360,6 +360,8 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
 
       {issues.length > 0 && <IssuesCard issues={issues} />}
 
+      <ProbeCard libraryId={libraryId} probe={detail.probe} onChange={loadDetail} />
+
       <div className="card">
         <h2>条目（{total}）</h2>
         <p className="hint">扫描入库的原始条目。matching 与海报墙属于 M2 / M5。</p>
@@ -445,8 +447,101 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
   );
 }
 
-function IssuesCard({ issues }: { issues: ScanIssue[] }) {
-  const [expanded, setExpanded] = useState(false);
+function ProbeCard({
+  libraryId,
+  probe,
+  onChange,
+}: {
+  libraryId: number;
+  probe: import('../api').ProbeProgress;
+  onChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const total = probe.ok + probe.pending + probe.failed;
+  const percent = total > 0 ? Math.round((probe.ok / total) * 100) : 0;
+
+  async function run(fn: () => Promise<string>) {
+    setBusy(true);
+    setMessage('');
+    try {
+      setMessage(await fn());
+      onChange();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>流信息探测</h2>
+      <p className="hint">
+        ffprobe 读取每个文件的容器/编码/位深/HDR/音轨/字幕/章节信息，写入数据库。
+        扫描结束后会自动排队，这里可以手动补跑。
+      </p>
+      {message && <div className="alert">{message}</div>}
+
+      <div className="row" style={{ marginBottom: 10 }}>
+        <span className="badge">已完成 {probe.ok}</span>
+        <span className="badge">待探测 {probe.pending}</span>
+        <span className="badge">失败 {probe.failed}</span>
+        <span className="faint">{percent}%</span>
+      </div>
+
+      <div
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: 'var(--bg-elev-2)',
+          overflow: 'hidden',
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            width: `${percent}%`,
+            height: '100%',
+            background: 'var(--accent)',
+            transition: 'width .3s ease',
+          }}
+        />
+      </div>
+
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={busy || probe.pending === 0}
+          onClick={() =>
+            void run(async () => {
+              const res = await api.enqueueProbes(libraryId);
+              return `已入队 ${res.enqueued} 个探测任务`;
+            })
+          }
+        >
+          把待探测的文件入队
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={busy || probe.failed === 0}
+          onClick={() =>
+            void run(async () => {
+              const res = await api.resetFailedProbes(libraryId);
+              return `已重置 ${res.reset} 个失败的探测，重新入队 ${res.enqueued} 个`;
+            })
+          }
+        >
+          重置失败的探测
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IssuesCard({ issues }: { issues: ScanIssue[] }) {  const [expanded, setExpanded] = useState(false);
   const shown = expanded ? issues : issues.slice(0, 5);
   return (
     <div className="card">

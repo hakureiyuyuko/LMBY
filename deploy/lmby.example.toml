@@ -32,3 +32,8 @@ auto_migrate = true
 # 留空则用 PATH 里的 ffmpeg。
 path = "ffmpeg"
 probe_path = "ffprobe"
+
+[tasks]
+# 后台任务队列（探测 / 刮削）的并发 worker 数。
+# 探测是 IO 密集型，4 个已经能把网盘带宽压满；小机器可降到 2。
+workers = 4

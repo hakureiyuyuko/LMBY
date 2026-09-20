@@ -26,8 +26,10 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/auth"
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
+	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 	"github.com/hakureiyuyuko/lmby/internal/version"
+	"github.com/hakureiyuyuko/lmby/internal/worker"
 )
 
 func main() {
@@ -362,6 +364,22 @@ func cmdServe(args []string) error {
 	if err := bootstrapAdmin(ctx, st, log); err != nil {
 		return err
 	}
+
+	// 后台任务队列：探测、后续的刮削都跑在这里。
+	// 与 HTTP 服务共享同一个 ctx，收到退出信号时一起优雅停止。
+	//
+	// 启动前先把上次进程留下的 running 任务立刻回收：
+	// 那些任务不可能再有 worker 认领（worker 随进程一起死了），
+	// 而维护协程的回收阀值（30 分钟）会让它们白等很久。
+	if n, err := st.RecoverStaleTasks(ctx, 0); err != nil {
+		log.Warn("回收上次中断的任务失败", "err", err)
+	} else if n > 0 {
+		log.Info("已回收上次中断的任务", "count", n)
+	}
+
+	pool := worker.New(st, log, cfg.Tasks.Workers)
+	pool.Register(probe.NewHandler(st, cfg.FFmpeg.ProbePath, log))
+	go pool.Run(ctx)
 
 	srv := api.New(cfg, st, log, ff)
 

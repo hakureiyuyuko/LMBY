@@ -47,24 +47,26 @@ type Progress struct {
 
 // Stats 是扫描结束时的统计。
 type Stats struct {
-	Dirs         int   `json:"dirs"`
-	Videos       int   `json:"videos"`
-	NewFiles     int   `json:"newFiles"`
-	ChangedFiles int   `json:"changedFiles"`
-	MovedFiles   int   `json:"movedFiles"`
-	DeletedFiles int   `json:"deletedFiles"`
-	Unchanged    int   `json:"unchanged"`
-	ItemsNew     int   `json:"itemsNew"`
-	SeriesNew    int   `json:"seriesNew"`
-	SeasonsNew   int   `json:"seasonsNew"`
-	EpisodesNew  int   `json:"episodesNew"`
-	MoviesNew    int   `json:"moviesNew"`
-	NFORead      int   `json:"nfoRead"`
-	Images       int   `json:"images"`
-	Subtitles    int   `json:"subtitles"`
-	Unrecognized int   `json:"unrecognized"`
-	Issues       int   `json:"issues"`
-	ElapsedMS    int64 `json:"elapsedMs"`
+	Dirs         int `json:"dirs"`
+	Videos       int `json:"videos"`
+	NewFiles     int `json:"newFiles"`
+	ChangedFiles int `json:"changedFiles"`
+	MovedFiles   int `json:"movedFiles"`
+	DeletedFiles int `json:"deletedFiles"`
+	Unchanged    int `json:"unchanged"`
+	ItemsNew     int `json:"itemsNew"`
+	SeriesNew    int `json:"seriesNew"`
+	SeasonsNew   int `json:"seasonsNew"`
+	EpisodesNew  int `json:"episodesNew"`
+	MoviesNew    int `json:"moviesNew"`
+	NFORead      int `json:"nfoRead"`
+	Images       int `json:"images"`
+	Subtitles    int `json:"subtitles"`
+	Unrecognized int `json:"unrecognized"`
+	Issues       int `json:"issues"`
+	// ProbesEnqueued 是本轮扫描后入队的探测任务数。
+	ProbesEnqueued int64 `json:"probesEnqueued"`
+	ElapsedMS      int64 `json:"elapsedMs"`
 }
 
 // Options 控制一次扫描。
@@ -138,6 +140,18 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 	if err := w.linkImages(ctx); err != nil {
 		return w.stats, err
 	}
+
+	// 扫描结束后统一入队探测任务。
+	//
+	// 放在这里而不是「每插一个文件就入队一次」有两个原因：
+	//   1. 一条 insert ... select 就能把整个库待探测的文件全排上，避免几万次往返；
+	//   2. 上一次扫描中途被中断时残留的 pending 文件也会被自然补上。
+	if n, err := st.EnqueueProbesForLibrary(ctx, lib.ID); err != nil {
+		w.issue("warning", "", "入队探测任务失败: "+err.Error())
+	} else {
+		w.stats.ProbesEnqueued = n
+	}
+
 	if err := w.finish(ctx); err != nil {
 		return w.stats, err
 	}

@@ -36,6 +36,13 @@ type Config struct {
 
 	Database DatabaseConfig `toml:"database"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
+	Tasks    TasksConfig    `toml:"tasks"`
+}
+
+// TasksConfig 是后台任务队列的配置。
+type TasksConfig struct {
+	// Workers 是并发的任务处理数。探测/刮削都是 IO 密集型，几个就够。
+	Workers int `toml:"workers"`
 }
 
 // DatabaseConfig 是 PostgreSQL 连接配置。
@@ -68,6 +75,11 @@ func Default() *Config {
 		FFmpeg: FFmpegConfig{
 			Path:      "ffmpeg",
 			ProbePath: "ffprobe",
+		},
+		Tasks: TasksConfig{
+			// 探测与刮削都是 IO 密集型；4 个 worker 既能压满带宽又不会把
+			// 小机器（或网盘）打爆。
+			Workers: 4,
 		},
 	}
 }
@@ -122,6 +134,9 @@ func applyEnv(cfg *Config) error {
 	setStr(&cfg.Database.DSN, "LMBY_DATABASE_DSN")
 	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
 	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
+	setInt(&cfg.Tasks.Workers, "LMBY_TASKS_WORKERS")
+	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
+	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
 
 	if v, ok := os.LookupEnv("LMBY_SECURE_COOKIES"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -157,6 +172,16 @@ func applyEnv(cfg *Config) error {
 func setStr(dst *string, key string) {
 	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
 		*dst = v
+	}
+}
+
+// setInt 用环境变量覆盖整数配置项。非法值忽略（保持默认），
+// 以免一个手误让服务起不来。
+func setInt(dst *int, key string) {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			*dst = n
+		}
 	}
 }
 

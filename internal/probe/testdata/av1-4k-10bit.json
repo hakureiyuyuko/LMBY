@@ -1,0 +1,82 @@
+{
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "av1",
+            "codec_long_name": "Alliance for Open Media AV1",
+            "profile": "Main",
+            "codec_type": "video",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "width": 3840,
+            "height": 2160,
+            "coded_width": 3840,
+            "coded_height": 2160,
+            "closed_captions": 0,
+            "film_grain": 1,
+            "has_b_frames": 0,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "16:9",
+            "pix_fmt": "yuv420p10le",
+            "level": 13,
+            "color_range": "tv",
+            "refs": 1,
+            "r_frame_rate": "25/1",
+            "avg_frame_rate": "25/1",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "extradata_size": 18,
+            "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "BPS": "2302209",
+                "DURATION": "00:09:10.960000000",
+                "NUMBER_OF_FRAMES": "13775",
+                "NUMBER_OF_BYTES": "158553196",
+                "_STATISTICS_WRITING_APP": "mkvmerge v67.0.0 ('Under Stars') 64-bit",
+                "_STATISTICS_WRITING_DATE_UTC": "2022-05-09 04:41:07",
+                "_STATISTICS_TAGS": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES"
+            }
+        }
+    ],
+    "chapters": [
+
+    ],
+    "format": {
+        "filename": "/mnt/media/「W」未来Se丶/「基准测试」/AV1 演示片/AV1 4K YUV420P10 25fps 2Mbps.mkv",
+        "nb_streams": 1,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "matroska,webm",
+        "format_long_name": "Matroska / WebM",
+        "start_time": "0.000000",
+        "duration": "550.960000",
+        "size": "158655937",
+        "bit_rate": "2303701",
+        "probe_score": 100,
+        "tags": {
+            "encoder": "libebml v1.4.2 + libmatroska v1.6.4",
+            "creation_time": "2022-05-09T04:41:07.000000Z"
+        }
+    }
+}

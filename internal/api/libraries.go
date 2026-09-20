@@ -150,11 +150,18 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 
 	progress, running := s.scans.Status(lib.ID)
 
+	probeProgress, err := s.store.ProbeProgressOf(ctx, lib.ID)
+	if err != nil {
+		s.serverError(w, "统计探测进度失败", err)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"library":  libraryResponse{Library: *lib, Counts: counts, ImageCount: images, ScanRunning: running},
 		"lastScan": lastRun,
 		"issues":   issues,
 		"progress": progressOrNil(progress, running),
+		"probe":    probeProgress,
 	})
 }
 
