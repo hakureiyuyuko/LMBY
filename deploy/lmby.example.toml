@@ -1,0 +1,34 @@
+# LMBY 示例配置
+#
+# 优先级：内置默认值 < 本文件 < 环境变量（LMBY_*）
+# 所有键都可省略，只保留需要改的部分。
+
+# HTTP 监听地址。反代部署时建议 "127.0.0.1:8099"。
+listen = ":8099"
+
+# 运行期数据目录（缓存、头像、HLS 分片等）。数据库内容不在这里。
+data_dir = "/var/lib/lmby"
+
+# debug | info | warn | error
+log_level = "info"
+
+# 对外访问地址，用于生成分享链接（可选）。
+# base_url = "https://lmby.example.com"
+
+# 走 HTTPS 时置 true，否则浏览器的 Cookie 加上 Secure 后不会被回传。
+secure_cookies = false
+
+# 会话有效期（小时），默认 720（30 天）。
+session_ttl_hours = 720
+
+[database]
+# 支持 postgres:// URL 或 key=value 形式。
+dsn = "postgres://lmby:CHANGE_ME@127.0.0.1:5432/lmby?sslmode=disable"
+max_conns = 10
+# 启动时自动应用内嵌迁移。
+auto_migrate = true
+
+[ffmpeg]
+# 留空则用 PATH 里的 ffmpeg。
+path = "ffmpeg"
+probe_path = "ffprobe"

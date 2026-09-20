@@ -1,0 +1,42 @@
+# golangci-lint 配置
+# 安装：go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+  disable:
+    # 生成代码与内嵌资源不需要检查
+    - exhaustruct
+
+linters-settings:
+  revive:
+    rules:
+      - name: package-comments
+        disabled: true
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # 测试里允许宽松一些
+    - path: _test\.go
+      linters:
+        - errcheck
+        - unparam
+  max-issues-per-linter: 0
+  max-same-issues: 0

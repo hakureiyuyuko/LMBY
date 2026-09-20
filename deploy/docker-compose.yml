@@ -1,0 +1,62 @@
+# LMBY 一键部署：lmby + PostgreSQL
+#
+#   docker compose up -d
+#
+# 说明：
+#   - PostgreSQL 由本 compose 一起拉起，用户不需要自备数据库；
+#   - /dev/dri 映射给容器，硬件转码（VAAPI/QSV）才有设备可用；
+#     没有核显的机器可以删掉 devices 段，走软件转码。
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lmby-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lmby
+      POSTGRES_USER: lmby
+      # 生产部署请改成随机强口令，并与下面的 DSN 保持一致
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lmby-dev-password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lmby -d lmby"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  lmby:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: lmby
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LMBY_LISTEN: ":8099"
+      LMBY_DATA_DIR: /var/lib/lmby
+      LMBY_DATABASE_DSN: "postgres://lmby:${POSTGRES_PASSWORD:-lmby-dev-password}@postgres:5432/lmby?sslmode=disable"
+      # 首次启动若系统无账号，用这个口令自动创建管理员（可留空，改用 Web 初始化页面）
+      LMBY_ADMIN_PASSWORD: ${LMBY_ADMIN_PASSWORD:-}
+      # 宿主机的 render 组 GID，不同发行版可能不同：getent group render
+      LMBY_RENDER_GID: ${LMBY_RENDER_GID:-993}
+    ports:
+      - "8099:8099"
+    volumes:
+      - lmby-data:/var/lib/lmby
+      # 媒体目录：按需改成本机路径
+      # - /mnt/media:/media:ro
+    devices:
+      # 核显直通，硬件转码用；没有核显可删掉这一段
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${LMBY_RENDER_GID:-993}"
+    # NVIDIA 用户改用下面两行（需要宿主机装 nvidia-container-toolkit）
+    # runtime: nvidia
+    # environment: { NVIDIA_VISIBLE_DEVICES: all }
+
+volumes:
+  pgdata:
+  lmby-data:

@@ -1,0 +1,20 @@
+# 构建产物
+/lmby
+/lmby.exe
+/dist/
+*.tgz
+*.tar.gz
+
+# 运行时数据（绝不入库）
+/data/
+/config.toml
+
+# 前端依赖与构建产物
+/web/node_modules/
+#
+# 说明：web/dist/index.html 是「占位页」，必须入库 ——
+# go:embed 至少要匹配到一个文件，否则没构建前端时 go build 会失败。
+# 执行 npm run build 后它会变成真实的构建产物（会在 git 里显示为已修改），
+# 提交前用 `task web:restore-placeholder` 恢复即可。
+/web/dist/assets/
+/web/dist/*.map

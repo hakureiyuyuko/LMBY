@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LMBY</title>
+  </head>
+  <body>
+    <!--
+      占位页（必须入库）。
+      仓库里保留它是为了让 `go build` 在没有构建前端时也能通过 ——
+      go:embed 至少要匹配到一个文件。
+
+      执行 `cd web && npm run build` 后，本文件会被真实的 Vite 产物覆盖。
+      提交前可用 `task web:restore-placeholder` 把它恢复成占位页。
+    -->
+    <main style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 5rem auto; line-height: 1.7; padding: 0 1.5rem">
+      <h1>LMBY</h1>
+      <p>前端尚未构建。请在 <code>web/</code> 目录执行：</p>
+      <pre style="background: #f4f6f9; padding: 12px 14px; border-radius: 8px">npm install
+npm run build</pre>
+      <p>或者直接运行仓库根目录的 <code>task build</code>（会先建前端再编译后端）。</p>
+      <p>后端接口此刻是可用的：<a href="/healthz">/healthz</a></p>
+    </main>
+  </body>
+</html>

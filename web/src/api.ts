@@ -1,0 +1,138 @@
+/** LMBY 后端接口客户端。 */
+
+export interface User {
+  id: number;
+  username: string;
+  displayName: string;
+  isAdmin: boolean;
+  isDisabled: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+export interface Preferences {
+  theme: string;
+  language: string;
+  subtitlePrefs?: Record<string, unknown>;
+  audioPrefs?: Record<string, unknown>;
+  libraryViews?: Record<string, unknown>;
+}
+
+export interface Me {
+  user: User;
+  preferences: Preferences;
+}
+
+export interface Meta {
+  version: string;
+  versionFull: string;
+  setupRequired: boolean;
+  ffmpeg: boolean;
+}
+
+export interface Health {
+  status: 'ok' | 'degraded' | 'error';
+  version: string;
+  uptimeSeconds: number;
+  database: { ok: boolean; latencyMs?: number; error?: string };
+  ffmpeg: {
+    path: string;
+    available: boolean;
+    version: string;
+    hw_accels: string[] | null;
+    error?: string;
+  };
+}
+
+export interface SessionInfo {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  userAgent: string;
+  ip: string;
+  current: boolean;
+}
+
+export interface ChangePasswordResult {
+  ok: boolean;
+  revokedSessions: number;
+}
+
+/** 后端返回的结构化错误。 */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (init.body !== undefined) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
+  } catch {
+    throw new ApiError(0, '无法连接到服务器，请检查网络或服务是否在运行');
+  }
+
+  const text = await res.text();
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!res.ok) {
+    const message =
+      data && typeof data === 'object' && 'error' in data
+        ? String((data as { error: unknown }).error)
+        : `请求失败（HTTP ${res.status}）`;
+    throw new ApiError(res.status, message);
+  }
+
+  return data as T;
+}
+
+const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+
+export const api = {
+  meta: () => request<Meta>('/api/v1/meta'),
+  health: () => request<Health>('/healthz'),
+
+  me: () => request<Me>('/api/v1/auth/me'),
+  login: (username: string, password: string) =>
+    request<Me>('/api/v1/auth/login', { method: 'POST', ...json({ username, password }) }),
+  logout: () => request<{ ok: boolean }>('/api/v1/auth/logout', { method: 'POST' }),
+  setup: (username: string, password: string, displayName: string) =>
+    request<Me>('/api/v1/setup', { method: 'POST', ...json({ username, password, displayName }) }),
+
+  updateProfile: (displayName: string) =>
+    request<Me>('/api/v1/auth/me', { method: 'PATCH', ...json({ displayName }) }),
+  updatePreferences: (prefs: Preferences) =>
+    request<Me>('/api/v1/auth/me/preferences', {
+      method: 'PATCH',
+      ...json(prefs),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<ChangePasswordResult>('/api/v1/auth/password', {
+      method: 'POST',
+      ...json({ currentPassword, newPassword }),
+    }),
+
+  sessions: () => request<{ sessions: SessionInfo[] }>('/api/v1/auth/sessions'),
+  revokeSession: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+};

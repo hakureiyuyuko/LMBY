@@ -1,0 +1,77 @@
+// Taskfile —— 用 https://taskfile.dev 驱动常用命令（也可直接看命令手动执行）。
+//
+// 安装：go install github.com/go-task/task/v3/cmd/task@latest
+version: "3"
+
+vars:
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  LDFLAGS: -s -w -X github.com/hakureiyuyuko/lmby/internal/version.Version={{.VERSION}} -X github.com/hakureiyuyuko/lmby/internal/version.Commit={{.COMMIT}}
+
+tasks:
+  default:
+    cmds: [task --list]
+
+  web:deps:
+    dir: web
+    cmds: [npm install]
+
+  web:build:
+    dir: web
+    cmds: [npm run build]
+
+  web:restore-placeholder:
+    desc: 把 web/dist/index.html 恢复成入库的占位页（前端构建后提交前跑一下）
+    cmds: [git checkout -- web/dist/index.html]
+
+  web:dev:
+    desc: 启动 Vite 开发服务器（需另开一个终端跑 task run）
+    dir: web
+    cmds: [npm run dev]
+
+  build:
+    desc: 构建前端并编译单二进制（产物 ./lmby）
+    deps: [web:build]
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o lmby ./cmd/lmby
+
+  build:server-only:
+    desc: 只编译后端（用仓库里的占位前端）
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o lmby ./cmd/lmby
+
+  run:
+    desc: 本地启动（读 ./config.toml 或 LMBY_* 环境变量）
+    deps: [build]
+    cmds: [./lmby serve]
+
+  test:
+    desc: 跑全部单元测试
+    cmds: [go test ./...]
+
+  vet:
+    cmds: [go vet ./...]
+
+  fmt:
+    cmds: [gofmt -s -w .]
+
+  lint:
+    desc: 需要先安装 golangci-lint
+    cmds: [golangci-lint run]
+
+  migrate:
+    desc: 只应用数据库迁移
+    cmds: [go run ./cmd/lmby migrate]
+
+  check:
+    desc: 提交前总检查
+    cmds: [task vet, task test, task web:build]
+
+  cross:
+    desc: 交叉编译发布产物
+    cmds:
+      - mkdir -p dist
+      - for: [linux/amd64, linux/arm64]
+        cmd: GOOS={{splitList "/" .ITEM | first}} GOARCH={{splitList "/" .ITEM | last}} CGO_ENABLED=0 go build -trimpath -ldflags "{{.LDFLAGS}}" -o dist/lmby-{{replace "/" "-" .ITEM}} ./cmd/lmby

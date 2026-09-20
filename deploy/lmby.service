@@ -1,0 +1,27 @@
+[Unit]
+Description=LMBY 媒体服务器
+Documentation=https://github.com/hakureiyuyuko/lmby
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/lmby serve --config /etc/lmby/config.toml
+Restart=on-failure
+RestartSec=3
+
+# 让进程能访问核显设备（VAAPI/QSV 需要 video、render 组）
+SupplementaryGroups=video render kvm
+
+# 运行期数据目录（缓存、HLS 分片等）
+StateDirectory=lmby
+RuntimeDirectory=lmby
+
+# 日志交给 journald，stdout 输出 JSON 结构化日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lmby
+
+[Install]
+WantedBy=multi-user.target
