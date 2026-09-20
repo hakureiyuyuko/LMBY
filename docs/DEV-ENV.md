@@ -4,6 +4,12 @@ LMBY 的目标平台是 Linux。Windows 只用于写代码，**不作为服务�
 
 ## 当前开发/测试容器
 
+> 📌 **本文件里的内网坐标一律是占位符**：`<PVE_HOST>`、`<PVE_HOSTNAME>`、`<LMBY_DEV_IP>`、
+> `<LAN_GATEWAY>`、`<MEDIA_SERVER>`、`<MEDIA_SHARE>`、`<SMB_USER>`。
+> 这个仓库是**公开**的，所以内网地址、共享路径与账号名都不写进来；
+> 真实值见 `docs/local-notes.md`（**已加入 .gitignore，不进版本库**，只在本机/容器里保留）。
+> 端口、软件版本（PVE/Debian/Go/ffmpeg）与主机名 `lmby-dev` 保留 —— 它们是软件事实或项目名，不指向具体网络。
+
 | 项 | 值 |
 |---|---|
 | PVE 宿主 | `<PVE_HOST>`（hostname `<PVE_HOSTNAME>`，PVE 9.2.11，内核 7.0.14-12-pve） |
@@ -11,7 +17,7 @@ LMBY 的目标平台是 Linux。Windows 只用于写代码，**不作为服务�
 | 地址 | `<LMBY_DEV_IP>`（DHCP），网关 `<LAN_GATEWAY>` |
 | 系统 | Debian 13 (trixie)，4 核 / 4G 内存 / 24G 磁盘（local-lvm） |
 | 显卡直通 | `/dev/dri`（Intel UHD 630，Comet Lake / Gen9.5）→ VAAPI 可用 |
-| 服务地址 | <http://127.0.0.1:8099> |
+| 服务地址 | `http://<LMBY_DEV_IP>:8099` |
 | 仓库位置 | 容器内 `/opt/lmby` |
 | 二进制 | `/usr/local/bin/lmby`，systemd 单元 `lmby` |
 | 配置 | `/etc/lmby/config.toml`（含数据库口令，权限 600） |
@@ -120,11 +126,11 @@ bash scripts/dev/smoke-test.sh
 # 已有账号时：SMOKE_USER=admin SMOKE_PASS=xxx bash scripts/dev/smoke-test.sh
 
 # 浏览器端到端（26 项断言，CDP 驱动真实 Chrome，会截图到 shots/）
-BASE=http://127.0.0.1:8099 CHROME='/path/to/chrome' node scripts/dev/browser-test.mjs
+BASE=http://<LMBY_DEV_IP>:8099 CHROME='/path/to/chrome' node scripts/dev/browser-test.mjs
 
 # M0 界面验收（登录/初始化/个人中心/主题，26 项）
 # M1 界面验收（媒体库/扫描进度/条目表，18 项）
-BASE=http://127.0.0.1:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m1-ui-test.mjs
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m1-ui-test.mjs
 ```
 
 两个脚本都是**无依赖**的（`smoke-test.sh` 只用 curl + jq；`browser-test.mjs` 只用 Node 内置

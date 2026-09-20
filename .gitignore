@@ -18,3 +18,6 @@
 # 提交前用 `task web:restore-placeholder` 恢复即可。
 /web/dist/assets/
 /web/dist/*.map
+
+# 真实的内网坐标（地址 / 共享 / 账号）—— 公开仓库里不写，只在本地保留
+/docs/local-notes.md
