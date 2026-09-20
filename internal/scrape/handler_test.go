@@ -472,6 +472,44 @@ func TestHandleTitleConflictGoesToReview(t *testing.T) {
 	}
 }
 
+// TestHandleNFOPriority nfo 优先：有 nfo 元数据的条目默认一条 API 都不打。
+// 这是用户的明确要求（nfo 是人工花大力气整理的），也是产品策略而不是实现细节，
+// 所以要有单测卡着。
+func TestHandleNFOPriority(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "言叶之庭", 2013)}
+	st.item.MatchState = store.MatchStateNFO
+	st.item.MetadataSource = store.MetadataSourceNFO
+	p := &fakeProvider{
+		movieResults: []provider.SearchResult{{ID: 198375, Kind: provider.KindMovie, Title: "言叶之庭", Year: 2013}},
+		movie:        &provider.Movie{ID: 198375, Title: "言叶之庭", Year: 2013},
+	}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(7, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(p.queries) != 0 {
+		t.Errorf("有 nfo 的条目不该打 API，实际请求了 %v", p.queries)
+	}
+	if len(st.metas) != 0 || len(st.outcomes) != 0 {
+		t.Error("有 nfo 的条目不该被改写元数据或状态")
+	}
+
+	// 只有显式 force 才会去搜（人主动要求覆盖时才允许）
+	st2 := &fakeStore{item: item(itemKindMovie, "言叶之庭", 2013)}
+	st2.item.MatchState = store.MatchStateNFO
+	st2.item.MetadataSource = store.MetadataSourceNFO
+	p2 := &fakeProvider{
+		movieResults: []provider.SearchResult{{ID: 198375, Kind: provider.KindMovie, Title: "言叶之庭", Year: 2013}},
+		movie:        &provider.Movie{ID: 198375, Title: "言叶之庭", Year: 2013},
+	}
+	if err := newTestHandler(st2, p2).Handle(context.Background(), task(7, true)); err != nil {
+		t.Fatalf("force 时 Handle 返回错误: %v", err)
+	}
+	if len(p2.queries) != 1 {
+		t.Errorf("force 时应当重新搜索，实际请求 %v", p2.queries)
+	}
+}
+
 func TestSortTitleAndTicks(t *testing.T) {
 	if got := sortTitle("The Matrix"); got != "matrix" {
 		t.Errorf("sortTitle(The Matrix) = %q, 期望 matrix", got)

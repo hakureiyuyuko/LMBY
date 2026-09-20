@@ -50,8 +50,17 @@ func NewManager(st *store.Store, log *slog.Logger) *Manager {
 	}
 }
 
+// StartOptions 控制一次扫描。
+type StartOptions struct {
+	// Trigger 是触发来源（manual / schedule / startup …），只用于记录。
+	Trigger string
+	// RefreshMetadata 为真时，文件没变也重读同目录的 nfo
+	// （用户手改了 nfo 之后靠这个生效，见 scanner.Options.RefreshMetadata）。
+	RefreshMetadata bool
+}
+
 // Start 异步启动一次扫描，立即返回 scan_runs 的 id。
-func (m *Manager) Start(libraryID int64, trigger string) (int64, error) {
+func (m *Manager) Start(libraryID int64, opts StartOptions) (int64, error) {
 	m.mu.Lock()
 	if r, ok := m.current[libraryID]; ok {
 		m.mu.Unlock()
@@ -62,6 +71,11 @@ func (m *Manager) Start(libraryID int64, trigger string) (int64, error) {
 	lib, err := m.st.GetLibrary(context.Background(), libraryID)
 	if err != nil {
 		return 0, err
+	}
+
+	trigger := opts.Trigger
+	if trigger == "" {
+		trigger = "manual"
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,11 +89,11 @@ func (m *Manager) Start(libraryID int64, trigger string) (int64, error) {
 	m.current[libraryID] = &running{runID: runID, started: time.Now(), cancel: cancel}
 	m.mu.Unlock()
 
-	go m.run(ctx, *lib, runID, trigger)
+	go m.run(ctx, *lib, runID, trigger, opts.RefreshMetadata)
 	return runID, nil
 }
 
-func (m *Manager) run(ctx context.Context, lib store.Library, runID int64, trigger string) {
+func (m *Manager) run(ctx context.Context, lib store.Library, runID int64, trigger string, refreshMetadata bool) {
 	defer func() {
 		m.mu.Lock()
 		delete(m.current, lib.ID)
@@ -99,8 +113,9 @@ func (m *Manager) run(ctx context.Context, lib store.Library, runID int64, trigg
 
 	start := time.Now()
 	stats, err := scanner.Scan(ctx, m.st, lib, scanner.Options{
-		ScanRunID: runID,
-		Trigger:   trigger,
+		ScanRunID:       runID,
+		Trigger:         trigger,
+		RefreshMetadata: refreshMetadata,
 		OnProgress: func(p scanner.Progress) {
 			m.mu.Lock()
 			if r, ok := m.current[lib.ID]; ok {

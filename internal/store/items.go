@@ -81,6 +81,9 @@ type ItemMeta struct {
 	ProviderIDs    map[string]string
 	PremiereDate   *time.Time
 	MatchState     string
+	// MetadataSource 记录元数据是谁写的（nfo / tmdb / manual）。
+	// 空表示不改动已有的来源标记。
+	MetadataSource string
 }
 
 // LibraryFile 是参与增量比对的物理文件。
@@ -131,12 +134,13 @@ func (s *Store) ApplyItemMeta(ctx context.Context, itemID int64, m ItemMeta) err
 		   provider_ids   = case when $14::jsonb <> '{}'::jsonb then $14::jsonb else provider_ids end,
 		   premiere_date  = coalesce($15, premiere_date),
 		   match_state    = coalesce(nullif($16, ''), match_state),
+		   metadata_source = coalesce(nullif($17, ''), metadata_source),
 		   updated_at     = now()
 		 where id = $1`,
 		itemID, m.Title, m.SortTitle, m.OriginalTitle, m.Year, m.Overview, m.Tagline,
 		m.RuntimeTicks, m.Rating, m.OfficialRating,
 		jsonArray(m.Genres), jsonArray(m.Tags), jsonArray(m.Studios),
-		jsonMap(m.ProviderIDs), m.PremiereDate, m.MatchState)
+		jsonMap(m.ProviderIDs), m.PremiereDate, m.MatchState, m.MetadataSource)
 	if err != nil {
 		// 唯一约束冲突（介质库里有同名同年条目）要能被上层识别。
 		//

@@ -219,6 +219,10 @@ lmby user ls --config /etc/lmby/config.toml
 
 ## 刮削 CLI 与接口
 
+**元数据优先级：nfo 优先。** 媒体同目录有 nfo 就用 nfo（人工整理的），
+只有没 nfo 的条目才去刮；自动流程永不覆盖 nfo，除非显式 `--force`。
+`lmby scrape status` 会把「nfo 元数据」单独列一项。
+
 ```bash
 # 入队（--force 连已匹配的重刮，--kind 限 movie/series，--library 限某个库）
 lmby scrape enqueue --library 1
@@ -247,6 +251,19 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 
 未配 TMDB 凭据时入队接口回 **409**，且服务启动时不会注册刮削处理器
 （日志里会有一行「未配置 TMDB 凭据：元数据刮削不可用」）—— 不让任务白排队。
+
+### 手改 nfo 之后怎么让它生效
+
+nfo 在本项目里是权威元数据，所以给了个「重新导入」的口子：
+
+```bash
+# 触发扫描时带 refreshMetadata：文件没变也重读一遍同目录的 nfo
+curl -b cookies.txt -X POST http://<LMBY_DEV_IP>:8099/api/v1/libraries/1/scan \
+  -H 'Content-Type: application/json' -d '{"refreshMetadata": true}'
+```
+
+实测 479 个文件全量重读只花 6.4 秒（CIFS 上 ~11ms/个）。
+不用 touch 媒体文件 —— 网络盘上 touch 会连带把几万个文件的重新探测都触发一遍。
 
 ## 环境相关的注意事项
 

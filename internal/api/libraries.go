@@ -169,6 +169,11 @@ type updateLibraryRequest struct {
 	Name *string `json:"name"`
 }
 
+// scanRequest 是触发扫描时的可选请求体。
+type scanRequest struct {
+	RefreshMetadata bool `json:"refreshMetadata"`
+}
+
 // handleUpdateLibrary 目前只支持改名。
 func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -225,12 +230,30 @@ func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------- 扫描
 
 // handleStartScan 触发一次扫描。
+//
+// 可选请求体：{"refreshMetadata": true} —— 文件没变也重读同目录的 nfo。
+// 用户手改了 nfo（nfo 在本项目里是权威元数据）之后靠这个让它生效，
+// 而不必去 touch 媒体文件（网络盘上那样会连带触发重新探测）。
 func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	runID, err := s.scans.Start(id, "manual")
+
+	var req scanRequest
+	if r.ContentLength > 0 {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+	}
+
+	runID, err := s.scans.Start(id, scan.StartOptions{
+		Trigger:         "manual",
+		RefreshMetadata: req.RefreshMetadata,
+	})
+	if err == nil {
+		s.log.Info("已启动扫描", "libraryId", id, "scanRunId", runID, "refreshMetadata", req.RefreshMetadata)
+	}
 	if errors.Is(err, scan.ErrAlreadyRunning) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "该媒体库已有扫描任务在运行", "scanRunId": runID,

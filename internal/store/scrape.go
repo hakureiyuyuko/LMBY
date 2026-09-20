@@ -11,16 +11,28 @@ import (
 
 // match_state 的取值。见 migrations/0006_scrape.sql 的注释。
 const (
-	// MatchStateLocal 只有扫描/nfo 得到的信息，还没刮过。
+	// MatchStateLocal 只有扫描得到的信息，还没刮过，也没 nfo。
 	MatchStateLocal = "local"
+	// MatchStateNFO 元数据来自媒体同目录的 nfo —— **人工整理的，刮削不许覆盖**。
+	//
+	// 为什么单独一个状态，不共用 manual：nfo 是「离线人工整理」的结果，
+	// 用户可能积累了成千上万条，与「在界面上手改过一条」是两件事、
+	// 展示上也应当分开数（进度条上要能看出「有多少条是 nfo 给的」）。
+	MatchStateNFO = "nfo"
 	// MatchStateMatched 自动匹配成功，元数据来自 provider。
 	MatchStateMatched = "matched"
 	// MatchStateReview 有候选但不够确定，等人工确认。
 	MatchStateReview = "review"
-	// MatchStateManual 人工指定过或字段被锁，重扫不覆盖。
+	// MatchStateManual 人工在界面上指定过或字段被锁，重扫不覆盖。
 	MatchStateManual = "manual"
 	// MatchStateFailed 找不到候选 / 反复失败。
 	MatchStateFailed = "failed"
+)
+
+// metadata_source 的取值（元数据是谁写的）。与 match_state 是两个维度：
+// 前者说「数据从哪来」，后者说「自动流程还要不要动它」。
+const (
+	MetadataSourceNFO = "nfo"
 )
 
 // MatchOutcome 是一次刮削的结局，落到 media_items 的刮削相关字段上。
@@ -97,7 +109,10 @@ func (s *Store) SeriesStructure(ctx context.Context, seriesID int64) (season, ep
 // EnqueueScrapesForLibrary 把某个库里需要刮削的条目一次性入队。
 //
 // 与探测一样用一条 insert ... select，避免几万条目逐条往返。
-// kind 为空表示电影与剧集都要；force 为真时连已刮过的也重刮（但仍跳过 manual）。
+// kind 为空表示电影与剧集都要；force 为真时连已刮过的也重刮。
+//
+// **nfo 与人工锁定的条目不在此列**（除非 force）：nfo 是人工整理的元数据，
+// 默认策略是「有 nfo 就用 nfo，没有才去刮」（见 docs/REQUIREMENTS.md 的决策表）。
 func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, kind string, force bool) (int64, error) {
 	kinds := []string{"movie", "series"}
 	if kind == "movie" || kind == "series" {
@@ -113,7 +128,10 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 		 where i.library_id = $1 and i.deleted_at is null
 		   and i.kind = any($3)
 		   and i.match_state <> 'manual'
-		   and ($4 or i.match_state in ('local', 'failed', 'review'))
+		   -- nfo 优先：已有 nfo 元数据的条目默认不刮（force 才覆盖）。
+		   -- 这里同时看 state 与 source —— 光看 state 的话，万一有
+		   -- 「nfo 导入写得早、状态没跟上」的历史数据就漏了。
+		   and ($4 or (i.metadata_source <> 'nfo' and i.match_state in ('local', 'failed', 'review')))
 		 on conflict do nothing`,
 		libraryID, TaskKindScrape, kinds, force)
 	if err != nil {
@@ -124,6 +142,7 @@ func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, k
 
 // ScrapeProgress 是刮削进度（按匹配状态分）。
 type ScrapeProgress struct {
+	NFO     int64 `json:"nfo"`
 	Local   int64 `json:"local"`
 	Matched int64 `json:"matched"`
 	Review  int64 `json:"review"`
@@ -136,6 +155,7 @@ func (s *Store) ScrapeProgressOf(ctx context.Context, libraryID int64) (*ScrapeP
 	var p ScrapeProgress
 	err := s.pool.QueryRow(ctx,
 		`select
+		   count(*) filter (where match_state = 'nfo'),
 		   count(*) filter (where match_state = 'local'),
 		   count(*) filter (where match_state = 'matched'),
 		   count(*) filter (where match_state = 'review'),
@@ -143,7 +163,7 @@ func (s *Store) ScrapeProgressOf(ctx context.Context, libraryID int64) (*ScrapeP
 		   count(*) filter (where match_state = 'failed')
 		 from media_items
 		 where library_id = $1 and deleted_at is null and kind in ('movie', 'series')`,
-		libraryID).Scan(&p.Local, &p.Matched, &p.Review, &p.Manual, &p.Failed)
+		libraryID).Scan(&p.NFO, &p.Local, &p.Matched, &p.Review, &p.Manual, &p.Failed)
 	if err != nil {
 		return nil, fmt.Errorf("统计刮削进度失败: %w", err)
 	}

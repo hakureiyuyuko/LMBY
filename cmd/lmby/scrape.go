@@ -235,8 +235,8 @@ func printScrapeSummary(ctx context.Context, st *store.Store, libraryID int64, a
 		stats.Pending, stats.Running, stats.Failed, byKind[store.TaskKindScrape])
 	for _, r := range rows {
 		p := r.Prog
-		fmt.Printf("库 #%d %s：已匹配 %d / 待人工 %d / 已锁定 %d / 失败 %d / 未刮 %d\n",
-			r.ID, r.Name, p.Matched, p.Review, p.Manual, p.Failed, p.Local)
+		fmt.Printf("库 #%d %s：nfo 元数据 %d / 已匹配 %d / 待人工 %d / 已锁定 %d / 失败 %d / 未刮 %d\n",
+			r.ID, r.Name, p.NFO, p.Matched, p.Review, p.Manual, p.Failed, p.Local)
 	}
 	return nil
 }
@@ -250,5 +250,8 @@ func scrapeUsage() string {
 		"                      入队并就地跑完（不依赖服务进程，便于验收）",
 		"  lmby scrape status  [--library N]                                  看队列水位与匹配分布",
 		"  lmby scrape reset   [--library N]                                  把失败的条目重置为待刮",
+		"",
+		"默认不刮「已有 nfo 元数据」与「人工锁定」的条目 —— 有 nfo 就用 nfo，",
+		"只有没 nfo 的才去刮；--force 才会覆盖（会先把警告打到 stderr）。",
 	}, "\n")
 }

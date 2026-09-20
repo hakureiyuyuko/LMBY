@@ -3,8 +3,37 @@ package scanner
 import (
 	"testing"
 
+	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
 )
+
+// TestNFOHasMetadata 守住「什么样的 nfo 算人工元数据」：
+// 空 nfo 不能把条目钉成 nfo 状态，否则那条就永远不会被刮削。
+func TestNFOHasMetadata(t *testing.T) {
+	year := int32(2013)
+	rating := 8.2
+
+	cases := []struct {
+		name string
+		md   metadata.Metadata
+		want bool
+	}{
+		{"空 nfo", metadata.Metadata{}, false},
+		{"只有标题", metadata.Metadata{Title: "言叶之庭"}, true},
+		{"只有原名", metadata.Metadata{OriginalTitle: "言の葉の庭"}, true},
+		{"只有简介", metadata.Metadata{Overview: "下雨天的庭园…"}, true},
+		{"只有年份", metadata.Metadata{Year: &year}, true},
+		{"只有评分", metadata.Metadata{Rating: &rating}, true},
+		{"只有流派", metadata.Metadata{Genres: []string{"动画"}}, true},
+		{"只有外部 id", metadata.Metadata{ProviderIDs: map[string]string{"tmdb": "198375"}}, true},
+	}
+
+	for _, c := range cases {
+		if got := nfoHasMetadata(&c.md); got != c.want {
+			t.Errorf("%s: nfoHasMetadata = %v, 期望 %v", c.name, got, c.want)
+		}
+	}
+}
 
 // newTestWalker 构造一个只带解析缓存的 walker。
 //

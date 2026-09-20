@@ -139,13 +139,20 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 	}
 
 	// 已经刮好的不再重复请求 —— 「重复刮削零 API 调用」最直接的保证。
-	// 人工锁定的更不该碰（人工结果优先于自动结果）。
+	//
+	// **nfo 与人工锁定的更不该碰**：nfo 是人工整理的元数据（用户明确要求
+	// 「优先 nfo、没 nfo 才刮」），人工锁定的字段同理。
+	// 只有显式 force 才会覆盖它们，而且会先打一条警告。
 	if !p.Force {
 		switch it.MatchState {
-		case store.MatchStateMatched, store.MatchStateManual:
-			h.log.Debug("条目已是最终状态，跳过", "itemId", it.ID, "state", it.MatchState)
+		case store.MatchStateNFO, store.MatchStateMatched, store.MatchStateManual:
+			h.log.Debug("条目已有权威元数据，跳过", "itemId", it.ID, "state", it.MatchState,
+				"source", it.MetadataSource)
 			return nil
 		}
+	} else if it.MatchState == store.MatchStateNFO || it.MetadataSource == store.MetadataSourceNFO {
+		h.log.Warn("force 刮削将覆盖 nfo 导入的元数据",
+			"itemId", it.ID, "title", it.Title, "source", it.MetadataSource)
 	}
 
 	local := h.localFacts(ctx, it)

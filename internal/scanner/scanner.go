@@ -71,9 +71,17 @@ type Stats struct {
 
 // Options 控制一次扫描。
 type Options struct {
-	ScanRunID   int64
-	Trigger     string
-	OnProgress  func(Progress)
+	ScanRunID  int64
+	Trigger    string
+	OnProgress func(Progress)
+
+	// RefreshMetadata 为真时，**文件没变也重读一遍同目录的 nfo**。
+	//
+	// 为什么需要它：nfo 在本项目里是「权威元数据」（人工整理的），
+	// 用户手改 nfo 之后必须有个办法让它生效 —— 否则得去 touch 媒体文件，
+	// 而网络盘上 touch 会连带把重新探测也触发一遍（几万个文件，得不偿失）。
+	RefreshMetadata bool
+
 	MinFileSize int64 // 小于该字节数的视频跳过；<=0 表示用默认值
 }
 
@@ -440,6 +448,11 @@ func (w *walker) handleVideo(ctx context.Context, dir, path string, d fs.DirEntr
 		w.itemByPath[path] = ex.ItemID
 		if ex.SizeBytes == size && ex.MtimeNS == mtime {
 			w.stats.Unchanged++
+			if w.opts.RefreshMetadata {
+				// 「重新导入 nfo」：文件没变也重读一遍 nfo。
+				// 这只多一次小文件读（实测 CIFS 上 ~11ms），且不会碰媒体文件本身。
+				w.applyMetadata(ctx, path, ex.ItemID)
+			}
 			return
 		}
 		if err := w.st.UpdateFileChanged(ctx, ex.ID, size, mtime); err != nil {
@@ -773,7 +786,13 @@ func (w *walker) applyMetadata(ctx context.Context, path string, itemID int64) {
 		Studios:        md.Studios,
 		ProviderIDs:    md.ProviderIDs,
 		PremiereDate:   md.PremiereDate,
-		MatchState:     "local",
+	}
+	if nfoHasMetadata(md) {
+		// 有 nfo 就标上「元数据来自 nfo（人工整理）」：刮削默认不会碰它。
+		// 这是用户明确拍板的策略 —— nfo 是花了大力气人工做的，TMDB 不许覆盖它，
+		// 只有没 nfo 的条目才去刮（见 docs/REQUIREMENTS.md §0 的决策表）。
+		meta.MatchState = store.MatchStateNFO
+		meta.MetadataSource = store.MetadataSourceNFO
 	}
 	if md.RuntimeMinutes > 0 {
 		t := int64(md.RuntimeMinutes) * metadata.TicksPerMinute
@@ -782,6 +801,16 @@ func (w *walker) applyMetadata(ctx context.Context, path string, itemID int64) {
 	if err := w.st.ApplyItemMeta(ctx, itemID, meta); err != nil {
 		w.issue("warning", nfoPath, "写入条目元数据失败: "+err.Error())
 	}
+}
+
+// nfoHasMetadata 判断这份 nfo 是否真的带了人工整理的元数据。
+//
+// 为什么要有这个判断：空的 nfo（或只写了技术字段的）不该把条目钉成
+// 「nfo 元数据」—— 那样它就永远不会被刮削，而用户其实什么也没写。
+func nfoHasMetadata(md *metadata.Metadata) bool {
+	return md.Title != "" || md.OriginalTitle != "" || md.Overview != "" ||
+		md.Year != nil || md.Rating != nil ||
+		len(md.Genres) > 0 || len(md.Studios) > 0 || len(md.ProviderIDs) > 0
 }
 
 // ---------------------------------------------------------------- 图片归属
