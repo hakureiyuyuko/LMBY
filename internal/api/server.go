@@ -9,8 +9,10 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
+	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
+	"github.com/hakureiyuyuko/lmby/internal/settings"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
@@ -24,23 +26,30 @@ type Server struct {
 	// scraper 用于人工匹配（应用候选/重新搜索/标记无需匹配）。
 	// 没配元数据源时为 nil，对应接口返回 409。
 	scraper *scrape.Handler
+	// settings 是运行期可改的全局设置（目前是 TMDB 凭据）。
+	settings *settings.Service
+	// meta 是元数据源本体（设置页的「测试连接」直接用它打一次真请求）。
+	meta    provider.Client
 	started time.Time
 	limiter *loginLimiter
 	scans   *scan.Manager
 }
 
 // New 构造 Server。
-func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service, scraper *scrape.Handler) *Server {
+func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,
+	scraper *scrape.Handler, settingsSvc *settings.Service, meta provider.Client) *Server {
 	return &Server{
-		cfg:     cfg,
-		store:   st,
-		log:     log,
-		ffmpeg:  ff,
-		images:  img,
-		scraper: scraper,
-		started: time.Now(),
-		limiter: newLoginLimiter(8, 15*time.Minute),
-		scans:   scan.NewManager(st, log),
+		cfg:      cfg,
+		store:    st,
+		log:      log,
+		ffmpeg:   ff,
+		images:   img,
+		scraper:  scraper,
+		settings: settingsSvc,
+		meta:     meta,
+		started:  time.Now(),
+		limiter:  newLoginLimiter(8, 15*time.Minute),
+		scans:    scan.NewManager(st, log),
 	}
 }
 
@@ -77,8 +86,19 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
 	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
 
+	// ---- 设置（管理员）----
+	mux.Handle("GET /api/v1/settings", s.requireAdmin(s.handleGetSettings))
+	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
+	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
+	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
+
 	// ---- 搜索（标题 / 原始标题，中文二元组）----
 	mux.Handle("GET /api/v1/search", s.requireAuth(s.handleSearch))
+
+	// ---- 浏览（海报墙 / 子项）与批量操作 ----
+	mux.Handle("GET /api/v1/libraries/{id}/browse", s.requireAuth(s.handleBrowseLibrary))
+	mux.Handle("GET /api/v1/items/{id}/children", s.requireAuth(s.handleItemChildren))
+	mux.Handle("POST /api/v1/items/batch", s.requireAuth(s.handleBatchItems))
 
 	// ---- 条目详情与人工编辑（字段锁定）----
 	mux.Handle("GET /api/v1/items/{id}", s.requireAuth(s.handleGetItem))

@@ -47,3 +47,18 @@ max_cache_mb = 512
 # 拖到 2 分钟以上（互相拖累，总吞吐反而下降）。网盘/SMB 建议 2~4，
 # 本地盘可以到 8。
 workers = 4
+
+[tmdb]
+# 元数据源。留空也能跑：只是元数据刮削、图片回源与人工匹配不可用
+# （扫描、浏览、搜索、播放都不受影响）。
+#
+# 也可以在 Web 界面「设置」页里填 —— 那里填的值存数据库、**保存即生效（不必重启）**，
+# 并且**优先于这个文件**；界面上有「恢复为配置文件的值」可以退回来。
+#
+# read_token：v4 Read Access Token（推荐）。themoviedb.org → 设置 → API → API Read Access Token
+# api_key：v3 API Key，与上面二选一。
+read_token = ""
+api_key = ""
+# 元数据语言；fallback_language 在缺译名时回退。
+language = "zh-CN"
+fallback_language = "en-US"

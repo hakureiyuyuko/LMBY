@@ -129,7 +129,13 @@ func (s *Server) handleResetFailedScrapes(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// scrapeConfigured 判断是否配了可用的元数据源（没配就明确回 409，而不是让任务白排队）。
+// scrapeConfigured 判断当前是否有可用的元数据源（没配就明确回 409，而不是让任务白排队）。
+//
+// 看的是**运行期设置**而不是启动时的配置：设置页里刚填的 TMDB Key 也要算数，
+// 否则用户保存完凭据，刮削接口还回 409，很容易让人以为没保存上。
 func (s *Server) scrapeConfigured() bool {
+	if s.settings != nil {
+		return s.settings.Configured()
+	}
 	return s.cfg.TMDB.ReadToken != "" || s.cfg.TMDB.APIKey != ""
 }

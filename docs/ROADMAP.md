@@ -1,6 +1,6 @@
 # LMBY 开发 Todolist
 
-> 状态：**M0 已完成并实测验收**，下一步 M1（媒体库与扫描）。
+> 状态：**M0 / M1 / M2 均已完成并实测验收**，下一步 M3（播放核心 —— v0.1 计划发在那里）。
 > 已完成项标 `[x]`，未完成/改期的项保留在下方并注明原因。
 > 原则：先打通端到端最小闭环（扫描→入库→播放），再堆功能；**转码是唯一高风险块，尽早真机验证**。
 > 参考代码：`C:\Users\admin\Desktop\dev\_ref\jellyfin`（只读阅读，不复制文件）、`C:\Users\admin\Desktop\dev\TV`（自研，可复用）。
@@ -41,7 +41,7 @@
 
 ---
 
-## M1 — 媒体库与扫描 🚧（主体已完成并实测验收）
+## M1 — 媒体库与扫描 ✅（已完成并实测验收）
 
 > 已完成：库管理、扫描器（增量/移动/软删除）、命名解析器、本地 nfo 导入、图片归属登记、
 > SSE 实时进度、扫描问题清单、媒体库界面。
@@ -97,14 +97,14 @@
 
 ---
 
-## M2 — 元数据与刮削 🚧（任务队列 + 探测 + provider + 匹配打分器已完成）
+## M2 — 元数据与刮削 ✅（已完成并实测验收）
 
 > 已完成：PostgreSQL 任务队列（`internal/store/tasks.go` + `internal/worker`）、
 > ffprobe 流信息探测（`internal/probe`，9 个真实夹具单测）、批量入队/重置接口、
 > 界面上的探测进度与队列水位；TMDB provider + `provider_cache` jsonb 缓存 + 限流退避；
 > **匹配打分器 `internal/match`（含 `lmby match` 命令行工具）**；
 > **刮削处理器 `internal/scrape`（含 `lmby scrape` 与刮削接口）**。
-> 待完成：GUI 其余部分（详情页/海报墙、批量匹配、设置页填 TMDB 凭据）。
+> **M2 已全部完成**（下一步是 M3 播放核心，v0.1 计划发在那里）。
 
 **参考**：`MediaBrowser.Providers/{Movies,Manager}/*`、`MediaBrowser.LocalMetadata/Parsers/*`、`MediaBrowser.XbmcMetadata/*`（导入参考）
 
@@ -147,7 +147,15 @@
       切词是 PG 函数 + **生成列**（`search_vec`，写入时自动维护，改完标题立刻能搜到）；
       查询三路并存：分词命中（`tsvector`）+ 子串兜底（`ILIKE`，负责单字）+ 词相似容忍错字
       （`<%`，阈值 0.4）；界面有查询词/库/类型过滤、分页、浏览器 URL 同步（可收藏可分享）
-- [ ] GUI 其余部分：详情页（海报墙 + 剧集视图）、批量匹配、设置页里填 TMDB 凭据
+- [x] GUI 其余部分：**海报墙与剧集视图**（`web/src/pages/Browse.tsx` / `Series.tsx`，
+      `GET /libraries/{id}/browse` 只要顶层条目、`GET /items/{id}/children` 给季/集与集数）、
+      **批量匹配**（人工匹配页多选 → 批量入队/强制重刮/标记不需要匹配，
+      `POST /items/batch`；媒体库页加「元数据刮削」卡片：一键刮削/强制重刮/重置失败的）、
+      **设置页**（`web/src/pages/Settings.tsx`：TMDB 凭据存数据库、保存即生效，
+      密钥加密存储、只写不回显，带「测试连接」与系统信息）
+- [x] 元数据凭据的可运维性：`settings` 表 + `internal/settings` + `internal/secrets`
+      （AES-256-GCM，密钥是数据目录里 0600 的 secret.key），
+      运行期可换凭据（`tmdb.Client.SetCredentials`，不必重启）
 - [x] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%（`scripts/dev/match-sample.sh`
       实测 10 条样本 9 条 auto、0 条误配）；人工匹配可修正；重复刮削零 API 调用（缓存命中）；
       手改字段不被覆盖（`scripts/dev/verify-item-edit.sh` 42 项断言，含对照组）
@@ -210,6 +218,43 @@ GET  /api/v1/libraries/{id}/items?matchState=review,failed   列表支持按状�
 | 标记不需要匹配 | 状态 `manual` + 原因写进 `scrape_error`（自制片、样品片不会再挂在待处理里）|
 | 页面渲染 | 无头 Chrome 截图确认：导航/标签/卡片/候选面板（含海报）/打分明细都正常，亮色主题 |
 | 回归 | 媒体库页照常（条目列表 + 分页 + 探测进度 + 扫描记录）|
+
+### M2 GUI 收尾（海报墙 / 剧集视图 / 批量 / 设置页）的验收（2026-09-20）
+
+界面上最后两块：**浏览**与**设置**。
+
+| 接口 | 作用 |
+|---|---|
+| `GET /api/v1/libraries/{id}/browse?kind=&sort=&limit=&offset=` | 海报墙：只要**顶层**条目（电影/剧集），可按标题/年份/最近添加排序 |
+| `GET /api/v1/items/{id}/children` | 子项：剧集 → 季（带每季集数）→ 集 |
+| `POST /api/v1/items/batch` | 批量：`scrape`（可 force）/ `skip`（标记不需要匹配），一次一条 SQL 排完 |
+| `GET /api/v1/settings` | 设置页内容（TMDB 状态 + 系统信息）；**密钥永不可显** |
+| `PUT/DELETE /api/v1/settings/tmdb` | 保存 / 恢复为配置文件的值（管理员专属）|
+| `POST /api/v1/provider/test` | 拿当前凭据真打一次 TMDB（绕开缓存 —— 缓存命中会假装通着）|
+
+| 项 | 结果 |
+|---|---|
+| `scripts/dev/verify-browse.sh` | **40 项断言全绿**：海报墙无季/集/花絮、总数 = 电影+剧集、kind/sort 过滤与分页、层级 parentId 正确、每季集数对得上、参数校验、批量跳转/标记/入队（跑完重扫还原）|
+| `scripts/dev/verify-settings.sh` | **38 项断言全绿**：密钥不回显、非管理员 403（临时造了个只读用户）、未登录 401、保存后立刻生效（填错 token → 真实请求立刻失败；**证明不需要重启**）、库里存的是 `enc:v1:` 密文且无明文、恢复为配置文件的值后又能通 |
+| `scripts/dev/m2-ui-test.mjs` | **34 项断言全绿**（无头 Chrome）：海报墙（筛选/排序/卡片指向）、剧集视图（季标签 → 集列表 → 点集进条目页）、人工匹配的勾选与批量条（确认框取消时不误改数据）、设置页（状态/来源/测试连接/保存/恢复/系统信息）|
+| `scripts/dev/seed-review-item.sh` | 验收库全部是 nfo（没东西可刮）时，用它临时造一条 review 条目来验证人工匹配与批量选择界面（`--restore` 还原）|
+| 截图 | `docs/images/poster-wall.png` / `series-view.png` / `settings.png` |
+
+几个设计点：
+
+- **海报墙与条目表分工**：`/libraries/{id}/items` 是原始条目表（含季与集，排查用）；
+  `/browse` 只要顶层、带海报，是给人看的。两个都留着。
+- **子项数跟子项一起回**：剧集视图要显示「第 1 季 · 20 集」，不这样就得为每一季再发一次请求。
+- **批量做成一个接口**：几百条时逐条调用会发几百个请求；而且逐条失败很难说清哪几条成功了。
+  上限 500 条（防手写请求把队列灌满）。
+- **密钥只写不回显**：`GET` 只回 `hasReadToken/hasApiKey`，界面把它渲染成「已设置（要替换就输入新的）」；
+  提交时「没填」与「要清空」是两种意图（指针字段 + `null` 区分）。
+- **凭据加密存储**：`internal/secrets` 用数据目录里 0600 的密钥文件做 AES-256-GCM。
+  威胁模型写得很具体：防的是**数据库备份单独泄漏**，不防「数据库与数据目录一起被拿走」。
+- **数据库优先于配置文件**，但这件事必须在界面上看得见：设置页显示当前值的来源，
+  并提供「恢复为配置文件的值」把数据库那条删掉。
+- **测试连接走未包缓存的客户端**：否则缓存命中时会回「通着」—— 而用户正是想验证凭据能不能用
+  （实测踩到，第一版就是这样）。
 
 ### M2 搜索的验收（2026-09-20，真库实跑）
 

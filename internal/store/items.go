@@ -290,12 +290,46 @@ func (s *Store) GetItem(ctx context.Context, id int64) (*Item, error) {
 	return &it, nil
 }
 
+// itemListColumns 是列表类查询（条目列表、海报墙、子项）统一读的列。
+//
+// 刻意不用 `select *`：media_items 里还有 search_vec（tsvector）之类没法扫进 Item 的列，
+// 而且列顺序一变扫描会静默错位。加列时只要同步改 scanItems。
+const itemListColumns = `id, library_id, kind, parent_id, series_id, season_number,
+	episode_number, episode_end, extra_type, title, sort_title, original_title,
+	year, premiere_date, overview, tagline, runtime_ticks, community_rating,
+	official_rating, genres, tags, studios, provider_ids, file_tech, match_state,
+	match_score, metadata_source, scrape_error, updated_at`
+
+// scanItems 按 itemListColumns 的顺序扫出条目，并负责关掉 rows。
+func scanItems(rows pgx.Rows) ([]Item, error) {
+	defer rows.Close()
+	var out []Item
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.ID, &it.LibraryID, &it.Kind, &it.ParentID, &it.SeriesID, &it.SeasonNum,
+			&it.EpisodeNum, &it.EpisodeEnd, &it.ExtraType, &it.Title, &it.SortTitle,
+			&it.OriginalTitle, &it.Year, &it.PremiereDate, &it.Overview, &it.Tagline,
+			&it.RuntimeTicks, &it.Rating, &it.OfficialRated, &it.Genres, &it.Tags,
+			&it.Studios, &it.ProviderIDs, &it.FileTech, &it.MatchState, &it.MatchScore,
+			&it.MetadataSource, &it.ScrapeError, &it.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
 // ItemFilter 是列条目的过滤条件（零值 = 不过滤）。
 type ItemFilter struct {
 	// Kind 限定 movie / series / season / episode 等。
 	Kind string
 	// MatchState 命中其中任一状态即算匹配（人工匹配界面要同时看 review 与 failed）。
 	MatchState []string
+	// TopLevel 只取顶层条目（没有父项）—— 海报墙要的是电影与剧集，
+	// 不是它们下面的季与集。
+	TopLevel bool
+	// Sort 决定排序（见 itemOrderBy），空 = 类型 + 标题。
+	Sort string
 }
 
 // itemWhere 拼出列条目的 where 子句与参数。
@@ -310,7 +344,28 @@ func itemWhere(libraryID int64, f ItemFilter) (string, []any) {
 		args = append(args, f.MatchState)
 		where = append(where, fmt.Sprintf("match_state = any($%d)", len(args)))
 	}
+	if f.TopLevel {
+		where = append(where, "parent_id is null")
+	}
 	return strings.Join(where, " and "), args
+}
+
+// itemOrderBy 生成列表的排序子句。
+//
+// 默认（空）保持原行为：按类型 + 标题 —— 人工匹配页与媒体库条目表都靠它稳定分页。
+// 海报墙另外支持年份与「最近添加」。created_at 不在 itemListColumns 里，
+// 但排序不需要选中它。
+func itemOrderBy(sort string) string {
+	switch sort {
+	case "year":
+		return "order by year desc nulls last, sort_title, title, id"
+	case "added":
+		return "order by created_at desc, id desc"
+	case "title":
+		return "order by sort_title, title, id"
+	default:
+		return "order by kind, sort_title, title, season_number nulls last, episode_number nulls last, id"
+	}
 }
 
 // ListItems 分页列出一个库的条目。
@@ -322,34 +377,14 @@ func (s *Store) ListItems(ctx context.Context, libraryID int64, f ItemFilter, li
 	args = append(args, limit, offset)
 
 	rows, err := s.pool.Query(ctx,
-		`select id, library_id, kind, parent_id, series_id, season_number, episode_number,
-		        episode_end, extra_type, title, sort_title, original_title, year, overview,
-		        tagline, runtime_ticks, community_rating, official_rating,
-		        genres, tags, studios, provider_ids, file_tech, match_state,
-		        match_score, metadata_source, scrape_error, updated_at
+		`select `+itemListColumns+`
 		 from media_items
-		 where `+cond+`
-		 order by kind, sort_title, title, season_number nulls last, episode_number nulls last, id
+		 where `+cond+` `+itemOrderBy(f.Sort)+`
 		 limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("查询条目列表失败: %w", err)
 	}
-	defer rows.Close()
-
-	var out []Item
-	for rows.Next() {
-		var it Item
-		if err := rows.Scan(&it.ID, &it.LibraryID, &it.Kind, &it.ParentID, &it.SeriesID,
-			&it.SeasonNum, &it.EpisodeNum, &it.EpisodeEnd, &it.ExtraType, &it.Title,
-			&it.SortTitle, &it.OriginalTitle, &it.Year, &it.Overview, &it.Tagline,
-			&it.RuntimeTicks, &it.Rating, &it.OfficialRated, &it.Genres, &it.Tags,
-			&it.Studios, &it.ProviderIDs, &it.FileTech, &it.MatchState,
-			&it.MatchScore, &it.MetadataSource, &it.ScrapeError, &it.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, it)
-	}
-	return out, rows.Err()
+	return scanItems(rows)
 }
 
 // CountItems 统计一个库的条目数。

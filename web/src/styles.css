@@ -744,3 +744,140 @@ th {
   width: auto;
   padding: 7px 10px;
 }
+
+/* 海报墙 */
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.poster-card {
+  display: block;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.poster-img {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 海报框：占位块撑住比例，图片盖在上面（没图时就是一块带首字的色块）*/
+.poster-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elev-2);
+}
+
+.poster-ph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--border-strong);
+  user-select: none;
+}
+
+/* 没有海报时把占位块藏起来（比留个灰块好看，也不会伪造一张图） */
+.poster-missing {
+  visibility: hidden;
+}
+
+.poster-body {
+  margin-top: 6px;
+}
+
+.poster-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 剧集视图的集列表 */
+
+.ep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ep-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.ep-row:hover {
+  border-color: var(--border-strong);
+}
+
+.ep-thumb {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.ep-body {
+  min-width: 0;
+}
+
+.ep-title {
+  font-weight: 600;
+}
+
+/* 人工匹配：批量操作的勾选框与操作条 */
+
+.match-cell {
+  position: relative;
+}
+
+.match-cell .match-card {
+  width: 100%;
+  height: 100%;
+}
+
+.cell-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: inline-flex;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--bg-elev);
+}
+
+.batch-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+}

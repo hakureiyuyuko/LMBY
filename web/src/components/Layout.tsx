@@ -27,6 +27,12 @@ export function Layout() {
           <NavLink to="/account" className={({ isActive }) => (isActive ? 'active' : '')}>
             个人中心
           </NavLink>
+          {/* 设置只对管理员有意义（接口也会拦），普通用户不显示入口，免得点进去只看到一句无权限 */}
+          {user?.isAdmin && (
+            <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+              设置
+            </NavLink>
+          )}
         </nav>
         <div className="spacer" />
         <ThemeToggle />

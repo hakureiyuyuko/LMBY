@@ -52,7 +52,7 @@
 2. 扫描与增量更新（含移动识别、播放进度保留）
 3. 元数据：本地 nfo/图片优先 → 缺失走 TMDB（用户自备 Key）
 4. 人工匹配与条目编辑（**刚需**，不是可选）
-5. Web GUI（库浏览、详情、搜索、设置、任务管理、**明暗主题切换**）
+5. Web GUI（库浏览/海报墙、剧集视图、条目编辑与字段锁定、搜索、人工匹配与批量操作、设置、任务状态、**明暗主题切换**）
 6. 纯 Web 播放（hls.js + 原生 `<video>`）
 7. DirectPlay / DirectStream(remux) / Transcode 三档决策
 8. 硬件转码（QSV / NVENC / VAAPI / VideoToolbox / AMF，运行时探测）
@@ -195,6 +195,16 @@ tv_channels(id,source_id,tvg_id,name,logo_url,group_name,stream_url,enabled,favo
 collections, collection_items, playlists, playlist_items
 settings(key,value jsonb)   -- 含加密存储的 TMDB Key
 ```
+
+库内凭据的实现（M2 已落地，见 `docs/ROADMAP.md` 验收记录）：
+
+- 凭据存在 `settings` 的 `tmdb.credentials` 里，两个密钥字段是 `enc:v1:` 开头的密文
+  （`internal/secrets`，AES-256-GCM，密钥是数据目录里 0600 的 `secret.key`）；
+  没带前缀的值按明文读（兼容手工写进库的老数据）
+- **只写不回显**：接口只回 `hasReadToken/hasApiKey`，前端渲染成「已设置（要替换就输入新的）」
+- 优先级：数据库 > config.toml；设置页显示当前来源，并提供「恢复为配置文件的值」
+- 改完**立刻生效**（`tmdb.Client.SetCredentials`），不需要重启 —— 这是把它放进数据库的全部意义
+- 公开仓库里永远不写真实凭据；部署时留空、由管理员在设置页里填
 
 ---
 

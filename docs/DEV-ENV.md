@@ -147,6 +147,15 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-search.sh
 
 # M2 搜索：界面（22 项，无头 Chrome，截图到 shots-search/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/search-ui-test.mjs
+
+# M2 海报墙 / 剧集视图 / 批量 / 设置页：真库 HTTP 验收
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-browse.sh    # 40 项
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-settings.sh  # 38 项
+
+# 同一批的界面验收（34 项，截图到 shots-m2/）；人工匹配的批量选择需要库里有待处理条目：
+bash scripts/dev/seed-review-item.sh                                  # 临时造一条 review
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m2-ui-test.mjs
+bash scripts/dev/seed-review-item.sh --restore                        # 用完还原
 ```
 
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，

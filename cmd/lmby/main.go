@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,6 +35,8 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
+	"github.com/hakureiyuyuko/lmby/internal/secrets"
+	"github.com/hakureiyuyuko/lmby/internal/settings"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 	"github.com/hakureiyuyuko/lmby/internal/version"
 	"github.com/hakureiyuyuko/lmby/internal/worker"
@@ -424,14 +427,38 @@ func cmdServe(args []string) error {
 
 	pool := worker.New(st, log, cfg.Tasks.Workers)
 	pool.Register(probe.NewHandler(st, cfg.FFmpeg.ProbePath, log))
-	// 元数据源（TMDB）在刮削、图片回源与人工匹配三处都要用，所以只构造一次。
-	cached, _ := buildTMDBProvider(cfg, st, log)
-	var scraper *scrape.Handler
-	if cached != nil {
-		scraper = scrape.NewHandler(st, cached, log)
-		pool.Register(scraper)
+
+	// 运行期可改的全局设置（目前是 TMDB 凭据）。
+	// 密钥文件放在数据目录里（0600）；生成不了也不拦启动，只是退化成明文存库。
+	cipher := loadSecretsCipher(cfg, log)
+	settingsSvc := settings.New(st, cipher, settings.TMDB{
+		ReadToken: cfg.TMDB.ReadToken,
+		APIKey:    cfg.TMDB.APIKey,
+		Language:  cfg.TMDB.Language,
+	}, log)
+	if _, err := settingsSvc.Load(ctx); err != nil {
+		log.Warn("从数据库装载 TMDB 设置失败，本次先用配置文件的值", "err", err)
+	}
+
+	// 元数据源（TMDB）在刮削、图片回源、人工匹配与设置页四处都要用，所以只构造一次。
+	//
+	// 注意：**即使当下没有凭据也要构造** —— 设置页可以在运行期把 Key 填进来，
+	// 那时候这个客户端必须已经被各服务拿在手里（见 settingsSvc.SetOnChange）。
+	cached, tmdbClient := newTMDBProvider(st, settingsSvc.TMDB().ReadToken,
+		settingsSvc.TMDB().APIKey, settingsSvc.TMDB().Language)
+	settingsSvc.SetOnChange(func(t settings.TMDB) {
+		tmdbClient.SetCredentials(t.ReadToken, t.APIKey, t.Language)
+		log.Info("TMDB 凭据已更新（无需重启）", "language", t.Language,
+			"auth", authMode(config.TMDBConfig{ReadToken: t.ReadToken, APIKey: t.APIKey}))
+	})
+
+	scraper := scrape.NewHandler(st, cached, log)
+	pool.Register(scraper)
+	if !settingsSvc.Configured() {
+		log.Warn("尚未配置 TMDB 凭据：元数据刮削、图片回源与人工匹配暂不可用（可在设置页里填，或写进 config.toml）")
 	} else {
-		log.Warn("未配置 TMDB 凭据：元数据刮削、图片回源与人工匹配不可用（扫描、探测与浏览不受影响）")
+		log.Info("已启用 TMDB 刮削源", "language", settingsSvc.TMDB().Language,
+			"auth", authMode(cfg.TMDB), "fromDb", settingsSvc.TMDB().FromDB)
 	}
 	go pool.Run(ctx)
 
@@ -442,7 +469,9 @@ func cmdServe(args []string) error {
 	}
 	log.Info("图片管线就绪", "cacheDir", cfg.ImagesCacheDir(), "maxCacheMB", cfg.Images.MaxCacheMB)
 
-	srv := api.New(cfg, st, log, ff, imgSvc, scraper)
+	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
+	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
+	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {
@@ -484,30 +513,51 @@ func cmdServe(args []string) error {
 	}
 }
 
-// buildTMDBProvider 根据配置构造 TMDB provider（带 PostgreSQL 缓存）。
-// 未配置凭据时返回 (nil, nil)，调用方据此禁用刮削功能。
-func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*provider.Cached, *tmdb.Client) {
-	if cfg.TMDB.ReadToken == "" && cfg.TMDB.APIKey == "" {
-		return nil, nil
-	}
+// newTMDBProvider 用给定凭据构造「带缓存的 TMDB provider」。
+//
+// 总是返回非 nil：没凭据时客户端照样存在，只是发请求会 401 ——
+// 这样设置页在运行期填入 Key 之后（见 tmdb.Client.SetCredentials）不必重建任何东西。
+func newTMDBProvider(st *store.Store, readToken, apiKey, language string) (*provider.Cached, *tmdb.Client) {
 	client := tmdb.New(tmdb.Config{
-		ReadToken: cfg.TMDB.ReadToken,
-		APIKey:    cfg.TMDB.APIKey,
-		Language:  cfg.TMDB.Language,
+		ReadToken: readToken,
+		APIKey:    apiKey,
+		Language:  language,
 	})
-	if !client.Configured() {
-		return nil, nil
-	}
-	cached := provider.NewCached(client, st, provider.DefaultTTLs())
-	log.Info("已启用 TMDB 刮削源", "language", cfg.TMDB.Language, "auth", authMode(cfg.TMDB))
-	return cached, client
+	return provider.NewCached(client, st, provider.DefaultTTLs()), client
 }
 
+// buildTMDBProvider 是命令行（`lmby provider ...`）用的：从配置里取凭据。
+func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*provider.Cached, *tmdb.Client) {
+	cached, raw := newTMDBProvider(st, cfg.TMDB.ReadToken, cfg.TMDB.APIKey, cfg.TMDB.Language)
+	if raw.Configured() {
+		log.Info("已启用 TMDB 刮削源", "language", cfg.TMDB.Language, "auth", authMode(cfg.TMDB))
+	}
+	return cached, raw
+}
+
+// loadSecretsCipher 装载「存库凭据」的加密密钥（数据目录里的 0600 密钥文件）。
+//
+// 失败只警告并返回 nil（退化成明文存储）：加密是加固，不该让服务起不来 ——
+// 设置页会把这个状态显式告诉用户。
+func loadSecretsCipher(cfg *config.Config, log *slog.Logger) *secrets.Cipher {
+	path := filepath.Join(cfg.DataDir, "secret.key")
+	c, err := secrets.LoadOrCreate(path)
+	if err != nil {
+		log.Warn("加密密钥不可用：设置页里填的 TMDB 凭据将以明文存库", "path", path, "err", err)
+		return nil
+	}
+	return c
+}
+
+// authMode 把凭据形态描述成人话（日志与 CLI 输出用）。
 func authMode(c config.TMDBConfig) string {
 	if c.ReadToken != "" {
 		return "v4 read access token"
 	}
-	return "v3 api key"
+	if c.APIKey != "" {
+		return "v3 api key"
+	}
+	return "未配置"
 }
 
 // cmdProvider 是对着真实 provider 排查问题用的命令行工具。
@@ -561,7 +611,7 @@ func cmdProvider(args []string) error {
 	defer st.Close()
 
 	cached, raw := buildTMDBProvider(cfg, st, log)
-	if cached == nil {
+	if !raw.Configured() {
 		return errors.New("未配置 TMDB 凭据（config.toml 的 [tmdb] 段，或 LMBY_TMDB_READ_TOKEN）")
 	}
 

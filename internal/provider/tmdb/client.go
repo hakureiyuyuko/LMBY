@@ -58,6 +58,11 @@ type Client struct {
 	sem     chan struct{}
 	mu      sync.Mutex
 	nextRun time.Time
+
+	// cfgMu 保护 cfg 里的凭据与默认语言：设置页可以在运行期换掉它们
+	// （见 SetCredentials），而请求是从多个 goroutine 发的。
+	// 与 mu（限速用的 nextRun）分开，免得两者互相等。
+	cfgMu sync.RWMutex
 }
 
 // New 构造客户端。
@@ -104,17 +109,46 @@ func (c *Client) ImageURL(path, size string) string {
 
 // Configured 表示凭据是否齐备。
 func (c *Client) Configured() bool {
-	return c.cfg.ReadToken != "" || c.cfg.APIKey != ""
+	readToken, apiKey, _ := c.credentials()
+	return readToken != "" || apiKey != ""
+}
+
+// credentials 返回当前生效的凭据与默认语言。
+func (c *Client) credentials() (readToken, apiKey, lang string) {
+	c.cfgMu.RLock()
+	defer c.cfgMu.RUnlock()
+	return c.cfg.ReadToken, c.cfg.APIKey, c.cfg.Language
+}
+
+// lang 返回当前默认语言。
+func (c *Client) lang() string {
+	_, _, lang := c.credentials()
+	return lang
+}
+
+// SetCredentials 在运行期换掉凭据与默认语言。
+//
+// 有了它，设置页里填完 TMDB Key 就不需要重启：下一次搜索/取详情就用新的。
+// 传空串表示把该字段清掉（语言为空则不动 —— 它总有默认值，不该被静默改掉）。
+func (c *Client) SetCredentials(readToken, apiKey, language string) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	c.cfg.ReadToken = readToken
+	c.cfg.APIKey = apiKey
+	if language != "" {
+		c.cfg.Language = language
+	}
 }
 
 // ---------------------------------------------------------------- HTTP 基础设施
 
 func (c *Client) newRequest(ctx context.Context, path string, params url.Values) (*http.Request, error) {
+	readToken, apiKey, _ := c.credentials()
 	if params == nil {
 		params = url.Values{}
 	}
-	if c.cfg.ReadToken == "" && c.cfg.APIKey != "" {
-		params.Set("api_key", c.cfg.APIKey)
+	if readToken == "" && apiKey != "" {
+		params.Set("api_key", apiKey)
 	}
 	u := c.cfg.BaseURL + path
 	if len(params) > 0 {
@@ -125,8 +159,8 @@ func (c *Client) newRequest(ctx context.Context, path string, params url.Values)
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.cfg.ReadToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.ReadToken)
+	if readToken != "" {
+		req.Header.Set("Authorization", "Bearer "+readToken)
 	}
 	return req, nil
 }
@@ -245,7 +279,7 @@ func (c *Client) SearchMovie(ctx context.Context, query string, opts provider.Se
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("include_adult", "false")
-	params.Set("language", orDefault(opts.Lang, c.cfg.Language))
+	params.Set("language", orDefault(opts.Lang, c.lang()))
 	if opts.Year > 0 {
 		params.Set("year", strconv.Itoa(opts.Year))
 	}
@@ -277,7 +311,7 @@ func (c *Client) SearchSeries(ctx context.Context, query string, opts provider.S
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("include_adult", "false")
-	params.Set("language", orDefault(opts.Lang, c.cfg.Language))
+	params.Set("language", orDefault(opts.Lang, c.lang()))
 	if opts.Year > 0 {
 		params.Set("first_air_date_year", strconv.Itoa(opts.Year))
 	}
@@ -411,7 +445,7 @@ type rawMovie struct {
 // Movie 实现 provider.Client。
 func (c *Client) Movie(ctx context.Context, id int, lang string) (*provider.Movie, error) {
 	params := url.Values{}
-	params.Set("language", orDefault(lang, c.cfg.Language))
+	params.Set("language", orDefault(lang, c.lang()))
 	params.Set("append_to_response", appendMovie)
 
 	var raw rawMovie
@@ -435,7 +469,7 @@ func (c *Client) Movie(ctx context.Context, id int, lang string) (*provider.Movi
 		PosterPath:     raw.PosterPath,
 		BackdropPath:   raw.BackdropPath,
 		ProviderIDs:    providerIDs(raw.ID, raw.ExternalIDs),
-		OfficialRating: pickCertification(raw.ReleaseDates, c.cfg.Language),
+		OfficialRating: pickCertification(raw.ReleaseDates, c.lang()),
 	}
 	for _, g := range raw.Genres {
 		m.Genres = append(m.Genres, g.Name)
@@ -495,7 +529,7 @@ type rawTV struct {
 // Series 实现 provider.Client。
 func (c *Client) Series(ctx context.Context, id int, lang string) (*provider.Series, error) {
 	params := url.Values{}
-	params.Set("language", orDefault(lang, c.cfg.Language))
+	params.Set("language", orDefault(lang, c.lang()))
 	params.Set("append_to_response", appendTV)
 
 	var raw rawTV
@@ -517,7 +551,7 @@ func (c *Client) Series(ctx context.Context, id int, lang string) (*provider.Ser
 		PosterPath:     raw.PosterPath,
 		BackdropPath:   raw.BackdropPath,
 		ProviderIDs:    providerIDs(raw.ID, raw.ExternalIDs),
-		OfficialRating: pickContentRating(raw.ContentRatings, c.cfg.Language),
+		OfficialRating: pickContentRating(raw.ContentRatings, c.lang()),
 	}
 	for _, g := range raw.Genres {
 		s.Genres = append(s.Genres, g.Name)
@@ -575,7 +609,7 @@ type rawSeason struct {
 // Season 实现 provider.Client（一次拿到整季，避免逐集请求）。
 func (c *Client) Season(ctx context.Context, seriesID int, season int, lang string) (*provider.Season, error) {
 	params := url.Values{}
-	params.Set("language", orDefault(lang, c.cfg.Language))
+	params.Set("language", orDefault(lang, c.lang()))
 	params.Set("append_to_response", "images")
 
 	var raw rawSeason
@@ -619,7 +653,7 @@ type rawEpisodeDetails struct {
 // Episode 实现 provider.Client。
 func (c *Client) Episode(ctx context.Context, seriesID, season, episode int, lang string) (*provider.Episode, error) {
 	params := url.Values{}
-	params.Set("language", orDefault(lang, c.cfg.Language))
+	params.Set("language", orDefault(lang, c.lang()))
 	params.Set("append_to_response", "credits,images,external_ids")
 
 	var raw rawEpisodeDetails

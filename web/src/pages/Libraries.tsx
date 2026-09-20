@@ -139,6 +139,9 @@ export function Libraries() {
                 ))}
                 <span className="badge">图片 {lib.imageCount}</span>
                 <div className="spacer" />
+                <Link className="btn btn-sm" to={`/library/${lib.id}`}>
+                  海报墙
+                </Link>
                 {running ? (
                   <button type="button" className="btn btn-sm" onClick={() => void cancelScan(lib.id)}>
                     取消扫描
@@ -361,6 +364,8 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
 
       {issues.length > 0 && <IssuesCard issues={issues} />}
 
+      <ScrapeCard libraryId={libraryId} onChange={loadDetail} />
+
       <ProbeCard libraryId={libraryId} probe={detail.probe} onChange={loadDetail} />
 
       <div className="card">
@@ -451,6 +456,132 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * 刮削卡片：库级的一键刮削、强制重刮、重置失败。
+ *
+ * 为什么放在库里而不是单独一页：刮削是「这批内容扫进来了，去把元数据补上」的收尾动作，
+ * 用户刚看完扫描结果，紧接着就会做这件事。
+ */
+function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () => void }) {
+  const [data, setData] = useState<{ configured: boolean; scrape: import('../api').ScrapeProgress } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setData(await api.scrapeStatus(libraryId));
+    } catch {
+      /* 读不到就当未配置处理 */
+    }
+  }, [libraryId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run(fn: () => Promise<string>) {
+    setBusy(true);
+    setMessage('');
+    try {
+      setMessage(await fn());
+      await load();
+      onChange();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const p = data?.scrape;
+  const todo = p ? p.local + p.failed + p.review : 0;
+
+  return (
+    <div className="card">
+      <h2>元数据刮削</h2>
+      <p className="hint">
+        有本地 nfo 的条目<strong>不会</strong>被刮削（nfo 是当初人工整理的，默认最权威）；
+        只有没 nfo 的才会去 TMDB 找，找不到或拿不准的进「人工匹配」。
+      </p>
+      {message && <div className="alert">{message}</div>}
+
+      {data && !data.configured && (
+        <div className="alert alert-error">
+          还没配 TMDB 凭据：去「设置」页填一个 Read Access Token（或 API Key）就能开始刮削。
+        </div>
+      )}
+
+      {p && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          <span className="badge">来自 nfo {p.nfo}</span>
+          <span className="badge">已匹配 {p.matched}</span>
+          <span className="badge">待确认 {p.review}</span>
+          <span className="badge">没找到 {p.failed}</span>
+          <span className="badge">已人工 {p.manual}</span>
+          <span className="badge">未刮削 {p.local}</span>
+        </div>
+      )}
+
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={busy || !data?.configured}
+          onClick={() =>
+            void run(async () => {
+              const res = await api.enqueueScrapes(libraryId, {});
+              return `已入队 ${res.enqueued} 条（已有 nfo/已匹配的会自动跳过）`;
+            })
+          }
+        >
+          一键刮削（{todo} 条待处理）
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={busy || !data?.configured}
+          onClick={() => {
+            if (
+              !window.confirm(
+                '强制重刮会把 TMDB 的值写进所有条目的**未锁定**字段（包括有 nfo 的）。\n' +
+                  '锁住的字段与人工改过的字段不会被动。确定继续？',
+              )
+            ) {
+              return;
+            }
+            void run(async () => {
+              const res = await api.enqueueScrapes(libraryId, { force: true });
+              return `已强制入队 ${res.enqueued} 条`;
+            });
+          }}
+        >
+          强制重刮全部
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={busy || (p?.failed ?? 0) === 0}
+          onClick={() =>
+            void run(async () => {
+              const res = await api.resetFailedScrapes(libraryId);
+              return `已重置 ${res.reset} 条失败记录，并重新入队 ${res.enqueued} 条`;
+            })
+          }
+        >
+          重置失败的
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void run(async () => '已刷新')}>
+          刷新
+        </button>
+        <div className="spacer" />
+        <Link className="btn btn-sm" to="/match">
+          去人工匹配
+        </Link>
+      </div>
+    </div>
   );
 }
 

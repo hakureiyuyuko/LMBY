@@ -37,6 +37,9 @@ export function Match() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
+  // checked 是「批量操作」的勾选集合；与 selected（打开右侧面板的那一条）是两件事：
+  // 前者是选区，后者是焦点。混在一个状态里会让「点了卡片却又勾了别的」变得说不清。
+  const [checked, setChecked] = useState<Set<number>>(new Set());
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,8 +68,46 @@ export function Match() {
 
   useEffect(() => {
     setSelected(null);
+    setChecked(new Set());
     void loadItems();
   }, [loadItems]);
+
+  function toggleCheck(id: number) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** 批量操作：选中一批条目做同一件事（重刮 / 标记不需要匹配）。 */
+  async function batch(action: 'scrape' | 'skip', force = false) {
+    const ids = [...checked];
+    if (ids.length === 0) return;
+    if (action === 'skip') {
+      if (!window.confirm(`把选中的 ${ids.length} 条标记为「不需要匹配」？`)) return;
+    } else {
+      const tip = force
+        ? `给选中的 ${ids.length} 条排到队尾重刮，并强制覆盖已有元数据（锁住的字段不动）？`
+        : `给选中的 ${ids.length} 条排一次刮削（已有元数据的会自动跳过）？`;
+      if (!window.confirm(tip)) return;
+    }
+    setBusy(true);
+    setNotice('');
+    try {
+      const res = await api.batchItems({ action, itemIds: ids, force, reason: '人工批量标记：不需要匹配' });
+      setNotice(`已处理 ${res.applied} 条${res.skipped > 0 ? `，跳过 ${res.skipped} 条` : ''}。`);
+      setError('');
+      setChecked(new Set());
+      setSelected(null);
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '批量操作失败');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function apply(itemId: number, providerId: number) {
     setBusy(true);
@@ -156,37 +197,88 @@ export function Match() {
         )}
         {items && items.length > 0 && (
           <p className="muted small">
-            共 {total} 条，显示前 {items.length} 条
+            共 {total} 条，显示前 {items.length} 条 —— 勾选卡片左上角可以批量操作
           </p>
+        )}
+
+        {checked.size > 0 && (
+          <div className="row batch-bar">
+            <strong>已选 {checked.size} 条</strong>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => void batch('scrape')}
+            >
+              排到队尾刮削
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={busy}
+              onClick={() => void batch('scrape', true)}
+            >
+              强制重刮（覆盖未锁字段）
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={() => void batch('skip')}
+            >
+              标记不需要匹配
+            </button>
+            <div className="spacer" />
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => setChecked(new Set(items?.map((x) => x.id) ?? []))}
+            >
+              全选本页
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setChecked(new Set())}>
+              清除选择
+            </button>
+          </div>
         )}
 
         <div className="match-grid">
           {items?.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              className={selected === it.id ? 'match-card selected' : 'match-card'}
-              onClick={() => setSelected(it.id === selected ? null : it.id)}
-            >
-              <img
-                className="match-thumb"
-                src={`/api/v1/items/${it.id}/images/poster?w=160`}
-                alt=""
-                loading="lazy"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-                }}
-              />
-              <div className="match-card-body">
-                <div className="match-title">{it.title || '（无标题）'}</div>
-                <div className="muted small">
-                  {kindLabels[it.kind] ?? it.kind}
-                  {it.year ? ` · ${it.year}` : ''}
-                  {it.matchScore != null ? ` · 分数 ${it.matchScore.toFixed(2)}` : ''}
+            <div className="match-cell" key={it.id}>
+              <label className="cell-check" title="勾选后可批量操作">
+                <input
+                  type="checkbox"
+                  data-check={it.id}
+                  checked={checked.has(it.id)}
+                  onChange={() => toggleCheck(it.id)}
+                />
+              </label>
+              <button
+                type="button"
+                className={selected === it.id ? 'match-card selected' : 'match-card'}
+                onClick={() => setSelected(it.id === selected ? null : it.id)}
+              >
+                <img
+                  className="match-thumb"
+                  src={`/api/v1/items/${it.id}/images/poster?w=160`}
+                  alt=""
+                  loading="lazy"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+                  }}
+                />
+                <div className="match-card-body">
+                  <div className="match-title">{it.title || '（无标题）'}</div>
+                  <div className="muted small">
+                    {kindLabels[it.kind] ?? it.kind}
+                    {it.year ? ` · ${it.year}` : ''}
+                    {it.matchScore != null ? ` · 分数 ${it.matchScore.toFixed(2)}` : ''}
+                  </div>
+                  {it.scrapeError && <div className="muted small match-why">{it.scrapeError}</div>}
                 </div>
-                {it.scrapeError && <div className="muted small match-why">{it.scrapeError}</div>}
-              </div>
-            </button>
+              </button>
+            </div>
           ))}
         </div>
       </div>

@@ -57,6 +57,21 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.Handler {
 	})
 }
 
+// requireAdmin 在 requireAuth 之外再要求管理员身份（设置页、全局操作）。
+//
+// 非管理员返回 403 而不是 404：这是「你知道有这个东西但你没权限」的场景，
+// 藏着反而让用户以为页面不存在、跑来问为什么打不开。
+func (s *Server) requireAdmin(next http.HandlerFunc) http.Handler {
+	return s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		a := currentAuth(r)
+		if a == nil || a.User == nil || !a.User.IsAdmin {
+			writeError(w, http.StatusForbidden, "只有管理员能改全站设置")
+			return
+		}
+		next(w, r)
+	})
+}
+
 // statusRecorder 记录响应状态码与字节数，供访问日志使用。
 type statusRecorder struct {
 	http.ResponseWriter

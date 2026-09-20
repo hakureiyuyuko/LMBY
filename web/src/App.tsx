@@ -3,12 +3,15 @@ import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
 import { Account } from './pages/Account';
+import { Browse } from './pages/Browse';
 import { Home } from './pages/Home';
 import { ItemEdit } from './pages/Item';
 import { Libraries } from './pages/Libraries';
 import { Login } from './pages/Login';
 import { Match } from './pages/Match';
 import { Search } from './pages/Search';
+import { SeriesView } from './pages/Series';
+import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
 
@@ -78,6 +81,9 @@ function AppRoutes() {
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
         <Route path="/libraries" element={<Libraries />} />
+        <Route path="/library/:id" element={<Browse />} />
+        <Route path="/series/:id" element={<SeriesView />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/search" element={<Search />} />
         <Route path="/items/:id" element={<ItemEdit />} />
         <Route path="/match" element={<Match />} />

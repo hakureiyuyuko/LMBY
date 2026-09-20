@@ -158,6 +158,51 @@ export const api = {
         (matchState.length > 0 ? `&matchState=${encodeURIComponent(matchState.join(','))}` : ''),
     ),
 
+  // ---------------------------------------------------------------- 浏览（海报墙 / 子项）
+  browse: (
+    libraryId: number,
+    params: { kind?: string; sort?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const sp = new URLSearchParams();
+    if (params.kind) sp.set('kind', params.kind);
+    if (params.sort) sp.set('sort', params.sort);
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    return request<BrowsePage>(`/api/v1/libraries/${libraryId}/browse?${sp.toString()}`);
+  },
+  children: (itemId: number) => request<ChildSummary>(`/api/v1/items/${itemId}/children`),
+  batchItems: (body: { action: 'scrape' | 'skip'; itemIds: number[]; force?: boolean; reason?: string }) =>
+    request<BatchResult>('/api/v1/items/batch', { method: 'POST', ...json(body) }),
+
+  // ---------------------------------------------------------------- 刮削（库级）
+  scrapeStatus: (libraryId: number) =>
+    request<{ configured: boolean; scrape: ScrapeProgress }>(`/api/v1/libraries/${libraryId}/scrape`),
+  enqueueScrapes: (libraryId: number, body: { force?: boolean; kind?: string } = {}) =>
+    request<{ enqueued: number; scrape: ScrapeProgress }>(`/api/v1/libraries/${libraryId}/scrape`, {
+      method: 'POST',
+      ...json(body),
+    }),
+  resetFailedScrapes: (libraryId: number) =>
+    request<{ reset: number; enqueued: number; scrape: ScrapeProgress }>(
+      `/api/v1/libraries/${libraryId}/scrape/reset`,
+      { method: 'POST' },
+    ),
+
+  // ---------------------------------------------------------------- 设置（管理员）
+  settings: () => request<SettingsPayload>('/api/v1/settings'),
+  updateTMDBSettings: (body: { readToken?: string; apiKey?: string; language?: string }) =>
+    request<{ ok: boolean; tmdb: TMDBSettings; clearedCache: number }>('/api/v1/settings/tmdb', {
+      method: 'PUT',
+      ...json(body),
+    }),
+  resetTMDBSettings: () =>
+    request<{ ok: boolean; tmdb: TMDBSettings }>('/api/v1/settings/tmdb', { method: 'DELETE' }),
+  testProvider: (q?: string) =>
+    request<ProviderTestResult>(
+      `/api/v1/provider/test${q ? `?q=${encodeURIComponent(q)}` : ''}`,
+      { method: 'POST' },
+    ),
+
   // ---------------------------------------------------------------- 搜索
   search: (params: {
     q: string;
@@ -318,12 +363,87 @@ export interface Item {
   episodeNumber?: number;
   episodeEnd?: number;
   overview?: string;
+  runtimeTicks?: number;
+  premiereDate?: string;
   fileTech?: Record<string, unknown>;
   genres?: string[];
   matchState?: string;
   matchScore?: number;
   metadataSource?: string;
   scrapeError?: string;
+}
+
+/** 海报墙（只含顶层条目）。 */
+export interface BrowsePage {
+  items: Item[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** 子项列表（剧集 → 季，季 → 集）+ 每个子项自己的子项数。 */
+export interface ChildSummary {
+  item: MatchItem;
+  items: Item[];
+  counts: Record<string, number>;
+}
+
+/** 批量操作结果。 */
+export interface BatchResult {
+  action: string;
+  applied: number;
+  skipped: number;
+}
+
+/** 刮削进度（按匹配状态分）。 */
+export interface ScrapeProgress {
+  nfo: number;
+  local: number;
+  matched: number;
+  review: number;
+  manual: number;
+  failed: number;
+}
+
+/** TMDB 设置（密钥永不会回显，只回 has* 布尔）。 */
+export interface TMDBSettings {
+  configured: boolean;
+  hasReadToken: boolean;
+  hasApiKey: boolean;
+  language: string;
+  /** 值来自数据库（设置页写入的）还是配置文件兜底。 */
+  fromDb: boolean;
+  /** 密钥在库里是不是加密存的。 */
+  encrypted: boolean;
+  fallback?: { hasReadToken: boolean; hasApiKey: boolean; language: string };
+}
+
+/** 系统信息（只读）。 */
+export interface SystemInfo {
+  databaseEncoding: string;
+  databaseCollate: string;
+  databaseCtype: string;
+  schemaVersion: number;
+  itemCount: number;
+  fileCount: number;
+  imageCount: number;
+  taskPending: number;
+  serverTime: string;
+}
+
+export interface SettingsPayload {
+  tmdb: TMDBSettings;
+  system: SystemInfo;
+}
+
+/** 「测试连接」的结果。 */
+export interface ProviderTestResult {
+  ok: boolean;
+  query: string;
+  count?: number;
+  samples?: { id: number; title: string; year: number }[];
+  elapsed?: number;
+  error?: string;
 }
 
 /** 搜索命中：条目本体 + 排序依据。 */
