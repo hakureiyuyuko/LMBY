@@ -92,6 +92,11 @@ type Verdict struct {
 	Parts        []Part  `json:"parts"`
 	MatchedAlias string  `json:"matchedAlias,omitempty"` // 靠别名/原名命中时记下命中的那条标题
 
+	// PosterURL 是给界面看的：候选海报地址。
+	// 打分器自己不会填它（匹配不该关心图片），由刮削侧拿详情时顺手补上 ——
+	// 人工匹配界面就是靠它把几个同名候选摆在一起让人选的。
+	PosterURL string `json:"posterUrl,omitempty"`
+
 	// 下面是候选的原始信息，方便界面与 CLI 直接展示，也用作排序的决胜项。
 	Popularity    float64 `json:"popularity,omitempty"`
 	VoteCount     int     `json:"voteCount,omitempty"`

@@ -331,12 +331,20 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 100)
 	offset := queryInt(r, "offset", 0)
 
-	items, err := s.store.ListItems(ctx, id, kind, limit, offset)
+	filter := store.ItemFilter{Kind: kind}
+	// matchState 支持逗号分隔（人工匹配界面要同时看 review 与 failed）
+	for _, st := range strings.Split(r.URL.Query().Get("matchState"), ",") {
+		if st = strings.TrimSpace(st); st != "" {
+			filter.MatchState = append(filter.MatchState, st)
+		}
+	}
+
+	items, err := s.store.ListItems(ctx, id, filter, limit, offset)
 	if err != nil {
 		s.serverError(w, "读取条目失败", err)
 		return
 	}
-	total, err := s.store.CountItems(ctx, id, kind)
+	total, err := s.store.CountItems(ctx, id, filter)
 	if err != nil {
 		s.serverError(w, "统计条目失败", err)
 		return

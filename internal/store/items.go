@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -272,21 +274,47 @@ func (s *Store) GetItem(ctx context.Context, id int64) (*Item, error) {
 	return &it, nil
 }
 
+// ItemFilter 是列条目的过滤条件（零值 = 不过滤）。
+type ItemFilter struct {
+	// Kind 限定 movie / series / season / episode 等。
+	Kind string
+	// MatchState 命中其中任一状态即算匹配（人工匹配界面要同时看 review 与 failed）。
+	MatchState []string
+}
+
+// itemWhere 拼出列条目的 where 子句与参数。
+func itemWhere(libraryID int64, f ItemFilter) (string, []any) {
+	where := []string{"library_id = $1", "deleted_at is null"}
+	args := []any{libraryID}
+	if f.Kind != "" {
+		args = append(args, f.Kind)
+		where = append(where, fmt.Sprintf("kind = $%d", len(args)))
+	}
+	if len(f.MatchState) > 0 {
+		args = append(args, f.MatchState)
+		where = append(where, fmt.Sprintf("match_state = any($%d)", len(args)))
+	}
+	return strings.Join(where, " and "), args
+}
+
 // ListItems 分页列出一个库的条目。
-func (s *Store) ListItems(ctx context.Context, libraryID int64, kind string, limit, offset int) ([]Item, error) {
+func (s *Store) ListItems(ctx context.Context, libraryID int64, f ItemFilter, limit, offset int) ([]Item, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	cond, args := itemWhere(libraryID, f)
+	args = append(args, limit, offset)
+
 	rows, err := s.pool.Query(ctx,
 		`select id, library_id, kind, parent_id, series_id, season_number, episode_number,
 		        episode_end, extra_type, title, sort_title, original_title, year, overview,
 		        tagline, runtime_ticks, community_rating, official_rating,
-		        genres, tags, studios, provider_ids, file_tech, match_state, updated_at
+		        genres, tags, studios, provider_ids, file_tech, match_state,
+		        match_score, metadata_source, scrape_error, updated_at
 		 from media_items
-		 where library_id = $1 and deleted_at is null
-		   and ($2 = '' or kind = $2)
+		 where `+cond+`
 		 order by kind, sort_title, title, season_number nulls last, episode_number nulls last, id
-		 limit $3 offset $4`, libraryID, kind, limit, offset)
+		 limit $`+strconv.Itoa(len(args)-1)+` offset $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("查询条目列表失败: %w", err)
 	}
@@ -299,7 +327,8 @@ func (s *Store) ListItems(ctx context.Context, libraryID int64, kind string, lim
 			&it.SeasonNum, &it.EpisodeNum, &it.EpisodeEnd, &it.ExtraType, &it.Title,
 			&it.SortTitle, &it.OriginalTitle, &it.Year, &it.Overview, &it.Tagline,
 			&it.RuntimeTicks, &it.Rating, &it.OfficialRated, &it.Genres, &it.Tags,
-			&it.Studios, &it.ProviderIDs, &it.FileTech, &it.MatchState, &it.UpdatedAt); err != nil {
+			&it.Studios, &it.ProviderIDs, &it.FileTech, &it.MatchState,
+			&it.MatchScore, &it.MetadataSource, &it.ScrapeError, &it.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -308,16 +337,32 @@ func (s *Store) ListItems(ctx context.Context, libraryID int64, kind string, lim
 }
 
 // CountItems 统计一个库的条目数。
-func (s *Store) CountItems(ctx context.Context, libraryID int64, kind string) (int64, error) {
+func (s *Store) CountItems(ctx context.Context, libraryID int64, f ItemFilter) (int64, error) {
+	cond, args := itemWhere(libraryID, f)
 	var n int64
 	err := s.pool.QueryRow(ctx,
-		`select count(*) from media_items
-		 where library_id = $1 and deleted_at is null and ($2 = '' or kind = $2)`,
-		libraryID, kind).Scan(&n)
+		`select count(*) from media_items where `+cond, args...).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("统计条目失败: %w", err)
 	}
 	return n, nil
+}
+
+// MatchCandidates 读取条目的匹配候选（人工匹配界面用）。
+//
+// 候选是刮削时存下的（包含每个候选的打分明细），所以界面不需要重新搜一遍；
+// 数据是 JSON 数组，原样透给前端。
+func (s *Store) MatchCandidates(ctx context.Context, itemID int64) (json.RawMessage, error) {
+	var raw []byte
+	err := s.pool.QueryRow(ctx,
+		`select match_candidates from media_items where id = $1`, itemID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取匹配候选失败: %w", err)
+	}
+	return json.RawMessage(raw), nil
 }
 
 // ---------------------------------------------------------------- 文件读写

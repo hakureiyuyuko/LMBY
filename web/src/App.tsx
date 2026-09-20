@@ -6,6 +6,7 @@ import { Account } from './pages/Account';
 import { Home } from './pages/Home';
 import { Libraries } from './pages/Libraries';
 import { Login } from './pages/Login';
+import { Match } from './pages/Match';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
 
@@ -75,6 +76,7 @@ function AppRoutes() {
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
         <Route path="/libraries" element={<Libraries />} />
+        <Route path="/match" element={<Match />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<NotFound />} />
       </Route>

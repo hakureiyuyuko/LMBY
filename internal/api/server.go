@@ -10,29 +10,34 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
+	"github.com/hakureiyuyuko/lmby/internal/scrape"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
 // Server 持有处理请求所需的全部依赖。
 type Server struct {
-	cfg     *config.Config
-	store   *store.Store
-	log     *slog.Logger
-	ffmpeg  ffmpeg.Info
-	images  *images.Service
+	cfg    *config.Config
+	store  *store.Store
+	log    *slog.Logger
+	ffmpeg ffmpeg.Info
+	images *images.Service
+	// scraper 用于人工匹配（应用候选/重新搜索/标记无需匹配）。
+	// 没配元数据源时为 nil，对应接口返回 409。
+	scraper *scrape.Handler
 	started time.Time
 	limiter *loginLimiter
 	scans   *scan.Manager
 }
 
 // New 构造 Server。
-func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service) *Server {
+func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service, scraper *scrape.Handler) *Server {
 	return &Server{
 		cfg:     cfg,
 		store:   st,
 		log:     log,
 		ffmpeg:  ff,
 		images:  img,
+		scraper: scraper,
 		started: time.Now(),
 		limiter: newLoginLimiter(8, 15*time.Minute),
 		scans:   scan.NewManager(st, log),
@@ -75,6 +80,12 @@ func (s *Server) Handler() http.Handler {
 	// ---- 图片 ----
 	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))
 	mux.Handle("GET /api/v1/items/{id}/images/{kind}", s.requireAuth(s.handleItemImage))
+
+	// ---- 人工匹配 ----
+	mux.Handle("GET /api/v1/items/{id}/match", s.requireAuth(s.handleGetItemMatch))
+	mux.Handle("POST /api/v1/items/{id}/match", s.requireAuth(s.handleApplyItemMatch))
+	mux.Handle("POST /api/v1/items/{id}/match/search", s.requireAuth(s.handleSearchItemMatch))
+	mux.Handle("POST /api/v1/items/{id}/match/skip", s.requireAuth(s.handleSkipItemMatch))
 
 	// ---- 后台任务队列（探测 / 刮削）----
 	mux.Handle("GET /api/v1/tasks", s.requireAuth(s.handleTaskStats))

@@ -732,6 +732,127 @@ func TestHandleDetailFailureRetries(t *testing.T) {
 	}
 }
 
+// —— 人工匹配 ——
+
+// TestApplyCandidateWritesManual 人工选定候选：写元数据，状态标 manual
+// （manual 的语义就是「人工结果，自动重扫不再覆盖」）。
+func TestApplyCandidateWritesManual(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "某片", 2013)}
+	p := &fakeProvider{movie: &provider.Movie{
+		ID: 198375, Title: "言叶之庭", OriginalTitle: "言の葉の庭", Year: 2013,
+		Overview: "人工选的那一条的简介", Genres: []string{"动画"},
+		ProviderIDs: map[string]string{"tmdb": "198375"},
+	}}
+
+	if err := newTestHandler(st, p).ApplyCandidate(context.Background(), st.item, 198375); err != nil {
+		t.Fatalf("ApplyCandidate: %v", err)
+	}
+	if len(p.queries) != 0 {
+		t.Errorf("人工指定了候选就不该再搜，实际搜索 %v", p.queries)
+	}
+	if len(st.metas) != 1 || st.metas[0].Title != "言叶之庭" {
+		t.Fatalf("应当把选中条目的元数据写进去: %+v", st.metas)
+	}
+	if len(st.outcomes) != 1 {
+		t.Fatalf("应当落一条状态: %+v", st.outcomes)
+	}
+	o := st.outcomes[0]
+	if o.State != store.MatchStateManual {
+		t.Errorf("状态 = %s, 期望 %s（人工结果不该被自动重扫覆盖）", o.State, store.MatchStateManual)
+	}
+	if o.Score != nil {
+		t.Errorf("人工指定没有相似度可言，分数应为空，实际 %v", *o.Score)
+	}
+}
+
+// TestApplyCandidateSeriesEnqueuesChildren 剧集人工匹配后，它的季/集才有得刮。
+func TestApplyCandidateSeriesEnqueuesChildren(t *testing.T) {
+	st := &fakeStore{item: item(itemKindSeries, "某剧", 2021), seriesChildren: 3}
+	p := &fakeProvider{series: &provider.Series{ID: 97525, Name: "某剧", Overview: "…"}}
+
+	if err := newTestHandler(st, p).ApplyCandidate(context.Background(), st.item, 97525); err != nil {
+		t.Fatalf("ApplyCandidate: %v", err)
+	}
+	if len(st.enqueuedSeries) != 1 || st.enqueuedSeries[0] != 7 {
+		t.Errorf("应当给剧集 7 排上季/集，实际 %v", st.enqueuedSeries)
+	}
+}
+
+// TestApplyCandidateRejectsPositionalItems 季/集是按位置对应的，不该支持人工指定候选。
+func TestApplyCandidateRejectsPositionalItems(t *testing.T) {
+	st := &fakeStore{item: item(itemKindEpisode, "", 0)}
+	p := &fakeProvider{episode: &provider.Episode{ID: 1}}
+	if err := newTestHandler(st, p).ApplyCandidate(context.Background(), st.item, 123); err == nil {
+		t.Error("对单集应用候选应当报错")
+	}
+}
+
+// TestApplyCandidateTitleConflict 撞唯一索引（同名条目）时给可读的错误，而不是裸 SQL 错误。
+func TestApplyCandidateTitleConflict(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "某片", 2013)}
+	st.applyErr = fmt.Errorf("%w: duplicate key", store.ErrAlreadyExists)
+	p := &fakeProvider{movie: &provider.Movie{ID: 1, Title: "同名条目"}}
+
+	err := newTestHandler(st, p).ApplyCandidate(context.Background(), st.item, 1)
+	if err == nil {
+		t.Fatal("撞唯一索引应当报错")
+	}
+	if !strings.Contains(err.Error(), "同名") {
+		t.Errorf("错误信息应当说明是同名冲突: %q", err.Error())
+	}
+}
+
+// TestSearchCandidates 换个词搜索：返回打分排序的候选，但不落库。
+func TestSearchCandidates(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "某片", 2013)}
+	p := &fakeProvider{movieResults: []provider.SearchResult{
+		{ID: 11, Kind: provider.KindMovie, Title: "人工搜到的片", Year: 2013},
+		{ID: 12, Kind: provider.KindMovie, Title: "完全不相干的", Year: 1990},
+	}, movie: &provider.Movie{ID: 11, Title: "人工搜到的片", Year: 2013}}
+
+	ranked, err := newTestHandler(st, p).SearchCandidates(context.Background(), st.item, "人工搜到的片")
+	if err != nil {
+		t.Fatalf("SearchCandidates: %v", err)
+	}
+	if len(ranked) != 2 {
+		t.Fatalf("应当返回 2 条候选，实际 %d", len(ranked))
+	}
+	if ranked[0].CandidateID != 11 {
+		t.Errorf("榜首应当是 id=11，实际 %d", ranked[0].CandidateID)
+	}
+	if ranked[0].Score <= ranked[1].Score {
+		t.Errorf("分数应当递减: %v", ranked)
+	}
+	if len(st.metas) != 0 || len(st.outcomes) != 0 {
+		t.Error("搜索只是给候选，不该写库")
+	}
+}
+
+// TestSearchCandidatesEmptyQuery 空词报错（界面应当禁用按钮）。
+func TestSearchCandidatesEmptyQuery(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "某片", 2013)}
+	if _, err := newTestHandler(st, &fakeProvider{}).SearchCandidates(context.Background(), st.item, "   "); err == nil {
+		t.Error("空搜索词应当报错")
+	}
+}
+
+// TestMarkUnmatched 人工标记「不需要匹配」：状态 manual + 原因留痕。
+func TestMarkUnmatched(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "码流测试片", 0)}
+	p := &fakeProvider{}
+
+	if err := newTestHandler(st, p).MarkUnmatched(context.Background(), st.item, "这是自制测试片"); err != nil {
+		t.Fatalf("MarkUnmatched: %v", err)
+	}
+	o := st.outcomes[0]
+	if o.State != store.MatchStateManual || !strings.Contains(o.Error, "自制测试片") {
+		t.Errorf("应当记 manual 并留下原因: %+v", o)
+	}
+	if len(p.queries) != 0 || len(st.metas) != 0 {
+		t.Error("标记不需要匹配不该打 API 或改元数据")
+	}
+}
+
 func TestSortTitleAndTicks(t *testing.T) {
 	if got := sortTitle("The Matrix"); got != "matrix" {
 		t.Errorf("sortTitle(The Matrix) = %q, 期望 matrix", got)

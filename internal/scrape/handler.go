@@ -213,6 +213,8 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 
 	details := Enrich(ctx, h.client, it.Kind, cands, local.SeasonNumber, h.log)
 	ranked := h.scorer.Rank(local, cands)
+	// 候选要存进库给人看，顺手补上海报地址（人工界面靠它区分同名条目）
+	DecoratePosters(h.client, ranked, details)
 	top := ranked[0]
 
 	switch top.Decision {

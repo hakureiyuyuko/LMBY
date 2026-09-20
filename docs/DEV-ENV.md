@@ -275,6 +275,21 @@ cache_dir = "/var/lib/lmby/images"  # 默认 <data_dir>/images
 max_cache_mb = 512
 ```
 
+## 人工匹配接口
+
+界面上是导航里的「人工匹配」页（`/match`）。后端四个接口：
+
+```
+GET  /api/v1/items/{id}/match          状态 + 候选（含打分明细，读的是刮削时存的 match_candidates）
+POST /api/v1/items/{id}/match          {"providerId": 431819} 应用选定 → 状态转 manual
+POST /api/v1/items/{id}/match/search   {"query": "..."} 换个词重搜（不落库）
+POST /api/v1/items/{id}/match/skip     {"reason": "..."} 标记不需要匹配
+GET  /api/v1/libraries/{id}/items?matchState=review,failed   列表支持逗号分隔的状态过滤
+```
+
+前端不单独跑：`cd web && npm run build` 的产物会被 `go:embed` 进二进制。
+容器里验前端渲染可以无头 Chrome 截图（见 M2 验收记录里的做法）。
+
 ### 手改 nfo 之后怎么让它生效
 
 nfo 在本项目里是权威元数据，所以给了个「重新导入」的口子：

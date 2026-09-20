@@ -15,6 +15,9 @@ export function Layout() {
           <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
             媒体库
           </NavLink>
+          <NavLink to="/match" className={({ isActive }) => (isActive ? 'active' : '')}>
+            人工匹配
+          </NavLink>
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
             概览
           </NavLink>

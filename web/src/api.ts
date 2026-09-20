@@ -152,10 +152,29 @@ export const api = {
     request<{ running: boolean; progress: ScanProgress | null; lastScan: ScanRun | null; issues: ScanIssue[] }>(
       `/api/v1/libraries/${id}/scan`,
     ),
-  items: (id: number, kind = '', limit = 100, offset = 0) =>
+  items: (id: number, kind = '', limit = 100, offset = 0, matchState: string[] = []) =>
     request<ItemsPage>(
-      `/api/v1/libraries/${id}/items?kind=${encodeURIComponent(kind)}&limit=${limit}&offset=${offset}`,
+      `/api/v1/libraries/${id}/items?kind=${encodeURIComponent(kind)}&limit=${limit}&offset=${offset}` +
+        (matchState.length > 0 ? `&matchState=${encodeURIComponent(matchState.join(','))}` : ''),
     ),
+
+  // ---------------------------------------------------------------- 人工匹配
+  itemMatch: (id: number) => request<MatchDetail>(`/api/v1/items/${id}/match`),
+  applyMatch: (id: number, providerId: number) =>
+    request<{ ok: boolean; matchState: string }>(`/api/v1/items/${id}/match`, {
+      method: 'POST',
+      ...json({ providerId }),
+    }),
+  searchMatch: (id: number, query: string) =>
+    request<{ query: string; candidates: MatchCandidate[] }>(`/api/v1/items/${id}/match/search`, {
+      method: 'POST',
+      ...json({ query }),
+    }),
+  skipMatch: (id: number, reason: string) =>
+    request<{ ok: boolean; matchState: string }>(`/api/v1/items/${id}/match/skip`, {
+      method: 'POST',
+      ...json({ reason }),
+    }),
 
   // ---------------------------------------------------------------- 后台任务
   tasks: () =>
@@ -274,6 +293,45 @@ export interface Item {
   fileTech?: Record<string, unknown>;
   genres?: string[];
   matchState?: string;
+  matchScore?: number;
+  metadataSource?: string;
+  scrapeError?: string;
+}
+
+/** 人工匹配：一个候选（含打分明细）。 */
+export interface MatchCandidate {
+  candidateId: number;
+  kind: string;
+  title: string;
+  year?: number;
+  score: number;
+  decision: string;
+  margin?: number;
+  posterUrl?: string;
+  matchedAlias?: string;
+  parts?: { name: string; weight: number; score: number; note: string }[];
+}
+
+/** 人工匹配：条目的摘要。 */
+export interface MatchItem {
+  id: number;
+  libraryId: number;
+  kind: string;
+  title: string;
+  originalTitle?: string;
+  year?: number;
+  matchState: string;
+  metadataSource?: string;
+  scrapeError?: string;
+  matchScore?: number;
+  overview?: string;
+  providerIds?: Record<string, string>;
+  lockedFields?: string[];
+}
+
+export interface MatchDetail {
+  item: MatchItem;
+  candidates: MatchCandidate[];
 }
 
 export interface ItemsPage {
