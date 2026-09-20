@@ -181,6 +181,21 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
 脚本跑到一半报「引号未闭合」，很难看出在哪一行。
 
+■ **改前端 / 重新部署的顺序**（踩过，会直接上线一个残废界面）：
+
+```
+cd web && npm run build      # 生成 dist/index.html + dist/assets/*
+tar czf ... -C . .           # 打包必须在下一步之前！
+# 发布/部署（容器里 go build 把 dist 嵌进二进制）
+task web:restore-placeholder # = git checkout -- web/dist/index.html，只在提交前跑
+```
+
+入库的 `web/dist/index.html` 是**占位页**；真的构建产物（带哈希的 assets）不入库。
+如果在 `npm run build` 之前先把占位页恢复回去，打出来的包就会把占位页嵌进二进制
+（或者是更早的构建残留：index.html 引用的 bundle 根本不在包里 —— 界面白屏或
+“少几个入口” 且无任何报错，因为后端原先会把缺失的静态资源也回退成 index.html）。
+后端现在会对缺失资源回 404，至少能在控制台看到真正的错误。
+
 这几个脚本都是**无依赖**的（`smoke-test.sh` / `verify-item-edit.sh` 只用 curl + jq；两个界面脚本只用
 Node 内置 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
 
