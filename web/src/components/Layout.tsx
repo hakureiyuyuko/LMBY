@@ -46,7 +46,7 @@ export function Layout() {
         <Outlet />
       </main>
 
-      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M1 媒体库与扫描</footer>
+      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M3 播放（直出 / 转封装）</footer>
     </div>
   );
 }

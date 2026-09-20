@@ -174,6 +174,41 @@ export const api = {
   batchItems: (body: { action: 'scrape' | 'skip'; itemIds: number[]; force?: boolean; reason?: string }) =>
     request<BatchResult>('/api/v1/items/batch', { method: 'POST', ...json(body) }),
 
+  // ---------------------------------------------------------------- 播放（M3）
+  /**
+   * 开始播放。body.profile 是前端实测出的能力（见 capabilities.ts）——
+   * 服务端拿它决定「能不能直出 / 要不要转封装」。不传则用服务端的保守默认档。
+   */
+  startPlayback: (itemId: number, body: StartPlaybackBody = {}) =>
+    request<PlaybackState>(`/api/v1/items/${itemId}/play`, { method: 'POST', ...json(body) }),
+  playbackState: (sessionId: string) =>
+    request<PlaybackState>(`/api/v1/play/${encodeURIComponent(sessionId)}`),
+  seekPlayback: (sessionId: string, positionTicks: number) =>
+    request<PlaybackState>(`/api/v1/play/${encodeURIComponent(sessionId)}/seek`, {
+      method: 'POST',
+      ...json({ positionTicks }),
+    }),
+  reportProgress: (sessionId: string, positionTicks: number, durationTicks: number) =>
+    request<{ progress: PlaybackProgress; played: boolean }>(
+      `/api/v1/play/${encodeURIComponent(sessionId)}/progress`,
+      { method: 'POST', ...json({ positionTicks, durationTicks }) },
+    ),
+  stopPlayback: (sessionId: string, body: { positionTicks?: number; durationTicks?: number } = {}) =>
+    request<{ ok: boolean }>(`/api/v1/play/${encodeURIComponent(sessionId)}/stop`, {
+      method: 'POST',
+      ...json(body),
+    }),
+  itemPlaylist: (itemId: number) => request<ItemPlaylist>(`/api/v1/items/${itemId}/playlist`),
+  itemProgress: (itemId: number) =>
+    request<{ progress: PlaybackProgress | null }>(`/api/v1/items/${itemId}/progress`),
+  continueWatching: (limit = 20) =>
+    request<{ items: ContinueWatchingEntry[] }>(`/api/v1/continue?limit=${limit}`),
+  setPlayed: (itemIds: number[], played: boolean) =>
+    request<{ ok: boolean; count: number; played: boolean }>('/api/v1/items/played', {
+      method: 'POST',
+      ...json({ itemIds, played }),
+    }),
+
   // ---------------------------------------------------------------- 刮削（库级）
   scrapeStatus: (libraryId: number) =>
     request<{ configured: boolean; scrape: ScrapeProgress }>(`/api/v1/libraries/${libraryId}/scrape`),
@@ -534,4 +569,121 @@ export interface ItemsPage {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ---------------------------------------------------------------- 播放（M3）
+
+/** 客户端上报的播放能力（服务端的 DeviceProfile 只做兜底）。 */
+export interface PlaybackProfile {
+  name: string;
+  containers: string[];
+  videoCodecs: string[];
+  audioCodecs: string[];
+  subtitleFormats?: string[];
+  maxWidth: number;
+  maxHeight: number;
+  maxBitDepth: number;
+  maxAudioChannels: number;
+  supportsHls: boolean;
+  supportsFmp4: boolean;
+  supportsTs: boolean;
+}
+
+/** 一条流的处理决定（含「为什么」）。 */
+export interface StreamPlan {
+  action: 'copy' | 'convert' | 'transcode' | 'burn' | 'drop' | 'none';
+  index: number;
+  codec?: string;
+  reason: string;
+  channels?: number;
+  language?: string;
+  title?: string;
+  default?: boolean;
+  downmix?: boolean;
+  image?: boolean;
+  forced?: boolean;
+}
+
+/** 播放决策（`GET /items/{id}/play` 里的 plan）。 */
+export interface PlaybackPlan {
+  mode: 'direct' | 'remux' | 'transcode';
+  fileId?: number;
+  container?: string;
+  containerKind?: string;
+  durationTicks: number;
+  startTicks: number;
+  segmentFormat?: 'fmp4' | 'ts';
+  video: StreamPlan;
+  audio: StreamPlan;
+  subtitle: StreamPlan;
+  playable: boolean;
+  reasons: string[];
+}
+
+/** 播放会话状态：模式决定用哪个 URL。 */
+export interface PlaybackState {
+  playSessionId?: string;
+  mode: 'direct' | 'remux' | 'transcode';
+  playable: boolean;
+  state: 'direct' | 'starting' | 'ready' | 'finished' | 'error' | 'stopped';
+  error?: string;
+  log?: string;
+  reasons: string[];
+  plan: PlaybackPlan;
+  startSeconds: number;
+  durationSeconds: number;
+  directUrl?: string;
+  hlsUrl?: string;
+  subtitleUrl?: string;
+  /** ready：字幕已可挂；preparing：内嵌字幕还在抽（后端异步任务）。 */
+  subtitleState?: 'ready' | 'preparing';
+  /** 转封装模式：这一段预生成窗口的结束位置（秒）。0 = 直出或未知。 */
+  windowEndSeconds?: number;
+  itemId: number;
+  title?: string;
+  progress?: PlaybackProgress | null;
+  playbackSeconds?: number;
+}
+
+export interface PlaybackProgress {
+  itemId: number;
+  positionTicks: number;
+  durationTicks: number;
+  played: boolean;
+  playCount: number;
+}
+
+export interface ContinueWatchingEntry {
+  item: Item;
+  progress: PlaybackProgress;
+  remainingTicks: number;
+}
+
+/** 开始播放的请求体。 */
+export interface StartPlaybackBody {
+  profile?: PlaybackProfile;
+  videoStreamIndex?: number;
+  audioStreamIndex?: number;
+  /** -1 = 明确不要字幕，0/缺省 = 自动（只选强制字幕轨）。 */
+  subtitleStreamIndex?: number;
+  startPositionTicks?: number;
+  restart?: boolean;
+}
+
+/** 条目下的文件与流（播放器的音轨/字幕选择器用）。 */
+export interface PlaylistFile {
+  fileId: number;
+  container: string;
+  containerKind: string;
+  sizeBytes: number;
+  durationTicks: number;
+  probeState: string;
+  video: { index: number; codec: string; width: number; height: number; bitDepth?: number; title?: string; language?: string; default?: boolean }[];
+  audio: { index: number; codec: string; channels: number; language?: string; title?: string; default?: boolean }[];
+  subtitles: { index: number; codec: string; language?: string; title?: string; default?: boolean; forced?: boolean; isImage?: boolean }[];
+}
+
+export interface ItemPlaylist {
+  itemId: number;
+  files: PlaylistFile[];
 }

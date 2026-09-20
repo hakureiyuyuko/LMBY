@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
-import type { FullItem, ItemDetail, ItemFieldInfo } from '../api';
+import type { FullItem, ItemDetail, ItemFieldInfo, ItemPlaylist, PlaybackProgress } from '../api';
+import { formatClock } from '../capabilities';
 
 /**
  * 条目编辑（含字段锁定）。
@@ -67,6 +68,9 @@ export function ItemEdit() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  // 播放相关（M3）：续播位置、已看状态、文件与流信息
+  const [progress, setProgress] = useState<PlaybackProgress | null>(null);
+  const [playlist, setPlaylist] = useState<ItemPlaylist | null>(null);
 
   /** 把服务端返回的详情铺进表单（保存成功后也走这里，等于重置了「已改」标记）。 */
   const applyDetail = useCallback((d: ItemDetail) => {
@@ -97,6 +101,36 @@ export function ItemEdit() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 播放信息（进度 / 可播文件）：与编辑无关，失败也不影响编辑功能
+  const loadPlayback = useCallback(async () => {
+    if (!Number.isFinite(itemId) || itemId <= 0) return;
+    try {
+      const p = await api.itemProgress(itemId);
+      setProgress(p.progress);
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      setPlaylist(await api.itemPlaylist(itemId));
+    } catch {
+      /* 忽略 */
+    }
+  }, [itemId]);
+
+  useEffect(() => {
+    void loadPlayback();
+  }, [loadPlayback]);
+
+  async function togglePlayed(next: boolean) {
+    try {
+      await api.setPlayed([itemId], next);
+      setProgress((p) => (p ? { ...p, played: next } : p));
+      setNotice(next ? '已标记为看过' : '已标记为未看');
+    } catch (e) {
+      setError(messageOf(e, '标记失败'));
+    }
+  }
 
   function setField(name: string, value: string) {
     setDraft((d) => ({ ...d, [name]: value }));
@@ -199,6 +233,8 @@ export function ItemEdit() {
 
   const it = detail.item;
   const locked = new Set(locks);
+  const resumeSeconds = progress && !progress.played ? progress.positionTicks / 10_000_000 : 0;
+  const file = playlist?.files[0];
 
   return (
     <>
@@ -258,6 +294,46 @@ export function ItemEdit() {
 
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert alert-ok">{notice}</div>}
+      </div>
+
+      <div className="card">
+        <h2>播放</h2>
+        <p className="hint">
+          服务端会在开播前做一次播放决策：能直出就直出（原文件 + HTTP Range，最省资源），
+          否则就只换容器（转封装，视频不重新编码），两者都不行才需要转码 —— 具体选了哪条、
+          为什么，播放器里点「为什么这么播」看得到。
+        </p>
+        {file && (
+          <p className="muted small">
+            文件 {file.containerKind || file.container || '未知'} · 视频{' '}
+            {file.video?.[0]
+              ? `${file.video[0].codec} ${file.video[0].width}×${file.video[0].height}`
+              : '（无）'}{' '}
+            · 音频 {file.audio?.[0] ? `${file.audio[0].codec} ${file.audio[0].channels}ch` : '（无）'}
+            {(file.subtitles?.length ?? 0) > 0 ? ` · ${file.subtitles.length} 条字幕` : ''}
+          </p>
+        )}
+        <div className="row" style={{ marginTop: 8 }}>
+          <Link className="btn btn-primary" to={`/play/${it.id}`}>
+            {resumeSeconds > 0 ? `继续播放（${formatClock(resumeSeconds)}）` : '播放'}
+          </Link>
+          {resumeSeconds > 0 && (
+            <Link className="btn" to={`/play/${it.id}?restart=1`}>
+              从头播放
+            </Link>
+          )}
+          <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={Boolean(progress?.played)}
+              onChange={(e) => void togglePlayed(e.target.checked)}
+            />
+            标记为已看
+          </label>
+          {progress && progress.playCount > 0 && (
+            <span className="faint small">已看过 {progress.playCount} 次</span>
+          )}
+        </div>
       </div>
 
       <div className="card">

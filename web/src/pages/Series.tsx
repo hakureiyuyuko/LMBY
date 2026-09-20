@@ -205,32 +205,42 @@ export function SeriesView() {
           <h2>集（{episodeItems.length}）</h2>
           <div className="ep-list">
             {episodeItems.map((ep) => (
-              <Link key={ep.id} className="ep-row" to={`/items/${ep.id}`}>
-                <img
-                  className="ep-thumb"
-                  src={`/api/v1/items/${ep.id}/images/thumb?w=200`}
-                  alt=""
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).classList.add('poster-missing');
-                  }}
-                />
-                <div className="ep-body">
-                  <div className="ep-title">
-                    <span className="faint">
-                      S{String(ep.seasonNumber ?? 0).padStart(2, '0')}
-                      E{String(ep.episodeNumber ?? 0).padStart(2, '0')}
-                    </span>{' '}
-                    {ep.title || '（无标题）'}
+              <div key={ep.id} className="ep-row">
+                <Link className="ep-main" to={`/items/${ep.id}`}>
+                  <img
+                    className="ep-thumb"
+                    src={`/api/v1/items/${ep.id}/images/thumb?w=200`}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).classList.add('poster-missing');
+                    }}
+                  />
+                  <div className="ep-body">
+                    <div className="ep-title">
+                      <span className="faint">
+                        S{String(ep.seasonNumber ?? 0).padStart(2, '0')}
+                        E{String(ep.episodeNumber ?? 0).padStart(2, '0')}
+                      </span>{' '}
+                      {ep.title || '（无标题）'}
+                    </div>
+                    <div className="muted small">
+                      {ep.year ? `${ep.year} · ` : ''}
+                      {runtimeText(ep.runtimeTicks)}
+                      {ep.matchState ? ` · ${stateLabels[ep.matchState] ?? ep.matchState}` : ''}
+                    </div>
+                    {ep.overview && <div className="muted small search-clamp">{ep.overview}</div>}
                   </div>
-                  <div className="muted small">
-                    {ep.year ? `${ep.year} · ` : ''}
-                    {runtimeText(ep.runtimeTicks)}
-                    {ep.matchState ? ` · ${stateLabels[ep.matchState] ?? ep.matchState}` : ''}
-                  </div>
-                  {ep.overview && <div className="muted small search-clamp">{ep.overview}</div>}
+                </Link>
+                <div className="ep-actions">
+                  <Link className="btn btn-sm btn-primary" to={`/play/${ep.id}`}>
+                    播放
+                  </Link>
+                  <Link className="btn btn-sm btn-ghost" to={`/items/${ep.id}`}>
+                    详情
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         </div>

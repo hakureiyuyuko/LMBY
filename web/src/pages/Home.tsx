@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { Health } from '../api';
+import type { ContinueWatchingEntry, Health } from '../api';
+import { formatClock } from '../capabilities';
 
 function dotClass(ok: boolean) {
   return ok ? 'dot dot-ok' : 'dot dot-bad';
@@ -9,6 +11,8 @@ function dotClass(ok: boolean) {
 export function Home() {
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState('');
+  const [resume, setResume] = useState<ContinueWatchingEntry[]>([]);
+  const [resumeError, setResumeError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -19,14 +23,94 @@ export function Home() {
     }
   }, []);
 
+  const loadResume = useCallback(async () => {
+    try {
+      const res = await api.continueWatching(12);
+      setResume(res.items);
+      setResumeError('');
+    } catch {
+      setResumeError('读取继续观看列表失败');
+    }
+  }, []);
+
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 10000);
     return () => window.clearInterval(timer);
   }, [load]);
 
+  useEffect(() => {
+    void loadResume();
+  }, [loadResume]);
+
+  async function markPlayed(itemId: number) {
+    try {
+      await api.setPlayed([itemId], true);
+      await loadResume();
+    } catch {
+      /* 失败就下次刷新再说 */
+    }
+  }
+
   return (
     <>
+      <div className="card">
+        <h2>继续观看</h2>
+        <p className="hint">
+          进度按账号独立保存（服务端每 10 秒收一次心跳），关页面不会丢。标记为已看之后就不再出现在这里。
+        </p>
+        {resumeError && <div className="alert alert-error">{resumeError}</div>}
+        {resume.length === 0 && !resumeError && (
+          <p className="muted">
+            还没有观看记录。去 <Link to="/libraries">媒体库</Link> 挑一部开始。
+          </p>
+        )}
+        {resume.length > 0 && (
+          <div className="continue-list">
+            {resume.map((e) => {
+              const pos = e.progress.positionTicks / 10_000_000;
+              const total = e.progress.durationTicks / 10_000_000;
+              const pct = total > 0 ? Math.min(100, Math.round((pos / total) * 100)) : 0;
+              return (
+                <div className="continue-card" key={e.item.id}>
+                  <Link className="continue-poster" to={`/play/${e.item.id}`}>
+                    <img
+                      src={`/api/v1/items/${e.item.id}/images/poster?w=200`}
+                      alt=""
+                      loading="lazy"
+                      onError={(ev) => {
+                        (ev.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+                      }}
+                    />
+                    <span className="continue-bar">
+                      <span style={{ width: `${pct}%` }} />
+                    </span>
+                  </Link>
+                  <div className="continue-title" title={e.item.title}>
+                    {e.item.title || '（无标题）'}
+                  </div>
+                  <div className="muted small">
+                    看到 {formatClock(pos)} · 还剩 {formatClock(e.remainingTicks / 10_000_000)}
+                  </div>
+                  <div className="row" style={{ marginTop: 6 }}>
+                    <Link className="btn btn-sm btn-primary" to={`/play/${e.item.id}`}>
+                      继续播放
+                    </Link>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => void markPlayed(e.item.id)}
+                    >
+                      标记已看
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       <div className="card">
         <h2>服务状态</h2>
         <p className="hint">
@@ -87,12 +171,25 @@ export function Home() {
       </div>
 
       <div className="card">
-        <h2>下一步：M2 元数据与刮削</h2>
+        <h2>M3 已完成：播放</h2>
+        <p className="hint">直出与转封装（DirectPlay / DirectStream）。</p>
+        <ul className="muted" style={{ margin: 0, paddingLeft: 20 }}>
+          <li>播放决策引擎：能直出就直出，否则只换容器；每一步都给出理由</li>
+          <li>直出：HTTP Range / ETag / 断点续传，拖动瞬时响应</li>
+          <li>转封装：mkv → HLS fMP4（视频不重新编码），窗口式预生成</li>
+          <li>播放进度、续播、已看标记（按账号独立）</li>
+          <li>文本字幕 → WebVTT，全屏播放器与快捷键</li>
+        </ul>
+      </div>
+
+      <div className="card">
+        <h2>下一步：M4 转码</h2>
         <p className="hint">路线图见仓库 docs/ROADMAP.md。</p>
         <ul className="muted" style={{ margin: 0, paddingLeft: 20 }}>
-          <li>TMDB provider、匹配打分、限流与缓存</li>
-          <li>持久化任务队列 + worker（ffprobe 探测也接在这里）</li>
-          <li>人工匹配界面与字段锁定</li>
+          <li>ffmpeg 能力探测（真跑一小段验证）+ 能力矩阵</li>
+          <li>CPU / 硬件转码（VAAPI 优先）与质量档位</li>
+          <li>图形字幕烧录、HDR → SDR tone mapping</li>
+          <li>节流与回收：预生成 N 片后 SIGSTOP，分片被消费时 SIGCONT</li>
         </ul>
       </div>
     </>

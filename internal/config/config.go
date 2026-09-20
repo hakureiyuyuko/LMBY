@@ -40,6 +40,37 @@ type Config struct {
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
 	Images   ImagesConfig   `toml:"images"`
+	Playback PlaybackConfig `toml:"playback"`
+}
+
+// PlaybackConfig 是播放（转封装 / 会话）相关配置。
+//
+// 这些参数都直接影响磁盘与 CPU，所以做成可配置：家里的小主机与
+// 独立服务器能承受的并发完全不是一回事。
+type PlaybackConfig struct {
+	// StreamsDir 是 HLS 分片目录，默认 <data_dir>/streams。
+	StreamsDir string `toml:"streams_dir"`
+	// HLSSegmentSeconds 是分片时长（秒），默认 4。
+	// 太短会让播放列表请求变密，太长会让起播变慢。
+	HLSSegmentSeconds int `toml:"hls_segment_seconds"`
+	// HLSWindowSeconds 是一次预生成多远的媒体内容（秒），默认 300。
+	//
+	// 为什么要有窗口：`-c copy` 的转封装比实时快几十倍，不限量的话
+	// 播一部 2 小时的电影会在几秒内把整部片拷进数据目录（几十 GB）。
+	// 窗口用完就按当前播放位置再起一段（见 internal/stream）。
+	HLSWindowSeconds int `toml:"hls_window_seconds"`
+	// MaxSessions 是同时存在的转封装会话上限，默认 4。
+	MaxSessions int `toml:"max_sessions"`
+	// IdleSeconds 是无客户端访问后回收会话的秒数，默认 45。
+	IdleSeconds int `toml:"idle_seconds"`
+}
+
+// StreamsDirPath 返回解析过默认值的分片目录。
+func (c *Config) StreamsDirPath() string {
+	if strings.TrimSpace(c.Playback.StreamsDir) != "" {
+		return c.Playback.StreamsDir
+	}
+	return filepath.Join(c.DataDir, "streams")
 }
 
 // ImagesConfig 是图片管线配置。
@@ -123,6 +154,12 @@ func Default() *Config {
 		Images: ImagesConfig{
 			MaxCacheMB: 512,
 		},
+		Playback: PlaybackConfig{
+			HLSSegmentSeconds: 4,
+			HLSWindowSeconds:  300,
+			MaxSessions:       4,
+			IdleSeconds:       45,
+		},
 	}
 }
 
@@ -182,6 +219,11 @@ func applyEnv(cfg *Config) error {
 	setStr(&cfg.TMDB.Language, "LMBY_TMDB_LANGUAGE")
 	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
 	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
+	setStr(&cfg.Playback.StreamsDir, "LMBY_PLAYBACK_STREAMS_DIR")
+	setInt(&cfg.Playback.HLSSegmentSeconds, "LMBY_PLAYBACK_HLS_SEGMENT_SECONDS")
+	setInt(&cfg.Playback.HLSWindowSeconds, "LMBY_PLAYBACK_HLS_WINDOW_SECONDS")
+	setInt(&cfg.Playback.MaxSessions, "LMBY_PLAYBACK_MAX_SESSIONS")
+	setInt(&cfg.Playback.IdleSeconds, "LMBY_PLAYBACK_IDLE_SECONDS")
 
 	if v, ok := os.LookupEnv("LMBY_SECURE_COOKIES"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -246,6 +288,20 @@ func (c *Config) Validate() error {
 	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return errors.New("data_dir 不能为空")
+	}
+	// 播放参数只做「修正」不做「报错」：这些值调歪了顶多画质/磁盘不理想，
+	// 没有理由让整个服务起不来。
+	if c.Playback.HLSSegmentSeconds < 1 || c.Playback.HLSSegmentSeconds > 30 {
+		c.Playback.HLSSegmentSeconds = 4
+	}
+	if c.Playback.HLSWindowSeconds < 30 || c.Playback.HLSWindowSeconds > 7200 {
+		c.Playback.HLSWindowSeconds = 300
+	}
+	if c.Playback.MaxSessions < 1 || c.Playback.MaxSessions > 64 {
+		c.Playback.MaxSessions = 4
+	}
+	if c.Playback.IdleSeconds < 10 || c.Playback.IdleSeconds > 3600 {
+		c.Playback.IdleSeconds = 45
 	}
 	return nil
 }

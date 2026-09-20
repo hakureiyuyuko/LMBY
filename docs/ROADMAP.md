@@ -1,6 +1,6 @@
 # LMBY 开发 Todolist
 
-> 状态：**M0 / M1 / M2 均已完成并实测验收**，下一步 M3（播放核心 —— v0.1 计划发在那里）。
+> 状态：**M0 / M1 / M2 / M3 均已完成并实测验收**，下一步 M4（转码与硬件加速）。
 > 已完成项标 `[x]`，未完成/改期的项保留在下方并注明原因。
 > 原则：先打通端到端最小闭环（扫描→入库→播放），再堆功能；**转码是唯一高风险块，尽早真机验证**。
 > 参考代码：`C:\Users\admin\Desktop\dev\_ref\jellyfin`（只读阅读，不复制文件）、`C:\Users\admin\Desktop\dev\TV`（自研，可复用）。
@@ -462,18 +462,28 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 
 ---
 
-## M3 — 播放核心：DirectPlay / DirectStream（1.5 周）
+## M3 — 播放核心：DirectPlay / DirectStream ✅（已完成并实测验收）
 
 **参考**：`MediaBrowser.Model/Dlna/StreamBuilder.cs` ⭐、`DirectPlayProfile/CodecProfile/TranscodingProfile/SubtitleProfile/ConditionProcessor.cs`、`Jellyfin.Api/Controllers/{VideosController,MediaInfoController,HlsSegmentController}.cs`
 
-- [ ] 静态分发：HTTP `Range`（单区间，可选多区间）、`ETag`/`Last-Modified`、容器→Content-Type、断点续传
-- [ ] 客户端能力上报接口 + 服务端 **DeviceProfile** 表（可配置、可自定义客户端 profile JSON）
-- [ ] **播放决策引擎 v1**：输出 mode + 每流（视频/音频/字幕）独立动作 + **理由字符串**（UI 显示"为什么转码"）
-- [ ] DirectStream：`ffmpeg -c copy` remux 到 fMP4/TS + HLS 分发（复用 tvhub 已验证的参数）
-- [ ] 播放会话：创建/心跳/停止、会话 token、并发与权限校验、SSE 状态推送
-- [ ] 播放状态同步：进度上报、续播、已看标记、每用户独立（复用 tvhub 的 `internal/stream` 经验）
-- [ ] GUI 播放器 v1：hls.js + 自定义控制条（播放/暂停/seek/音量/全屏/进度记忆/错误回退）
-- [ ] **DoD**：Chrome + Safari + iOS 三端可起播 h264/aac 的 mp4 与 mkv(remux)；快速拖动进度不崩；关闭页面后 ffmpeg 进程被回收
+- [x] 静态分发：HTTP `Range`（单区间/多区间/后缀/越界 416 全交给 `http.ServeContent`）、`ETag`/`Last-Modified`/`If-None-Match`、容器→Content-Type、断点续传
+- [x] 客户端能力上报：前端用 `MediaSource.isTypeSupported` 实测后随开播请求上报（**保守默认档兜底**）
+      —— 比静态 DeviceProfile 表更准；没做「服务端可配置 profile JSON」，因为浏览器能力只能实测，配置表反而会撒谎
+- [x] **播放决策引擎 v1**（`internal/playback`，纯函数 + 27 项单测）：输出 mode + 每流（视频/音频/字幕）独立动作 + **理由字符串**（界面上的「为什么这么播」）
+- [x] DirectStream：`ffmpeg -c copy` remux 到 HLS fMP4（需要时音频转 AAC 并把多声道降到立体声）+ 分片分发
+      —— **窗口式预生成**（默认 300s）：`-c copy` 比实时快几十倍，不限量会在几秒内把整部电影拷进磁盘
+- [x] 播放会话：创建/查询/seek/心跳/停止、会话与用户绑定（别人的会话一律 403）、每用户并发上限、并发满时淘汰最久未看的会话
+- [x] 播放状态同步：进度心跳（10 秒）、续播、已看标记（> 92% 自动）、**每用户独立**、首页「继续观看」
+- [x] GUI 播放器：hls.js（Safari/iOS 走原生 HLS）+ 自研控制条（播放/拖动/音量/全屏/音轨与字幕切换/重新载入/快捷键）+ 错误回退
+- [x] 字幕：内嵌文本字幕按需抽成 WebVTT（进程内单飞 + 落盘缓存，首次抽取要读源文件所以走「202 正在准备 + 前端轮询」）；图形字幕明确给出「需要烧录，M4」
+- [x] **DoD（实测）**：Chrome（CDP 真播）起播 mp4 直出与 mkv(remux) 均通过；拖到已生成窗口之外自动续段；关闭/离开页面 1 秒内回收 ffmpeg 与分片
+
+本次的两处「与路线图不同」的决定：
+
+1. **没做 SSE 状态推送** —— 播放状态由播放器自己掌握（它比服务端更早知道 PTS），
+   出错时调一次状态接口就能拿到 ffmpeg 的 stderr 尾巴。为它维护一条广播链路收益很低。
+2. **Safari / iOS 未实测** —— 手上没有 Apple 设备；代码路径（原生 HLS、hevc 的 `hvc1` 标签、
+   字幕 WebVTT 旁路）都已就位，但**未经真机验证**，发版说明里会写明。
 
 ---
 

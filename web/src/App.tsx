@@ -9,6 +9,7 @@ import { ItemEdit } from './pages/Item';
 import { Libraries } from './pages/Libraries';
 import { Login } from './pages/Login';
 import { Match } from './pages/Match';
+import { Player } from './pages/Player';
 import { Search } from './pages/Search';
 import { SeriesView } from './pages/Series';
 import { Settings } from './pages/Settings';
@@ -86,6 +87,8 @@ function AppRoutes() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/search" element={<Search />} />
         <Route path="/items/:id" element={<ItemEdit />} />
+        {/* 播放器独立成页（全屏播放）*/}
+        <Route path="/play/:id" element={<Player />} />
         <Route path="/match" element={<Match />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<NotFound />} />

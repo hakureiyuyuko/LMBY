@@ -156,7 +156,27 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-settings.sh  # 38 项
 bash scripts/dev/seed-review-item.sh                                  # 临时造一条 review
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m2-ui-test.mjs
 bash scripts/dev/seed-review-item.sh --restore                        # 用完还原
+
+# M3 播放：真库 HTTP 端到端（106 项）——Range/ETag、mkv→HLS 分片、seek、stop 回收、
+# 多版本选片、10bit HEVC 判「M4」、字幕抽 WebVTT、进度与续播、继续观看。
+# 样本（哪个文件走直出/转封装/转码）由脚本按编码条件从库里现挑，不写死文件名；
+# 它用 psql 读库挑样本，所以需要 /etc/lmby/pg-password（默认路径，可用 PGPASSWORD_FILE 覆盖）。
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh
+TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 额外验「无人观看 45s 自动回收」
+
+# M3 播放器界面验收（30 项，真 Chrome 真的把片子放起来，截图到 shots-play/）
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
 ```
+
+■ 播放验收的两个坑（都是实测踩出来的）：
+
+1. **分片必须与播放列表同级**（`/api/v1/play/{sid}/seg_00000.m4s`，不是 `/seg/xxx`）。
+   m3u8 里写的是相对文件名，hls.js / Safari / ffprobe 都会拿播放列表 URL 作基准拼——
+   放在子路径下会全部 404。`verify-play.sh` 用 ffprobe 直接读服务发出的 m3u8 交叉验证，
+   就是这一条把问题当场拓出来的。
+2. **不要把 m3u8 直接交给 `<video src>`**：Chrome 对 `application/vnd.apple.mpegurl`
+   的 `canPlayType` 会回 `maybe`（实测 Chrome 153），真塞进去的话 `readyState=4` 但
+   `duration=0`、画面永远不动且不报错。现在只在 UA 确实是 Safari/iOS 时才走原生 HLS。
 
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
 脚本跑到一半报「引号未闭合」，很难看出在哪一行。

@@ -38,6 +38,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/secrets"
 	"github.com/hakureiyuyuko/lmby/internal/settings"
 	"github.com/hakureiyuyuko/lmby/internal/store"
+	"github.com/hakureiyuyuko/lmby/internal/stream"
 	"github.com/hakureiyuyuko/lmby/internal/version"
 	"github.com/hakureiyuyuko/lmby/internal/worker"
 )
@@ -469,9 +470,29 @@ func cmdServe(args []string) error {
 	}
 	log.Info("图片管线就绪", "cacheDir", cfg.ImagesCacheDir(), "maxCacheMB", cfg.Images.MaxCacheMB)
 
+	// 转封装（播放）会话：每次播放一个子目录，空闲自动回收。
+	//
+	// 放在 api.New 之前创建并 Start：进程退出时 StopAll 会杀掉所有 ffmpeg ——
+	// 否则一次 Ctrl-C 就会留下一堆还在写分片的孤儿进程。
+	streams := stream.NewManager(stream.Options{
+		FFmpeg:         cfg.FFmpeg.Path,
+		Root:           cfg.StreamsDirPath(),
+		SegmentSeconds: cfg.Playback.HLSSegmentSeconds,
+		WindowSeconds:  cfg.Playback.HLSWindowSeconds,
+		MaxSessions:    cfg.Playback.MaxSessions,
+		IdleSeconds:    cfg.Playback.IdleSeconds,
+	}, log)
+	streams.Start()
+	defer streams.StopAll()
+	log.Info("播放（转封装）就绪",
+		"streamsDir", cfg.StreamsDirPath(),
+		"segmentSeconds", cfg.Playback.HLSSegmentSeconds,
+		"windowSeconds", cfg.Playback.HLSWindowSeconds,
+		"maxSessions", cfg.Playback.MaxSessions)
+
 	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
-	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient)
+	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {
@@ -765,6 +786,9 @@ func janitor(ctx context.Context, st *store.Store, srv *api.Server, log *slog.Lo
 			}
 			if n := srv.CleanupRateLimits(); n > 0 {
 				log.Debug("已清理登录限流记录", "count", n)
+			}
+			if n := srv.CleanupPlaySessions(); n > 0 {
+				log.Debug("已清理过期播放会话", "count", n)
 			}
 			cancel()
 		}

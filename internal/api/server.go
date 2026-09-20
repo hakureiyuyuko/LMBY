@@ -14,6 +14,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
 	"github.com/hakureiyuyuko/lmby/internal/settings"
 	"github.com/hakureiyuyuko/lmby/internal/store"
+	"github.com/hakureiyuyuko/lmby/internal/stream"
 )
 
 // Server 持有处理请求所需的全部依赖。
@@ -33,11 +34,22 @@ type Server struct {
 	started time.Time
 	limiter *loginLimiter
 	scans   *scan.Manager
+	// streams 管理转封装（HLS）会话；plays 管理播放会话。
+	streams *stream.Manager
+	plays   *playRegistry
+	// subs 管理「内嵌字幕抽成 WebVTT」的后台任务（同一文件+同一轨只抽一次）。
+	subs *subtitleJobs
 }
 
 // New 构造 Server。
 func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,
-	scraper *scrape.Handler, settingsSvc *settings.Service, meta provider.Client) *Server {
+	scraper *scrape.Handler, settingsSvc *settings.Service, meta provider.Client,
+	streams *stream.Manager) *Server {
+	if streams == nil {
+		// 没有 ffmpeg 时也要有个非 nil 的管理器（各处的调用会给出明确的失败原因），
+		// 而不是让每个 handler 都要判一次 nil。
+		streams = stream.NewManager(stream.Options{}, log)
+	}
 	return &Server{
 		cfg:      cfg,
 		store:    st,
@@ -50,8 +62,14 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		started:  time.Now(),
 		limiter:  newLoginLimiter(8, 15*time.Minute),
 		scans:    scan.NewManager(st, log),
+		streams:  streams,
+		plays:    newPlayRegistry(),
+		subs:     newSubtitleJobs(),
 	}
 }
+
+// Streams 暴露转封装管理器（供 main 在退出时停干净，不留孤儿 ffmpeg）。
+func (s *Server) Streams() *stream.Manager { return s.streams }
 
 // Scans 暴露扫描管理器（供 main 在启动时做残留清理等）。
 func (s *Server) Scans() *scan.Manager { return s.scans }
@@ -127,6 +145,30 @@ func (s *Server) Handler() http.Handler {
 
 	// ---- 实时事件（SSE）----
 	mux.Handle("GET /api/v1/events", s.requireAuth(s.handleEvents))
+
+	// ---- 播放（M3）----
+	mux.Handle("POST /api/v1/items/{id}/play", s.requireAuth(s.handleStartPlayback))
+	mux.Handle("GET /api/v1/items/{id}/playlist", s.requireAuth(s.handleItemPlaylist))
+	mux.Handle("GET /api/v1/items/{id}/progress", s.requireAuth(s.handleItemProgress))
+	mux.Handle("POST /api/v1/items/{id}/played", s.requireAuth(s.handleSetPlayed))
+	mux.Handle("POST /api/v1/items/played", s.requireAuth(s.handleSetPlayed))
+	mux.Handle("GET /api/v1/continue", s.requireAuth(s.handleContinueWatching))
+	mux.Handle("GET /api/v1/playback/sessions", s.requireAuth(s.handleListPlaySessions))
+
+	// 播放会话下的媒体分发：直出原文件 / HLS 播放列表与分片 / 字幕。
+	//
+	// 分片的路由必须是「与播放列表同级」（/play/{sid}/{name}）：m3u8 里写的是
+	// 相对文件名（init.mp4 / seg_00000.m4s），任何标准 HLS 客户端（hls.js、
+	// Safari、ffprobe）都会拿播放列表的 URL 作基准去拼 —— 放在 /seg/ 子路径下
+	// 就会全部 404（实测被 ffprobe 当场抓包）。
+	mux.Handle("GET /api/v1/play/{sid}/stream", s.requireAuth(s.handlePlayStream))
+	mux.Handle("GET /api/v1/play/{sid}/index.m3u8", s.requireAuth(s.handlePlayPlaylist))
+	mux.Handle("GET /api/v1/play/{sid}/{name}", s.requireAuth(s.handlePlaySegment))
+	mux.Handle("GET /api/v1/play/{sid}/subtitles/{name}", s.requireAuth(s.handlePlaySubtitle))
+	mux.Handle("GET /api/v1/play/{sid}", s.requireAuth(s.handlePlayState))
+	mux.Handle("POST /api/v1/play/{sid}/seek", s.requireAuth(s.handlePlaySeek))
+	mux.Handle("POST /api/v1/play/{sid}/progress", s.requireAuth(s.handlePlayProgress))
+	mux.Handle("POST /api/v1/play/{sid}/stop", s.requireAuth(s.handlePlayStop))
 
 	// ---- 前端静态资源（必须最后注册，作为兜底）----
 	mux.Handle("/", s.staticHandler())

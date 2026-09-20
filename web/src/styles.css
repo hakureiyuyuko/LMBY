@@ -871,6 +871,277 @@ th {
   background: var(--bg-elev);
 }
 
+/* ---------------------------------------------------------------- 播放器（M3） */
+
+/* 播放器占满内容区：它自己就是一块黑场，不嵌在卡片里 */
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-stage {
+  position: relative;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.player-stage:fullscreen {
+  aspect-ratio: auto;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.player-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+.player-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.player-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50ch;
+}
+
+.player-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ccc;
+  font-size: 14px;
+}
+
+/* 放不了 / 出错时的说明面板：直接压在视频区上 */
+.player-blocked {
+  position: absolute;
+  inset: 0;
+  padding: 24px;
+  overflow: auto;
+  color: #e6edf3;
+  background: rgba(10, 12, 16, 0.92);
+}
+
+.player-blocked h3 {
+  margin-top: 0;
+}
+
+.player-blocked .hint,
+.player-blocked .row {
+  color: #b9c2cc;
+}
+
+.player-reasons {
+  margin: 8px 0;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+
+.player-toast {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  max-width: 70%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(10, 12, 16, 0.85);
+  color: #e6edf3;
+  font-size: 13px;
+}
+
+.player-toast-error {
+  background: rgba(120, 22, 18, 0.92);
+}
+
+.player-info {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: min(460px, 70%);
+  max-height: 80%;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius);
+  background: rgba(10, 12, 16, 0.94);
+  color: #e6edf3;
+  font-size: 13px;
+}
+
+.player-info h4 {
+  margin: 0 0 8px;
+}
+
+.player-info .kv dt {
+  color: #9aa4b0;
+}
+
+.player-log {
+  margin: 10px 0 0;
+  padding: 8px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.5);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+.player-btn {
+  min-width: 34px;
+  padding: 4px 8px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.player-btn:hover {
+  background: var(--bg-elev-2);
+}
+
+.player-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.player-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.player-progress {
+  flex: 1;
+  min-width: 160px;
+}
+
+.player-vol {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-vol input {
+  width: 80px;
+}
+
+.player-select {
+  max-width: 240px;
+  padding: 4px 6px;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.player-hint {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- 继续观看 */
+
+.continue-list {
+  display: flex;
+  gap: var(--gap);
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.continue-card {
+  flex: 0 0 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.continue-poster {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elev-2);
+}
+
+.continue-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 进度条压在封面下沿：一眼能看出看到哪了 */
+.continue-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.continue-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.continue-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 剧集列表：整行可点，右侧还要放「播放 / 详情」两个按钮 */
+.ep-main {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ep-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .batch-bar {
   position: sticky;
   top: 0;

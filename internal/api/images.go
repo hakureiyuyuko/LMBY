@@ -76,10 +76,10 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	req := images.Request{
-		Width:   atoiClamp(q.Get("w"), 0, 4096),
-		Height:  atoiClamp(q.Get("h"), 0, 4096),
+		Width:   atoiClamp(q.Get("w"), 4096),
+		Height:  atoiClamp(q.Get("h"), 4096),
 		Format:  strings.TrimSpace(q.Get("format")),
-		Quality: atoiClamp(q.Get("q"), 0, 100),
+		Quality: atoiClamp(q.Get("q"), 100),
 	}
 
 	rendered, err := s.images.Open(r.Context(), item, kind, req)
@@ -117,13 +117,13 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", time.Time{}, f)
 }
 
-// atoiClamp 解析整数并夹在 [min,max]；空值或非法值返回 0（= 不限制）。
-func atoiClamp(s string, min, max int) int {
+// atoiClamp 解析非负整数并截到 max；空值、非法值或负数返回 0（= 不限制）。
+func atoiClamp(s string, max int) int {
 	if s == "" {
 		return 0
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < min {
+	if err != nil || n < 0 {
 		return 0
 	}
 	if n > max {
