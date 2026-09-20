@@ -38,6 +38,9 @@ apt-get install -y ffmpeg vainfo intel-media-va-driver-non-free libvpl2 \
 ## 部署流程
 
 ```bash
+# 0. 先构建前端（web/dist 不进版本库，本地构建后才会有真实产物）
+cd web && npm install && npm run build && cd ..
+
 # 1. 打包含前端的源码包（Windows 侧）
 tar czf lmby-src.tgz --exclude=./.git --exclude=./web/node_modules -C <仓库路径> .
 
