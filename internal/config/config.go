@@ -37,6 +37,19 @@ type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
+	TMDB     TMDBConfig     `toml:"tmdb"`
+}
+
+// TMDBConfig 是 TMDB 刮削源配置。
+//
+// 两个凭据任选其一即可：ReadToken（v4，Bearer）优先；
+// 都没有时 provider 会被判为未配置，刮削功能自动跳1过。
+type TMDBConfig struct {
+	ReadToken string `toml:"read_token"`
+	APIKey    string `toml:"api_key"`
+	// Language 是优先语言，FallbackLanguage 在优先语言缺数据时补。
+	Language         string `toml:"language"`
+	FallbackLanguage string `toml:"fallback_language"`
 }
 
 // TasksConfig 是后台任务队列的配置。
@@ -80,6 +93,10 @@ func Default() *Config {
 			// 探测与刮削都是 IO 密集型；4 个 worker 既能压满带宽又不会把
 			// 小机器（或网盘）打爆。
 			Workers: 4,
+		},
+		TMDB: TMDBConfig{
+			Language:         "zh-CN",
+			FallbackLanguage: "en-US",
 		},
 	}
 }
@@ -135,6 +152,9 @@ func applyEnv(cfg *Config) error {
 	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
 	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
 	setInt(&cfg.Tasks.Workers, "LMBY_TASKS_WORKERS")
+	setStr(&cfg.TMDB.ReadToken, "LMBY_TMDB_READ_TOKEN")
+	setStr(&cfg.TMDB.APIKey, "LMBY_TMDB_API_KEY")
+	setStr(&cfg.TMDB.Language, "LMBY_TMDB_LANGUAGE")
 	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
 	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
 

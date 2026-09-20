@@ -11,13 +11,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +30,8 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
+	"github.com/hakureiyuyuko/lmby/internal/provider"
+	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 	"github.com/hakureiyuyuko/lmby/internal/version"
 	"github.com/hakureiyuyuko/lmby/internal/worker"
@@ -52,6 +57,8 @@ func run(args []string) error {
 		return cmdMigrate(args)
 	case "user":
 		return cmdUser(args)
+	case "provider":
+		return cmdProvider(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -206,6 +213,10 @@ func splitFlagsAndPositionals(args []string) (flags, positional []string) {
 		"--config": true, "-config": true,
 		"--password": true, "-password": true,
 		"--display-name": true, "-display-name": true,
+		// provider 子命令的开关：不登记的话 `--kind tv` 里的 `tv`
+		// 会被当成位置参数，把「tv」拼进搜索关键词里（已踩过）。
+		"--kind": true, "-kind": true,
+		"--year": true, "-year": true,
 	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -248,6 +259,18 @@ func readPassword(flagValue string) (string, error) {
 }
 
 func newLogger(level string) *slog.Logger {
+	return newLoggerTo(os.Stdout, level)
+}
+
+// newCLILogger 把日志写到 stderr。
+//
+// CLI 工具的 stdout 要留给数据（方便 jq/脚本处理），否则日志会和 JSON 结果
+// 混在一起 —— 这个坑已经踩过一次。
+func newCLILogger(level string) *slog.Logger {
+	return newLoggerTo(os.Stderr, level)
+}
+
+func newLoggerTo(w io.Writer, level string) *slog.Logger {
 	var lv slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -259,7 +282,7 @@ func newLogger(level string) *slog.Logger {
 	default:
 		lv = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv}))
 }
 
 func cmdMigrate(args []string) error {
@@ -420,6 +443,184 @@ func cmdServe(args []string) error {
 		}
 		log.Info("已退出")
 		return nil
+	}
+}
+
+// buildTMDBProvider 根据配置构造 TMDB provider（带 PostgreSQL 缓存）。
+// 未配置凭据时返回 (nil, nil, nil)，调用方据此禁用刮削功能。
+func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*provider.Cached, *tmdb.Client, error) {
+	if cfg.TMDB.ReadToken == "" && cfg.TMDB.APIKey == "" {
+		return nil, nil, nil
+	}
+	client := tmdb.New(tmdb.Config{
+		ReadToken: cfg.TMDB.ReadToken,
+		APIKey:    cfg.TMDB.APIKey,
+		Language:  cfg.TMDB.Language,
+	})
+	if !client.Configured() {
+		return nil, nil, nil
+	}
+	cached := provider.NewCached(client, st, provider.DefaultTTLs())
+	log.Info("已启用 TMDB 刮削源", "language", cfg.TMDB.Language, "auth", authMode(cfg.TMDB))
+	return cached, client, nil
+}
+
+func authMode(c config.TMDBConfig) string {
+	if c.ReadToken != "" {
+		return "v4 read access token"
+	}
+	return "v3 api key"
+}
+
+// cmdProvider 是对着真实 provider 排查问题用的命令行工具。
+//
+// 用法：
+//
+//	lmby provider status
+//	lmby provider search --kind tv --year 2009 钢之炼金术师
+//	lmby provider movie 550
+//	lmby provider tv 31911
+//	lmby provider season 31911 1
+//	lmby provider image-url /abc.jpg w500
+func cmdProvider(args []string) error {
+	fs := flag.NewFlagSet("provider", flag.ContinueOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	kind := fs.String("kind", "tv", "search 的条目类型：movie | tv")
+	year := fs.Int("year", 0, "search 的年份过滤")
+	if len(args) == 0 {
+		fmt.Print(`用法：
+  lmby provider status
+  lmby provider search [--kind movie|tv] [--year 2009] <标题>
+  lmby provider movie <id>
+  lmby provider tv <id>
+  lmby provider season <tvId> <season>
+  lmby provider image-url <path> [size]
+`)
+		return nil
+	}
+
+	flags, positional := splitFlagsAndPositionals(args)
+	if err := fs.Parse(flags); err != nil {
+		return err
+	}
+	if len(positional) == 0 {
+		return errors.New("缺少子命令")
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	log := newCLILogger(cfg.LogLevel)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Open(ctx, cfg.Database.DSN, cfg.Database.MaxConns)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	cached, raw, err := buildTMDBProvider(cfg, st, log)
+	if err != nil {
+		return err
+	}
+	if cached == nil {
+		return errors.New("未配置 TMDB 凭据（config.toml 的 [tmdb] 段，或 LMBY_TMDB_READ_TOKEN）")
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+
+	sub, rest := positional[0], positional[1:]
+	switch sub {
+	case "status":
+		stats, err := st.ProviderCacheStatsOf(ctx)
+		if err != nil {
+			return err
+		}
+		hits, misses := cached.Stats()
+		return enc.Encode(map[string]any{
+			"provider": cached.Name(),
+			"auth":     authMode(cfg.TMDB),
+			"language": cfg.TMDB.Language,
+			"cache":    stats,
+			"session":  map[string]any{"hits": hits, "misses": misses},
+		})
+
+	case "search":
+		if len(rest) == 0 {
+			return errors.New("缺少搜索关键词")
+		}
+		query := strings.Join(rest, " ")
+		opts := provider.SearchOptions{Year: *year, Lang: cfg.TMDB.Language}
+		var results []provider.SearchResult
+		if *kind == provider.KindMovie {
+			results, err = cached.SearchMovie(ctx, query, opts)
+		} else {
+			results, err = cached.SearchSeries(ctx, query, opts)
+		}
+		if err != nil {
+			return err
+		}
+		if len(results) > 10 {
+			results = results[:10]
+		}
+		return enc.Encode(results)
+
+	case "movie", "tv":
+		if len(rest) == 0 {
+			return fmt.Errorf("%s 需要 id", sub)
+		}
+		id, err := strconv.Atoi(rest[0])
+		if err != nil {
+			return fmt.Errorf("id 必须是数字: %w", err)
+		}
+		if sub == "movie" {
+			m, err := cached.Movie(ctx, id, cfg.TMDB.Language)
+			if err != nil {
+				return err
+			}
+			return enc.Encode(m)
+		}
+		s, err := cached.Series(ctx, id, cfg.TMDB.Language)
+		if err != nil {
+			return err
+		}
+		return enc.Encode(s)
+
+	case "season":
+		if len(rest) < 2 {
+			return errors.New("season 需要 <tvId> <season>")
+		}
+		id, err := strconv.Atoi(rest[0])
+		if err != nil {
+			return err
+		}
+		season, err := strconv.Atoi(rest[1])
+		if err != nil {
+			return err
+		}
+		s, err := cached.Season(ctx, id, season, cfg.TMDB.Language)
+		if err != nil {
+			return err
+		}
+		return enc.Encode(s)
+
+	case "image-url":
+		if len(rest) < 1 {
+			return errors.New("image-url 需要 <path> [size]")
+		}
+		size := "w500"
+		if len(rest) > 1 {
+			size = rest[1]
+		}
+		fmt.Println(raw.ImageURL(rest[0], size))
+		return nil
+
+	default:
+		return fmt.Errorf("未知的 provider 子命令 %q", sub)
 	}
 }
 
