@@ -158,6 +158,22 @@ export const api = {
         (matchState.length > 0 ? `&matchState=${encodeURIComponent(matchState.join(','))}` : ''),
     ),
 
+  // ---------------------------------------------------------------- 搜索
+  search: (params: {
+    q: string;
+    libraryId?: number;
+    kind?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const sp = new URLSearchParams({ q: params.q });
+    if (params.libraryId) sp.set('libraryId', String(params.libraryId));
+    if (params.kind) sp.set('kind', params.kind);
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    return request<SearchPage>(`/api/v1/search?${sp.toString()}`);
+  },
+
   // ---------------------------------------------------------------- 条目详情与人工编辑
   item: (id: number) => request<ItemDetail>(`/api/v1/items/${id}`),
   updateItem: (id: number, body: { fields?: Record<string, unknown>; lockedFields?: string[] }) =>
@@ -293,8 +309,10 @@ export interface TaskInfo {
 
 export interface Item {
   id: number;
+  libraryId?: number;
   kind: string;
   title: string;
+  originalTitle?: string;
   year?: number;
   seasonNumber?: number;
   episodeNumber?: number;
@@ -306,6 +324,20 @@ export interface Item {
   matchScore?: number;
   metadataSource?: string;
   scrapeError?: string;
+}
+
+/** 搜索命中：条目本体 + 排序依据。 */
+export interface SearchHit extends Item {
+  rank: number;
+  similarity: number;
+}
+
+export interface SearchPage {
+  query: string;
+  items: SearchHit[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /** 后端返回的完整条目（GET /api/v1/items/{id} 里的 item）。 */

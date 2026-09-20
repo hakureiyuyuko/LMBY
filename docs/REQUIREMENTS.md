@@ -34,7 +34,7 @@
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 后端 | Go 1.27（标准库 `net/http` 路由、`pgx/v5` 手写 SQL、`slog`、`go:embed`） | 单二进制，见 ADR-0001 |
-| 存储 | PostgreSQL 16+ | 自己带容器，也支持外部 DSN |
+| 存储 | PostgreSQL 16+（**必须 UTF8 编码 + UTF-8 的 lc_ctype**，如 `C.UTF-8`） | 自己带容器，也支持外部 DSN；字符集不对会静默毁掉中文检索/排序，启动时会拦下 |
 | 前端 | React + TypeScript + Vite + TanStack Query（样式先用原生 CSS 变量） | 仅构建期用 Node |
 | 转码 | 外部 ffmpeg（用户装或镜像内置），HLS 输出 | 不做内置 ffmpeg |
 | 任务队列 | PG 表 + `FOR UPDATE SKIP LOCKED` + 进程内 worker | ❌ 不引 Redis/MQ |
@@ -120,6 +120,11 @@ TV/Show (2020)/Season 01/season.nfo + season01-poster.jpg + S01E02 - X.mkv + S01
 - 匹配打分：标题相似度（中文 bigram / 英文 token 归一）、年份、类型、集数-时长吻合、别名命中、可选文件 hash → 阈值以上自动，以下进人工匹配队列。
 - 工程要求：令牌桶限流、429/5xx 指数退避、`provider_cache` jsonb 缓存（重扫不打 API）、PG 持久化任务队列（可暂停/续跑/看失败原因）、多语言 fallback（本地 → `zh-CN` → 原名 → 别名）。
 - 搜索：`pg_trgm` GIN + `tsvector`，**不引 zhparser**（部署负担），中文用 bigram/trigram 模糊匹配。
+  实现（M2 已完成，见 `docs/ROADMAP.md` 的验收记录）：切词写成 PG 函数 + **生成列**
+  （`search_vec`，写入时自动维护），查询时三路并存 —— 二元组分词命中（`tsvector`）+
+  子串兜底（`ILIKE`，负责单字）+ 词相似容忍错字（`<%`，阈值调低到 0.4）。
+  ⚠️ 这三路都依赖数据库的字符语义：`server_encoding` 不是 UTF8、
+  或 `lc_ctype` 是 `C`（pg_trgm 切不出中文三元组）时，搜索会静默失效而非报错。
 
 ---
 

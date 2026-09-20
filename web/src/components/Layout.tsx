@@ -12,6 +12,9 @@ export function Layout() {
           LMBY <small>Light 的 Emby</small>
         </div>
         <nav className="nav">
+          <NavLink to="/search" className={({ isActive }) => (isActive ? 'active' : '')}>
+            搜索
+          </NavLink>
           <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
             媒体库
           </NavLink>

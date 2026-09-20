@@ -77,6 +77,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))
 	mux.Handle("GET /api/v1/libraries/{id}/items", s.requireAuth(s.handleListItems))
 
+	// ---- 搜索（标题 / 原始标题，中文二元组）----
+	mux.Handle("GET /api/v1/search", s.requireAuth(s.handleSearch))
+
 	// ---- 条目详情与人工编辑（字段锁定）----
 	mux.Handle("GET /api/v1/items/{id}", s.requireAuth(s.handleGetItem))
 	mux.Handle("PATCH /api/v1/items/{id}", s.requireAuth(s.handleUpdateItem))

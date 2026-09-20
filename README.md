@@ -73,9 +73,15 @@ docker compose up -d
 task build          # 等价于 cd web && npm run build && go build -o lmby ./cmd/lmby
 
 # 2. 准备数据库与配置
+#    注意：createdb 必须指定编码与 locale。宿主 locale 是 C 时（很多最小化系统默认就是），
+#    不加这些参数建出来的是 SQL_ASCII + C 的库 —— 那种库里中文会退化成字节，
+#    中文搜索、模糊匹配会静默失效（LMBY 启动时会直接拦下并告诉你修法）。
 sudo -u postgres psql -c "create role lmby login password '你的口令'"
-sudo -u postgres createdb -O lmby lmby
+sudo -u postgres createdb -E UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8 -T template0 -O lmby lmby
 sudo cp deploy/lmby.example.toml /etc/lmby/config.toml   # 改掉其中的 dsn
+
+# 已经建错字符集的库可以就地重建（会备份、逐表比对行数、跑中文自检）：
+#   sudo systemctl stop lmby && bash scripts/dev/fix-db-encoding.sh && sudo systemctl start lmby
 
 # 3. 启动（会自动应用迁移）
 ./lmby serve --config /etc/lmby/config.toml

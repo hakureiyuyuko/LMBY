@@ -104,7 +104,7 @@
 > 界面上的探测进度与队列水位；TMDB provider + `provider_cache` jsonb 缓存 + 限流退避；
 > **匹配打分器 `internal/match`（含 `lmby match` 命令行工具）**；
 > **刮削处理器 `internal/scrape`（含 `lmby scrape` 与刮削接口）**。
-> 待完成：搜索、GUI 其余部分（详情页/海报墙、批量匹配、设置页填 TMDB 凭据）。
+> 待完成：GUI 其余部分（详情页/海报墙、批量匹配、设置页填 TMDB 凭据）。
 
 **参考**：`MediaBrowser.Providers/{Movies,Manager}/*`、`MediaBrowser.LocalMetadata/Parsers/*`、`MediaBrowser.XbmcMetadata/*`（导入参考）
 
@@ -142,8 +142,12 @@
       （`web/src/pages/Item.tsx`、`GET|PATCH /api/v1/items/{id}`、`POST /api/v1/items/{id}/scrape`）：
       逐字段编辑/清空、逐字段加锁；锁定的**执行力在 SQL 里**
       （`applyItemMetaSQL`），nfo 重读与 TMDB 刮削都绕不过去，见下方验收记录
+- [x] **搜索**（`internal/store/search.go` + `GET /api/v1/search` + `web/src/pages/Search.tsx`）：
+      `pg_trgm` GIN + `tsvector`，中文用**二元组**（不引 zhparser）；
+      切词是 PG 函数 + **生成列**（`search_vec`，写入时自动维护，改完标题立刻能搜到）；
+      查询三路并存：分词命中（`tsvector`）+ 子串兜底（`ILIKE`，负责单字）+ 词相似容忍错字
+      （`<%`，阈值 0.4）；界面有查询词/库/类型过滤、分页、浏览器 URL 同步（可收藏可分享）
 - [ ] GUI 其余部分：详情页（海报墙 + 剧集视图）、批量匹配、设置页里填 TMDB 凭据
-- [ ] 搜索：`pg_trgm` GIN + `tsvector`（中文 bigram，不引 zhparser）
 - [x] **DoD**：无 nfo 的库能一键刮削完成；自测样本自动匹配准确率 ≥ 90%（`scripts/dev/match-sample.sh`
       实测 10 条样本 9 条 auto、0 条误配）；人工匹配可修正；重复刮削零 API 调用（缓存命中）；
       手改字段不被覆盖（`scripts/dev/verify-item-edit.sh` 42 项断言，含对照组）
@@ -206,6 +210,48 @@ GET  /api/v1/libraries/{id}/items?matchState=review,failed   列表支持按状�
 | 标记不需要匹配 | 状态 `manual` + 原因写进 `scrape_error`（自制片、样品片不会再挂在待处理里）|
 | 页面渲染 | 无头 Chrome 截图确认：导航/标签/卡片/候选面板（含海报）/打分明细都正常，亮色主题 |
 | 回归 | 媒体库页照常（条目列表 + 分页 + 探测进度 + 扫描记录）|
+
+### M2 搜索的验收（2026-09-20，真库实跑）
+
+切词与索引：`migrations/0007_search.sql`（PG 函数 + **STORED 生成列** `search_vec`），
+查询与排序：`internal/store/search.go`，接口 `GET /api/v1/search?q=&libraryId=&kind=&limit=&offset=`，
+界面：`web/src/pages/Search.tsx`（导航第二项「搜索」）。三路匹配并存：
+
+| 路 | 管什么 | 手段 |
+|---|---|---|
+| 分词命中 | 中文整句/英文整词，可排序 | 二元组切词 → `search_vec @@ plainto_tsquery('simple', lmby_bigram(q))` |
+| 子串兜底 | 单字查询（索引里只有两字的单元） | `title ILIKE '%q%'` |
+| 错字容忍 | 「钢之炼金术土」也能搜到 | `q <% title`（词相似，阈值调低到 0.4） |
+
+| 项 | 结果 |
+|---|---|
+| `scripts/dev/verify-search-sql.sh` | **15 项断言全绿**：中文整句→二元组、单字保留、中英混排分段、全角标点丢弃、日文假名、生成列/索引就位、存量行已回填、索引侧与查询侧切法一致 |
+| `scripts/dev/verify-search.sh` | **26 项断言全绿**（真库）：整标题首条命中、《钢之炼金术师》命中 5 条、「科学」中段命中、错字「某科土的超电磁炮」仍命中（相似度 0.417）、单字「科」命中（ILIKE）、库/类型过滤、分页、参数校验与鉴权、**改完标题立刻能搜到新标题、旧片段搜不到** |
+| `scripts/dev/search-ui-test.mjs` | **22 项断言全绿**（无头 Chrome，连跑两次稳定）：导航进搜索页→中文查询出卡片→错字查询仍命中那一条→点卡片进条目页→URL 参数直接可开→库/类型筛选→亮暗主题 |
+| 截图 | `docs/images/search.png` |
+
+**这次踩到的两个环境级真问题**（都不是代码 bug，但会让中文搜索静默失效，所以写进文档与自检）：
+
+1. **数据库编码是 SQL_ASCII**：宿主 locale 是 C 时 `createdb` 默认就建出这种库。
+   `length('钢') = 3`、`ascii('钢') = 233`、`to_tsvector` 根本认不出 CJK —— 中文搜索必然失效。
+2. **即使编码是 UTF8，`lc_ctype=C` 也会让 pg_trgm 切不出中文三元组**：
+   `show_trgm('某科学的超电磁炮')` 返回空集，错字容忍/模糊匹配整路失效。
+
+两者的共同点是**都不报错**，只会在搜索结果里悄悄少东西。现在的处理：
+
+- 应用启动时自检（`internal/store/store.go` 的 `checkEncoding`）：
+  编码不是 UTF8 或 `lc_ctype` 不是 UTF-8 就**拒绝启动**，并打印修法；
+- `scripts/dev/setup-pg.sh` 建库时显式 `-E UTF8 --lc-collate/--lc-ctype=C.UTF-8 -T template0`，
+  并做一次「汉字算不算字母」的探针；
+- `scripts/dev/fix-db-encoding.sh`：就地重建（dump → 旧库改名保留 → 用 UTF8 + C.UTF-8 重建 →
+  `lmby migrate` 建结构 → `--data-only` 灌数据 → 对齐 identity 序列 → 逐表比对行数 →
+  字符语义与中文三元组自检），任何一步不对都给回滚命令。
+- 顺带修掉一个**用户自己 dump/restore 也会踩**的坑：切词函数与生成列表达式里的函数名
+  必须写成 `public.lmby_bigram(...)`（pg_restore 会把 `search_path` 置空，
+  不限定名就会在 COPY 时报「function ... does not exist」）。
+
+**关于索引的限制**：单字查询走 ILIKE，用不上 trigram 索引；库里几万条以内没问题，
+真到几十万条时再把这一路收紧（或干脆在索引里也放单字）。
 
 ### M2 条目编辑 / 字段锁定的验收（2026-09-20，真库实跑）
 

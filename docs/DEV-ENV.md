@@ -138,7 +138,19 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 # M2 字段锁定的真库验收（42 项）——改字段 → 锁住 → 重扫，
 # 验「锁住的没被覆盖、没锁的被 nfo 改写」（对照组），跑完自动还原
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-item-edit.sh
+
+# M2 搜索：切词/索引侧（15 项，直接对 PG 跑）
+bash scripts/dev/verify-search-sql.sh
+
+# M2 搜索：真库 HTTP 端到端（26 项，含错字容忍与「改完标题立即可搜」）
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-search.sh
+
+# M2 搜索：界面（22 项，无头 Chrome，截图到 shots-search/）
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/search-ui-test.mjs
 ```
+
+■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
+脚本跑到一半报「引号未闭合」，很难看出在哪一行。
 
 这几个脚本都是**无依赖**的（`smoke-test.sh` / `verify-item-edit.sh` 只用 curl + jq；两个界面脚本只用
 Node 内置 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
@@ -153,6 +165,35 @@ DEEP=1 bash scripts/dev/match-sample.sh 3 # 额外取详情（含 alternative_ti
 
 二进制它自己找：优先 `/tmp/lmby.new`（刚编译的），否则用已部署的 `/usr/local/bin/lmby`。
 脚本直接读 `media_items` 随机抽样，人工只需扫一眼榜首对不对。
+
+### 数据库字符集（必须 UTF8 + UTF-8 的 lc_ctype）
+
+非 Docker 安装的一大坑：宿主 locale 是 C（最小化系统默认）时，`createdb` 建出来的库是
+**SQL_ASCII + C**。这种库“看起来”能用（Go 写进去的 UTF-8 字节原样存原样取），但中文全完：
+
+- `server_encoding=SQL_ASCII`：`length('钢')=3`、`to_tsvector` 认不出 CJK —— 中文搜索必然失效；
+- `lc_ctype=C`：就算编码是 UTF8，`pg_trgm` 也切不出中文三元组
+  （`show_trgm('某科学的超电磁炮')` 是空集）—— 模糊匹配/错字容忍整路静默失效。
+
+两者都不报错，只会在搜索结果里少东西，所以：
+
+```bash
+# 建库时就指定（setup-pg.sh 已内置这段与探针）
+createdb -E UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8 -T template0 -O lmby lmby
+
+# 已经建错了：就地重建（dump → 旧库改名保留 → 用 UTF8+C.UTF-8 重建 →
+#   lmby migrate 建结构 → --data-only 灌数据 → 对齐 identity 序列 →
+#   逐表比对行数 → 字符语义与中文三元组自检；任一步不对都给回滚命令）
+systemctl stop lmby
+bash scripts/dev/fix-db-encoding.sh
+systemctl start lmby
+
+# 只是查现状
+bash scripts/dev/fix-db-encoding.sh   # 字符集已正确时它会只跑自检
+```
+
+应用侧也有一道开机自检（`internal/store/store.go` 的 `checkEncoding`）：
+不满足就**拒绝启动**并打印修法 —— 宁可开不了机，也不要「搜索悄悄少结果」。
 
 ### M1 新增：数据库侧校验
 
