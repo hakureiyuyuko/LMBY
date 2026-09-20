@@ -460,10 +460,10 @@ func cmdServe(args []string) error {
 }
 
 // buildTMDBProvider 根据配置构造 TMDB provider（带 PostgreSQL 缓存）。
-// 未配置凭据时返回 (nil, nil, nil)，调用方据此禁用刮削功能。
-func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*provider.Cached, *tmdb.Client, error) {
+// 未配置凭据时返回 (nil, nil)，调用方据此禁用刮削功能。
+func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*provider.Cached, *tmdb.Client) {
 	if cfg.TMDB.ReadToken == "" && cfg.TMDB.APIKey == "" {
-		return nil, nil, nil
+		return nil, nil
 	}
 	client := tmdb.New(tmdb.Config{
 		ReadToken: cfg.TMDB.ReadToken,
@@ -471,11 +471,11 @@ func buildTMDBProvider(cfg *config.Config, st *store.Store, log *slog.Logger) (*
 		Language:  cfg.TMDB.Language,
 	})
 	if !client.Configured() {
-		return nil, nil, nil
+		return nil, nil
 	}
 	cached := provider.NewCached(client, st, provider.DefaultTTLs())
 	log.Info("已启用 TMDB 刮削源", "language", cfg.TMDB.Language, "auth", authMode(cfg.TMDB))
-	return cached, client, nil
+	return cached, client
 }
 
 func authMode(c config.TMDBConfig) string {
@@ -535,10 +535,7 @@ func cmdProvider(args []string) error {
 	}
 	defer st.Close()
 
-	cached, raw, err := buildTMDBProvider(cfg, st, log)
-	if err != nil {
-		return err
-	}
+	cached, raw := buildTMDBProvider(cfg, st, log)
 	if cached == nil {
 		return errors.New("未配置 TMDB 凭据（config.toml 的 [tmdb] 段，或 LMBY_TMDB_READ_TOKEN）")
 	}

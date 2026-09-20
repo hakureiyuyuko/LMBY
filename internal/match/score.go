@@ -327,15 +327,13 @@ func yearPart(l Local, c Candidate) (Part, bool) {
 	}
 	diff := abs(l.Year - c.Year)
 	var score float64
-	switch {
-	case diff == 0:
+	switch diff {
+	case 0:
 		score = 1
-	case diff == 1:
+	case 1:
 		score = 0.55
-	case diff == 2:
+	case 2:
 		score = 0.25
-	default:
-		score = 0
 	}
 	note := fmt.Sprintf("年份一致 %d", l.Year)
 	if diff > 0 {

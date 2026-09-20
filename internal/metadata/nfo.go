@@ -124,10 +124,7 @@ func ReadNFO(path string) (*Metadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	text, err := decodeXMLBytes(raw)
-	if err != nil {
-		return nil, fmt.Errorf("解码 %s 失败: %w", path, err)
-	}
+	text := decodeXMLBytes(raw)
 
 	var root xmlRoot
 	if err := xml.Unmarshal([]byte(text), &root); err != nil {
@@ -215,23 +212,24 @@ func TryReadNFO(path string) (*Metadata, error) {
 // ---------------------------------------------------------------- 编码处理
 
 // decodeXMLBytes 处理 BOM 与 UTF-16。
-func decodeXMLBytes(raw []byte) (string, error) {
+// 任何字节序列都能解出字符串（识别不了就按 UTF-8 原样处理），所以只有返回值。
+func decodeXMLBytes(raw []byte) string {
 	switch {
 	case len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF:
-		return string(raw[3:]), nil
+		return string(raw[3:])
 	case len(raw) >= 2 && raw[0] == 0xFF && raw[1] == 0xFE:
-		return decodeUTF16(raw[2:], false), nil
+		return decodeUTF16(raw[2:], false)
 	case len(raw) >= 2 && raw[0] == 0xFE && raw[1] == 0xFF:
-		return decodeUTF16(raw[2:], true), nil
+		return decodeUTF16(raw[2:], true)
 	}
 	// 没有 BOM 时也要识别 UTF-16（无 BOM 的 UTF-16 很常见）
 	if len(raw) >= 4 && raw[1] == 0x00 && raw[3] == 0x00 {
-		return decodeUTF16(raw, false), nil
+		return decodeUTF16(raw, false)
 	}
 	if len(raw) >= 4 && raw[0] == 0x00 && raw[2] == 0x00 {
-		return decodeUTF16(raw, true), nil
+		return decodeUTF16(raw, true)
 	}
-	return string(raw), nil
+	return string(raw)
 }
 
 func decodeUTF16(b []byte, bigEndian bool) string {

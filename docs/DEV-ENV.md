@@ -96,6 +96,19 @@ node ssh.mjs exec "tr -d '\r' < /root/cv.sh > /tmp/cv.sh && bash /tmp/cv.sh"
 `node ssh.mjs` 那条命令的细节见 `docs/DEV-ENV.md` 上方的四个坑；其中\#3（引号）与\#4（md5）
 是 2026-09-20 这轮新踩的。
 
+### lint（与 CI 同版本）
+
+```bash
+bash scripts/dev/lint.sh          # 需要在 /opt/gcl 有对应版本的 golangci-lint
+bash scripts/dev/lint.sh --new-from-rev=HEAD~1   # 只看本次改动的文件
+```
+
+> ⚠️ **`.golangci.yml` 必须是 v2 格式（开头要有 `version: "2"`）**。
+> CI 的 action 默认装 latest（现在是 v2），v1 格式的配置会让它直接
+> `can't load config: unsupported version of the configuration` 退出 ——
+> 也就是说 lint 任务从 M0 到 2026-09-20 之间**一次检查都没真跑过**（一直是红的但没人看）。
+> 改完 lint 相关的东西，先在容器里跑一遍再推。
+
 ## 验收脚本
 
 ```bash
@@ -125,7 +138,7 @@ bash scripts/dev/match-sample.sh          # 2 部剧集 + 10 部随机电影
 DEEP=1 bash scripts/dev/match-sample.sh 3 # 额外取详情（含 alternative_titles），能救回中文译名与主标题差得远的情况
 ```
 
-前置：`/tmp/lmby.new` 是最新编译产物（`container-verify.sh` 会生成）。
+二进制它自己找：优先 `/tmp/lmby.new`（刚编译的），否则用已部署的 `/usr/local/bin/lmby`。
 脚本直接读 `media_items` 随机抽样，人工只需扫一眼榜首对不对。
 
 ### M1 新增：数据库侧校验

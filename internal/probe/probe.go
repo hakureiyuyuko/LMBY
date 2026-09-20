@@ -248,7 +248,7 @@ func isFileProblem(stderr string) bool {
 func Normalize(data []byte) (*Info, error) {
 	var raw rawOutput
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("%w: 解析 ffprobe 输出失败: %v", ErrUnsupported, err)
+		return nil, fmt.Errorf("%w: 解析 ffprobe 输出失败: %w", ErrUnsupported, err)
 	}
 	if len(raw.Streams) == 0 {
 		return nil, fmt.Errorf("%w: 文件里没有可识别的流", ErrUnsupported)

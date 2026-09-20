@@ -30,7 +30,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	events, unsubscribe := s.scans.Subscribe()
 	defer unsubscribe()
 
-	fmt.Fprint(w, "event: hello\ndata: {\"ok\":true}\n\n")
+	if _, err := fmt.Fprint(w, "event: hello\ndata: {\"ok\":true}\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	// 心跳：有些代理会掐掉长时间静默的连接
@@ -42,7 +44,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
-			fmt.Fprint(w, ": ping\n\n")
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		case p, open := <-events:
 			if !open {
@@ -52,7 +56,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: scan\ndata: %s\n\n", payload)
+			if _, err := fmt.Fprintf(w, "event: scan\ndata: %s\n\n", payload); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}

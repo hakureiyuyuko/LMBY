@@ -125,7 +125,7 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 
 	lib, err := s.store.GetLibrary(ctx, id)
 	if err != nil {
-		s.notFoundOrError(w, "媒体库不存在", err)
+		s.notFoundOrError(w, err)
 		return
 	}
 	counts, err := s.store.CountItemsByKind(ctx, lib.ID)
@@ -192,7 +192,7 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := s.store.UpdateLibrary(ctx, id, name); err != nil {
-		s.notFoundOrError(w, "媒体库不存在", err)
+		s.notFoundOrError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -215,7 +215,7 @@ func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := s.store.DeleteLibrary(ctx, id); err != nil {
-		s.notFoundOrError(w, "媒体库不存在", err)
+		s.notFoundOrError(w, err)
 		return
 	}
 	s.log.Info("已删除媒体库", "id", id)
@@ -331,9 +331,10 @@ func (s *Server) handleListItems(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------- 工具
 
-func (s *Server) notFoundOrError(w http.ResponseWriter, notFoundMsg string, err error) {
+// notFoundOrError 把 store 的 ErrNotFound 翻成 404，其余当 500。
+func (s *Server) notFoundOrError(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, notFoundMsg)
+		writeError(w, http.StatusNotFound, "媒体库不存在")
 		return
 	}
 	s.serverError(w, "服务器内部错误", err)

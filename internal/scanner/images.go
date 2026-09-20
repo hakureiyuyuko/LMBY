@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -159,6 +158,3 @@ func (w *walker) singleItemInDir(dir string) (int64, bool) {
 	}
 	return 0, false
 }
-
-// osOpenDir 留作测试替身注入点（当前直接使用 os.Open）。
-var osOpenDir = os.Open

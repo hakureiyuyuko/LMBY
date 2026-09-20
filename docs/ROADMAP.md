@@ -294,3 +294,11 @@
 1. **每个里程碑必须有真实数据验收**，尤其转码：写完立刻真机 + 真浏览器验证，不攒到最后。
 2. **不做超出需求的抽象**。Emby 的"重"很大部分来自插件系统与通用框架——LMBY 只要够用的接口。
 3. **只读参考 Jellyfin，不复制其代码**（GPL-2.0 vs 本项目 AGPL-3.0 不兼容）。抄逻辑可以，抄文件不行。
+
+## 2026-09-20 的一条教训：**CI 红了两个月没人发现**
+
+`.github/workflows/ci.yml` 里 backend 与 frontend 一直是绿的，lint 一直是红的：
+配置 `.golangci.yml` 是 v1 格式，而 action 装的是 latest（v2），
+于是它每次都在「加载配置」这一步就退出 —— 一条检查都没真跑过。
+已迁移到 v2 格式，并顺带修完它原本会报的 14 个问题（errcheck 3、unparam 6、unused 3、
+staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器里跑 `scripts/dev/lint.sh` 再推。

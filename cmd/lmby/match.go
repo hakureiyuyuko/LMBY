@@ -73,10 +73,7 @@ func cmdMatch(args []string) error {
 	}
 	defer st.Close()
 
-	cached, _, err := buildTMDBProvider(cfg, st, log)
-	if err != nil {
-		return err
-	}
+	cached, _ := buildTMDBProvider(cfg, st, log)
 	if cached == nil {
 		return fmt.Errorf("未配置 TMDB 凭据（config.toml 的 [tmdb] 段，或 LMBY_TMDB_READ_TOKEN）")
 	}

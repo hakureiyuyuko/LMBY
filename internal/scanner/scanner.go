@@ -137,9 +137,7 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		}
 	}
 
-	if err := w.linkImages(ctx); err != nil {
-		return w.stats, err
-	}
+	w.linkImages(ctx)
 
 	// 扫描结束后统一入队探测任务。
 	//
@@ -509,9 +507,9 @@ func (w *walker) rootOf(path string) string {
 func (w *walker) ensureItem(ctx context.Context, path, dir string, res parser.Result) (int64, bool, error) {
 	switch res.Kind {
 	case parser.KindEpisode:
-		return w.ensureEpisodeItem(ctx, path, dir, res)
+		return w.ensureEpisodeItem(ctx, dir, res)
 	case parser.KindMovie:
-		return w.ensureMovieItem(ctx, path, dir, res)
+		return w.ensureMovieItem(ctx, dir, res)
 	case parser.KindExtra:
 		return w.ensureExtraItem(ctx, path, dir, res)
 	default:
@@ -528,7 +526,7 @@ func (w *walker) ensureItem(ctx context.Context, path, dir string, res parser.Re
 	}
 }
 
-func (w *walker) ensureEpisodeItem(ctx context.Context, path, dir string, res parser.Result) (int64, bool, error) {
+func (w *walker) ensureEpisodeItem(ctx context.Context, dir string, res parser.Result) (int64, bool, error) {
 	seriesTitle := res.Title
 	if seriesTitle == "" {
 		seriesTitle = filepath.Base(dir)
@@ -611,7 +609,7 @@ func (w *walker) ensureEpisodeItem(ctx context.Context, path, dir string, res pa
 	return id, seriesCreated, nil
 }
 
-func (w *walker) ensureMovieItem(ctx context.Context, path, dir string, res parser.Result) (int64, bool, error) {
+func (w *walker) ensureMovieItem(ctx context.Context, dir string, res parser.Result) (int64, bool, error) {
 	title := res.Title
 	if title == "" {
 		title = filepath.Base(dir)
@@ -792,7 +790,9 @@ func (w *walker) applyMetadata(ctx context.Context, path string, itemID int64) {
 //
 // 放在最后是因为要可靠知道「同目录下哪个视频对应哪个条目」，
 // 而 WalkDir 按文件名字典序访问，图片完全可能先于视频出现。
-func (w *walker) linkImages(ctx context.Context) error {
+//
+// 这里的失败都是逐条 issue（图片登记不了不该让整轮扫描失败），所以没有返回值。
+func (w *walker) linkImages(ctx context.Context) {
 	w.report("linking", "")
 
 	dirs := make([]string, 0, len(w.imagesByDir))
@@ -835,7 +835,6 @@ func (w *walker) linkImages(ctx context.Context) error {
 			w.issue("warning", "", "清理图片记录失败: "+err.Error())
 		}
 	}
-	return nil
 }
 
 // ---------------------------------------------------------------- 收尾

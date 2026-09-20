@@ -57,9 +57,6 @@ var (
 	reChroma    = regexp.MustCompile(`(?i)\bYUV\s?(\d{3})\s?P\s?(\d{1,2})\b`)
 	reFrameRate = regexp.MustCompile(`(?i)\b(\d{2,3}(?:\.\d+)?)\s?fps\b`)
 	reBitrate   = regexp.MustCompile(`(?i)\b(\d+(?:\.\d+)?)\s?(Mbps|Mb/s|Mbit|kbps|Kb/s)\b`)
-
-	// 方括号/圆括号里是纯技术信息时才整段删除
-	reBracketGroup = regexp.MustCompile(`[\[\]【】\(\)（）]`)
 )
 
 // Tech 是从文件名里识别出的技术标记。
@@ -243,14 +240,6 @@ func seasonFromPrefix(prefix string) int {
 		}
 	}
 	return NoSeason
-}
-
-func parseEpisodeMarker(name string) (season, episode, end int, ok bool) {
-	em, ok := findEpisodeMarker(name)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	return em.Season, em.Episode, em.End, true
 }
 
 // titleAfterMarker 取季集标记之后的文字作为标题。

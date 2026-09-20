@@ -53,7 +53,7 @@ func (s *Server) handleEnqueueProbes(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if _, err := s.store.GetLibrary(ctx, id); err != nil {
-		s.notFoundOrError(w, "媒体库不存在", err)
+		s.notFoundOrError(w, err)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (s *Server) handleResetFailedProbes(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 
 	if _, err := s.store.GetLibrary(ctx, id); err != nil {
-		s.notFoundOrError(w, "媒体库不存在", err)
+		s.notFoundOrError(w, err)
 		return
 	}
 
