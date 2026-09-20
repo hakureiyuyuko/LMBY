@@ -5,7 +5,17 @@
 // 这套流程是一样的。把这套流程固定下来，具体站点只负责翻译成自己的 API 形状。
 package provider
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrNotFound 表示提供方明确回复「没有这个东西」（如 TMDB 的 404）。
+//
+// 刮削处理器靠它区分两种失败：
+//   - 「TMDB 上就没有这一集」→ 业务结论，落库并写明原因，不重试；
+//   - 网络/5xx 等其他错误 → 返回 error 交给队列退避重试。
+var ErrNotFound = errors.New("provider: 未找到")
 
 // Kind 取值。
 const (

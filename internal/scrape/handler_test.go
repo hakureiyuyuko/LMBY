@@ -21,18 +21,31 @@ import (
 // 真实验证另有一套（见 docs/ROADMAP.md 的 M2 验收记录 + scripts/dev/match-sample.sh）。
 
 type fakeStore struct {
-	item     *store.Item
+	item *store.Item
+	// items 按 id 返回不同条目（季/集要读到它们所属的剧集）。
+	// 设了它就按 id 查，否则一律返回 item。
+	items    map[int64]*store.Item
 	itemErr  error
 	season   int
 	episodes int
 	metas    []store.ItemMeta
 	outcomes []store.MatchOutcome
 	applyErr error
+	// seriesChildren 是 EnqueueSeriesScrapes 的返回值；
+	// enqueuedSeries 记录哪些剧集被触发去入队季/集了。
+	seriesChildren int64
+	enqueuedSeries []int64
 }
 
-func (f *fakeStore) GetItem(context.Context, int64) (*store.Item, error) {
+func (f *fakeStore) GetItem(_ context.Context, id int64) (*store.Item, error) {
 	if f.itemErr != nil {
 		return nil, f.itemErr
+	}
+	if f.items != nil {
+		if it, ok := f.items[id]; ok {
+			return it, nil
+		}
+		return nil, store.ErrNotFound
 	}
 	if f.item == nil {
 		return nil, store.ErrNotFound
@@ -57,6 +70,11 @@ func (f *fakeStore) SaveMatchOutcome(_ context.Context, _ int64, o store.MatchOu
 	return nil
 }
 
+func (f *fakeStore) EnqueueSeriesScrapes(_ context.Context, seriesID int64) (int64, error) {
+	f.enqueuedSeries = append(f.enqueuedSeries, seriesID)
+	return f.seriesChildren, nil
+}
+
 type fakeProvider struct {
 	queries      []string
 	seasonCalls  []int
@@ -65,8 +83,10 @@ type fakeProvider struct {
 	movie        *provider.Movie
 	series       *provider.Series
 	season       *provider.Season
+	episode      *provider.Episode
 	searchErr    error
 	detailErr    error
+	episodeErr   error
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
@@ -115,8 +135,15 @@ func (f *fakeProvider) Season(_ context.Context, _ int, season int, _ string) (*
 	return f.season, nil
 }
 
-func (f *fakeProvider) Episode(context.Context, int, int, int, string) (*provider.Episode, error) {
-	return &provider.Episode{}, nil
+func (f *fakeProvider) Episode(_ context.Context, _ int, season, episode int, _ string) (*provider.Episode, error) {
+	f.seasonCalls = append(f.seasonCalls, season)
+	if f.episodeErr != nil {
+		return nil, f.episodeErr
+	}
+	if f.episode == nil {
+		return &provider.Episode{SeasonNumber: season, EpisodeNumber: episode}, nil
+	}
+	return f.episode, nil
 }
 
 func (f *fakeProvider) Images(context.Context, string, int, string) ([]provider.Image, error) {
@@ -200,8 +227,8 @@ func TestHandleAutoMatchMovie(t *testing.T) {
 	if o.State != store.MatchStateMatched {
 		t.Errorf("状态 = %s, 期望 %s", o.State, store.MatchStateMatched)
 	}
-	if o.Score < 0.9 {
-		t.Errorf("分数 = %.3f, 期望 ≥0.9", o.Score)
+	if o.Score == nil || *o.Score < 0.9 {
+		t.Errorf("分数 = %v, 期望 ≥0.9", o.Score)
 	}
 	if o.Source != "fake" {
 		t.Errorf("来源 = %s, 期望 fake", o.Source)
@@ -507,6 +534,197 @@ func TestHandleNFOPriority(t *testing.T) {
 	}
 	if len(p2.queries) != 1 {
 		t.Errorf("force 时应当重新搜索，实际请求 %v", p2.queries)
+	}
+}
+
+// —— 季与集 ——
+
+// TestHandleSeriesEnqueuesChildren 剧集匹配上之后，要把它的季与集排上队
+// （它们的元数据靠这个 provider id 才能定位）。
+func TestHandleSeriesEnqueuesChildren(t *testing.T) {
+	st := &fakeStore{item: item(itemKindSeries, "致不灭的你", 2021), seriesChildren: 25}
+	p := &fakeProvider{
+		tvResults: []provider.SearchResult{{
+			ID: 97525, Kind: provider.KindTV, Title: "致不灭的你", Year: 2021,
+		}},
+		series: &provider.Series{
+			ID: 97525, Name: "致不灭的你", Year: 2021,
+			Seasons: []provider.SeasonSummary{{SeasonNumber: 1, EpisodeCount: 20}},
+		},
+	}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(7, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(st.enqueuedSeries) != 1 || st.enqueuedSeries[0] != 7 {
+		t.Errorf("应当把剧集 7 的季/集入队，实际 %v", st.enqueuedSeries)
+	}
+}
+
+// TestHandleEpisodeScrapes 没 nfo 的一集：靠剧集的 tmdb id + 季集号直接取，不搜索。
+// 注意它会读剧集条目拿 provider id，但**不会写剧集的元数据**。
+func TestHandleEpisodeScrapes(t *testing.T) {
+	ep := &store.Item{
+		ID: 10, Kind: itemKindEpisode, SeriesID: ptrInt64(1),
+		SeasonNum: ptrInt32(1), EpisodeNum: ptrInt32(3),
+	}
+	series := &store.Item{
+		ID: 1, Kind: itemKindSeries, Title: "致不灭的你",
+		ProviderIDs: map[string]string{"tmdb": "97525"},
+	}
+	st := &fakeStore{items: map[int64]*store.Item{10: ep, 1: series}}
+	p := &fakeProvider{episode: &provider.Episode{
+		ID: 999, SeasonNumber: 1, EpisodeNumber: 3, Name: "第三个朋友",
+		Overview: "这一集的剧情", AirDate: "2021-04-26", RuntimeMin: 24, Rating: 8.1,
+	}}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(10, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(p.queries) != 0 {
+		t.Errorf("季/集不该走搜索，实际搜索了 %v", p.queries)
+	}
+	if len(st.metas) != 1 {
+		t.Fatalf("应当只写一集自己的元数据（剧集的不能动），实际 %d 次", len(st.metas))
+	}
+	m := st.metas[0]
+	if m.Title != "第三个朋友" || m.Overview != "这一集的剧情" {
+		t.Errorf("集标题/简介没写入: %+v", m)
+	}
+	if m.RuntimeTicks == nil || *m.RuntimeTicks != int64(24)*60*10_000_000 {
+		t.Errorf("集时长 = %v, 期望 24 分钟", m.RuntimeTicks)
+	}
+	if m.ProviderIDs["tmdb"] != "999" {
+		t.Errorf("集的 provider id = %v", m.ProviderIDs)
+	}
+	if m.PremiereDate == nil || m.PremiereDate.Format("2006-01-02") != "2021-04-26" {
+		t.Errorf("播出日期 = %v", m.PremiereDate)
+	}
+
+	o := st.outcomes[0]
+	if o.State != store.MatchStateMatched {
+		t.Errorf("状态 = %s, 期望 %s", o.State, store.MatchStateMatched)
+	}
+	if o.Score != nil {
+		t.Errorf("季/集是按位置对应的，不该有相似度分数，实际 %v", *o.Score)
+	}
+}
+
+// TestHandleEpisodeLocatesSeriesByTitle 剧集没有 provider id 时，按标题定位一次
+// （只用于取季/集元数据，剧集自己的元数据仍然不动）。
+func TestHandleEpisodeLocatesSeriesByTitle(t *testing.T) {
+	ep := &store.Item{
+		ID: 10, Kind: itemKindEpisode, SeriesID: ptrInt64(1),
+		SeasonNum: ptrInt32(1), EpisodeNum: ptrInt32(1),
+	}
+	series := &store.Item{ID: 1, Kind: itemKindSeries, Title: "致不灭的你", Year: ptrInt32(2021)}
+	st := &fakeStore{items: map[int64]*store.Item{10: ep, 1: series}}
+	p := &fakeProvider{
+		tvResults: []provider.SearchResult{{ID: 97525, Kind: provider.KindTV, Title: "致不灭的你", Year: 2021}},
+		episode:   &provider.Episode{ID: 1, Name: "第一集"},
+	}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(10, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(p.queries) != 1 {
+		t.Errorf("应当按标题搜一次定位剧集，实际 %v", p.queries)
+	}
+	if len(st.metas) != 1 {
+		t.Fatalf("应当只写集的元数据，实际 %d 次", len(st.metas))
+	}
+	if st.metas[0].Title != "第一集" {
+		t.Errorf("写进去的不是集的元数据: %+v", st.metas[0])
+	}
+	if len(st.outcomes) != 1 || st.outcomes[0].State != store.MatchStateMatched {
+		t.Errorf("集应当被标为已匹配: %+v", st.outcomes)
+	}
+}
+
+// TestHandleEpisodeWithoutSeries 没有所属剧集（或剧集定位不了）时静默跳过。
+func TestHandleEpisodeWithoutSeries(t *testing.T) {
+	ep := &store.Item{ID: 10, Kind: itemKindEpisode, SeasonNum: ptrInt32(1), EpisodeNum: ptrInt32(1)}
+	st := &fakeStore{items: map[int64]*store.Item{10: ep}}
+	p := &fakeProvider{}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(10, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(st.outcomes) != 0 || len(st.metas) != 0 || len(p.queries) != 0 {
+		t.Errorf("没剧集可依靠时什么都不该做: outcomes=%v metas=%v queries=%v",
+			st.outcomes, st.metas, p.queries)
+	}
+}
+
+// TestHandleEpisodeMissingOnProvider provider 上没有这一集：业务结论，不重试。
+func TestHandleEpisodeMissingOnProvider(t *testing.T) {
+	ep := &store.Item{
+		ID: 10, Kind: itemKindEpisode, SeriesID: ptrInt64(1),
+		SeasonNum: ptrInt32(1), EpisodeNum: ptrInt32(99),
+	}
+	series := &store.Item{ID: 1, Kind: itemKindSeries, Title: "某剧", ProviderIDs: map[string]string{"tmdb": "123"}}
+	st := &fakeStore{items: map[int64]*store.Item{10: ep, 1: series}}
+	p := &fakeProvider{episodeErr: provider.ErrNotFound}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(10, false)); err != nil {
+		t.Fatalf("provider 上没这一集不该让任务重试: %v", err)
+	}
+	o := st.outcomes[0]
+	if o.State != store.MatchStateFailed {
+		t.Errorf("状态 = %s, 期望 %s", o.State, store.MatchStateFailed)
+	}
+	if !strings.Contains(o.Error, "S01E99") {
+		t.Errorf("说明里应当写清是哪一集: %q", o.Error)
+	}
+}
+
+// TestHandleSeasonWritesOverview 季：写简介与外部 id，但不覆盖本地生成的季标题。
+func TestHandleSeasonWritesOverview(t *testing.T) {
+	seasonItem := &store.Item{
+		ID: 20, Kind: itemKindSeason, SeriesID: ptrInt64(1),
+		SeasonNum: ptrInt32(2), Title: "第 2 季",
+	}
+	series := &store.Item{ID: 1, Kind: itemKindSeries, Title: "某剧", ProviderIDs: map[string]string{"tmdb": "123"}}
+	st := &fakeStore{items: map[int64]*store.Item{20: seasonItem, 1: series}}
+	p := &fakeProvider{season: &provider.Season{
+		ID: 456, SeasonNumber: 2, Name: "Season 2", Overview: "第二季的简介", AirDate: "2022-01-08",
+	}}
+
+	if err := newTestHandler(st, p).Handle(context.Background(), task(20, false)); err != nil {
+		t.Fatalf("Handle 返回错误: %v", err)
+	}
+	if len(p.seasonCalls) != 1 || p.seasonCalls[0] != 2 {
+		t.Errorf("应当取第 2 季，实际 %v", p.seasonCalls)
+	}
+	m := st.metas[0]
+	if m.Title != "" {
+		t.Errorf("季标题是本地生成的，不该被 TMDB 的 %q 覆盖", m.Title)
+	}
+	if m.Overview != "第二季的简介" {
+		t.Errorf("季简介没写入: %+v", m)
+	}
+	if m.ProviderIDs["tmdb"] != "456" {
+		t.Errorf("季的 provider id = %v", m.ProviderIDs)
+	}
+	if st.outcomes[0].Score != nil {
+		t.Errorf("季也不该有相似度分数: %v", st.outcomes[0].Score)
+	}
+}
+
+// TestHandleDetailFailureRetries 取详情失败时不能把条目当成「已匹配」（否则会写空元数据）。
+func TestHandleDetailFailureRetries(t *testing.T) {
+	st := &fakeStore{item: item(itemKindMovie, "言叶之庭", 2013)}
+	p := &fakeProvider{
+		movieResults: []provider.SearchResult{{ID: 198375, Kind: provider.KindMovie, Title: "言叶之庭", Year: 2013}},
+		detailErr:    errors.New("tmdb: 500"),
+	}
+
+	err := newTestHandler(st, p).Handle(context.Background(), task(7, false))
+	if err == nil {
+		t.Fatal("取详情失败时应当返回 error 交给队列重试")
+	}
+	if len(st.metas) != 0 || len(st.outcomes) != 0 {
+		t.Error("取不到详情就不该写元数据或状态")
 	}
 }
 

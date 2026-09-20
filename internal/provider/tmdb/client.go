@@ -32,7 +32,10 @@ const DefaultBaseURL = "https://api.themoviedb.org/3"
 const DefaultImageBaseURL = "https://image.tmdb.org/t/p"
 
 // ErrNotFound 表示 TMDB 明确回复「没有这个东西」（404）。
-var ErrNotFound = errors.New("tmdb: 未找到")
+//
+// 哨兵定义在 provider 包里，因为「刮削器要区分不可重试的 404 与可重试的网络错误」
+// 是所有元数据源共有的需求，不该让上层为了判断它去 import 具体实现。
+var ErrNotFound = provider.ErrNotFound
 
 // Config 是客户端配置。
 type Config struct {

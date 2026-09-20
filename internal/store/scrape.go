@@ -40,7 +40,11 @@ type MatchOutcome struct {
 	// State 是新的 match_state（用上面的常量）。
 	State string
 	// Score 是匹配打分（0~1）。
-	Score float64
+	//
+	// nil 表示这个条目没有「相似度」这回事 —— 季与集是按 (剧集, 季号, 集号)
+	// 直接对应的，没有候选可比；记 NULL 比编一个 1.0 诚实
+	// （也就不会把「自动匹配的最低分」这类抽查指标带偏）。
+	Score *float64
 	// Source 是元数据来源（如 "tmdb"；空表示不改动原值）。
 	Source string
 	// Error 是给人看的失败原因 / 提示（会写进 scrape_error）。
@@ -108,34 +112,97 @@ func (s *Store) SeriesStructure(ctx context.Context, seriesID int64) (season, ep
 
 // EnqueueScrapesForLibrary 把某个库里需要刮削的条目一次性入队。
 //
-// 与探测一样用一条 insert ... select，避免几万条目逐条往返。
-// kind 为空表示电影与剧集都要；force 为真时连已刮过的也重刮。
+// 与探测一样用 insert ... select，避免几万条目逐条往返。分两批：
+//
+//  1. **电影与剧集** —— 它们靠「搜标题 + 打分」自己就能定位；
+//  2. **季与集** —— 它们靠所属剧集的 provider id 才能定位，
+//     所以只排「剧集已经匹配上」的；剧集刚匹配上时处理器会再补一批
+//     （见 EnqueueSeriesScrapes）。
+//
+// kind 为空表示四类都要；force 为真时连已刮过的也重刮。
 //
 // **nfo 与人工锁定的条目不在此列**（除非 force）：nfo 是人工整理的元数据，
 // 默认策略是「有 nfo 就用 nfo，没有才去刮」（见 docs/REQUIREMENTS.md 的决策表）。
+//
+// 优先级比探测高：探测是纯粹的背景工作（网盘上一条要十几秒），
+// 而刮削是用户点了一下就想看到结果的事 —— 同优先级时
+// 一次「刚扫完的 300 条待探测」会把刮削压到十几分钟之后（已踩到）。
 func (s *Store) EnqueueScrapesForLibrary(ctx context.Context, libraryID int64, kind string, force bool) (int64, error) {
-	kinds := []string{"movie", "series"}
-	if kind == "movie" || kind == "series" {
-		kinds = []string{kind}
+	topKinds := []string{"movie", "series"}
+	extraKinds := []string{"season", "episode"}
+	switch kind {
+	case "movie", "series":
+		topKinds = []string{kind}
+		extraKinds = nil
+	case "season", "episode":
+		topKinds = nil
+		extraKinds = []string{kind}
 	}
-	// 刮削的优先级比探测高：探测是纯粹的背景工作（网盘上一条要十几秒），
-	// 而刮削是用户点了一下就想看到结果的事。不分开的话，
-	// 一次「刚扫完的 300 条待探测」会让刮削排到十几分钟之后（已踩到）。
+
+	var total int64
+
+	if len(topKinds) > 0 {
+		tag, err := s.pool.Exec(ctx,
+			`insert into tasks (kind, payload, dedupe_key, priority)
+			 select $2, jsonb_build_object('itemId', i.id), 'item:' || i.id, 10
+			 from media_items i
+			 where i.library_id = $1 and i.deleted_at is null
+			   and i.kind = any($3)
+			   and i.match_state <> 'manual'
+			   -- nfo 优先：已有 nfo 元数据的条目默认不刮（force 才覆盖）。
+			   -- 这里同时看 state 与 source —— 光看 state 的话，万一有
+			   -- 「nfo 导入写得早、状态没跟上」的历史数据就漏了。
+			   and ($4 or (i.metadata_source <> 'nfo' and i.match_state in ('local', 'failed', 'review')))
+			 on conflict do nothing`,
+			libraryID, TaskKindScrape, topKinds, force)
+		if err != nil {
+			return total, fmt.Errorf("批量入队刮削任务失败: %w", err)
+		}
+		total += tag.RowsAffected()
+	}
+
+	if len(extraKinds) > 0 {
+		tag, err := s.pool.Exec(ctx,
+			`insert into tasks (kind, payload, dedupe_key, priority)
+			 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, 10
+			 from media_items e
+			 join media_items s on s.id = e.series_id
+			 where e.library_id = $1 and e.deleted_at is null
+			   and e.kind = any($3)
+			   -- 剧集得已经「被认出来」：matched（自动匹配）/ nfo / manual 都算；
+			   -- 具体能不能定位到 provider 上的那一部，交给处理器判断
+			   -- （nfo 里有 tmdbid 就直用，没有就按标题搜一次）。
+			   and s.match_state in ('matched', 'nfo', 'manual')
+			   and e.match_state <> 'manual'
+			   and ($4 or (e.metadata_source <> 'nfo' and e.match_state in ('local', 'failed', 'review')))
+			 on conflict do nothing`,
+			libraryID, TaskKindScrape, extraKinds, force)
+		if err != nil {
+			return total, fmt.Errorf("批量入队季/集刮削任务失败: %w", err)
+		}
+		total += tag.RowsAffected()
+	}
+
+	return total, nil
+}
+
+// EnqueueSeriesScrapes 把某个剧集下的季与集入队（剧集刚匹配上时调用）。
+//
+// 为什么由剧集处理器来触发：季/集的元数据要靠剧集的 provider id 才能定位，
+// 剧集还没匹配时它们排上队也只能白跑一趟。
+func (s *Store) EnqueueSeriesScrapes(ctx context.Context, seriesID int64) (int64, error) {
 	tag, err := s.pool.Exec(ctx,
 		`insert into tasks (kind, payload, dedupe_key, priority)
-		 select $2, jsonb_build_object('itemId', i.id), 'item:' || i.id, 10
-		 from media_items i
-		 where i.library_id = $1 and i.deleted_at is null
-		   and i.kind = any($3)
-		   and i.match_state <> 'manual'
-		   -- nfo 优先：已有 nfo 元数据的条目默认不刮（force 才覆盖）。
-		   -- 这里同时看 state 与 source —— 光看 state 的话，万一有
-		   -- 「nfo 导入写得早、状态没跟上」的历史数据就漏了。
-		   and ($4 or (i.metadata_source <> 'nfo' and i.match_state in ('local', 'failed', 'review')))
-		 on conflict do nothing`,
-		libraryID, TaskKindScrape, kinds, force)
+		 select $2, jsonb_build_object('itemId', e.id), 'item:' || e.id, 10
+		 from media_items e
+		 where e.series_id = $1 and e.deleted_at is null
+		   and e.kind in ('season', 'episode')
+		   and e.match_state <> 'manual'
+		   and e.metadata_source <> 'nfo'
+		   and e.match_state in ('local', 'failed', 'review')
+		 on conflict do nothing`, seriesID, TaskKindScrape)
 	if err != nil {
-		return 0, fmt.Errorf("批量入队刮削任务失败: %w", err)
+		return 0, fmt.Errorf("入队剧集下的季/集失败: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
@@ -162,7 +229,8 @@ func (s *Store) ScrapeProgressOf(ctx context.Context, libraryID int64) (*ScrapeP
 		   count(*) filter (where match_state = 'manual'),
 		   count(*) filter (where match_state = 'failed')
 		 from media_items
-		 where library_id = $1 and deleted_at is null and kind in ('movie', 'series')`,
+		 where library_id = $1 and deleted_at is null
+		   and kind in ('movie', 'series', 'season', 'episode')`,
 		libraryID).Scan(&p.NFO, &p.Local, &p.Matched, &p.Review, &p.Manual, &p.Failed)
 	if err != nil {
 		return nil, fmt.Errorf("统计刮削进度失败: %w", err)

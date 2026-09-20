@@ -219,9 +219,10 @@ lmby user ls --config /etc/lmby/config.toml
 
 ## 刮削 CLI 与接口
 
-**元数据优先级：nfo 优先。** 媒体同目录有 nfo 就用 nfo（人工整理的），
-只有没 nfo 的条目才去刮；自动流程永不覆盖 nfo，除非显式 `--force`。
-`lmby scrape status` 会把「nfo 元数据」单独列一项。
+**元数据优先级：本地优先，到每集粒度。** 媒体同目录有 nfo 就用 nfo
+（剧集看 `tvshow.nfo`、季看 `season.nfo`、集看 `S01E01.nfo`、电影看同名 nfo）；
+**本地没有、或本地文件格式不对**才去扫；自动流程永不覆盖已有本地元数据，
+除非显式 `--force`。`lmby scrape status` 会把「nfo 元数据」单独列一项。
 
 ```bash
 # 入队（--force 连已匹配的重刮，--kind 限 movie/series，--library 限某个库）
@@ -257,7 +258,8 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 nfo 在本项目里是权威元数据，所以给了个「重新导入」的口子：
 
 ```bash
-# 触发扫描时带 refreshMetadata：文件没变也重读一遍同目录的 nfo
+# 触发扫描时带 refreshMetadata：文件没变也重读一遍 nfo
+# （包括目录级的 tvshow.nfo / season.nfo）
 curl -b cookies.txt -X POST http://<LMBY_DEV_IP>:8099/api/v1/libraries/1/scan \
   -H 'Content-Type: application/json' -d '{"refreshMetadata": true}'
 ```

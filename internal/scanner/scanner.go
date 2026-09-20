@@ -130,6 +130,8 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		movieItemByDir:   map[string]int64{},
 		imagesByDir:      map[string][]imageEntry{},
 		imagesSeen:       map[int64]map[string]bool{},
+		metaApplied:      map[int64]bool{},
+		dirMetaChecked:   map[int64]bool{},
 	}
 
 	if err := w.loadExisting(ctx); err != nil {
@@ -236,6 +238,11 @@ type walker struct {
 
 	imagesByDir map[string][]imageEntry
 	imagesSeen  map[int64]map[string]bool
+	// metaApplied 记录本轮已经写过元数据的条目。
+	// 剧集目录的 tvshow.nfo 会被每一集各触发一次，没这个会重复读 130 遍。
+	metaApplied map[int64]bool
+	// dirMetaChecked 记录重扫时已补过目录级 nfo 的条目（同上，避免重复查库）。
+	dirMetaChecked map[int64]bool
 
 	processed  int
 	lastReport time.Time
@@ -452,6 +459,10 @@ func (w *walker) handleVideo(ctx context.Context, dir, path string, d fs.DirEntr
 				// 「重新导入 nfo」：文件没变也重读一遍 nfo。
 				// 这只多一次小文件读（实测 CIFS 上 ~11ms），且不会碰媒体文件本身。
 				w.applyMetadata(ctx, path, ex.ItemID)
+				// 目录级 nfo（tvshow.nfo / season.nfo）也要认领：
+				// 它本来是在 ensureItem 里读的，而那条路只在新建/变更时走 ——
+				// 重扫时文件没变，用户手改了 tvshow.nfo 就永远不生效。
+				w.refreshDirMetadata(ctx, ex.ItemID, path, dir)
 			}
 			return
 		}
@@ -553,6 +564,8 @@ func (w *walker) ensureEpisodeItem(ctx context.Context, dir string, res parser.R
 	// 「新建条目」的统计会比实际条目数多。
 	seriesCreated := false
 	w.seriesItemByDir[w.seriesDirOf(dir)] = seriesID
+	// 作品级元数据在剧集目录的 tvshow.nfo 里（同名 nfo 是文件级的）
+	w.applyDirMetadata(ctx, w.seriesDirOf(dir), seriesID, seriesNFONames...)
 
 	// 没写季号的剧集按第 1 季收，符合 Emby 习惯
 	season := res.Season
@@ -577,6 +590,8 @@ func (w *walker) ensureEpisodeItem(ctx context.Context, dir string, res parser.R
 			return 0, false, err
 		}
 		w.seasonCache[seasonKey] = seasonID
+		// 季目录里可能有 season.nfo（本地优先同样适用于季）
+		w.applyDirMetadata(ctx, dir, seasonID, seasonNFONames(season)...)
 	}
 
 	// 解析器拿到的标题若等于剧集名，说明文件名里没有集标题
@@ -630,6 +645,9 @@ func (w *walker) ensureMovieItem(ctx context.Context, dir string, res parser.Res
 	id, created, err := w.ensureDedup(ctx, w.movieCache, "movie", title, res.Year)
 	if err == nil {
 		w.movieItemByDir[dir] = id
+		// 同名 nfo 找不到时还有 movie.nfo / folder.nfo 这两种目录级写法
+		// （注意：同名 nfo 会在后面的 applyMetadata 里覆盖这里写入的值，优先级是对的）
+		w.applyDirMetadata(ctx, dir, id, movieNFONames...)
 	}
 	return id, created, err
 }
@@ -764,14 +782,124 @@ func (w *walker) applyMetadata(ctx context.Context, path string, itemID int64) {
 	nfoPath := filepath.Join(filepath.Dir(path), metadata.NFOFileName(filepath.Base(path)))
 	md, err := metadata.TryReadNFO(nfoPath)
 	if err != nil {
-		w.issue("warning", nfoPath, "解析 nfo 失败: "+err.Error())
+		// 「格式不对」也归为「本地没东西可用」：记一个问题，不标 nfo 状态，
+		// 那条就会回到可刮削的队列里（用户明确要求：本地没有/格式不对再去刮）。
+		w.issue("warning", nfoPath, "解析 nfo 失败（已按「无本地元数据」处理）: "+err.Error())
 		return
 	}
 	if md == nil {
 		return
 	}
+	w.applyNFO(ctx, md, nfoPath, itemID)
+}
+
+// applyNFO 把一份解析好的 nfo 写进条目，并标上「元数据来自 nfo」。
+func (w *walker) applyNFO(ctx context.Context, md *metadata.Metadata, nfoPath string, itemID int64) {
 	w.stats.NFORead++
 
+	meta := itemMetaFromNFO(md)
+	if nfoHasMetadata(md) {
+		// 有 nfo 就标上「元数据来自 nfo（人工整理）」：刮削默认不会碰它。
+		// 这是用户明确拍板的策略 —— nfo 是花了大力气人工做的，TMDB 不许覆盖它，
+		// 只有没 nfo 的条目才去刮（见 docs/REQUIREMENTS.md §0 的决策表）。
+		meta.MatchState = store.MatchStateNFO
+		meta.MetadataSource = store.MetadataSourceNFO
+	}
+	if err := w.st.ApplyItemMeta(ctx, itemID, meta); err != nil {
+		w.issue("warning", nfoPath, "写入条目元数据失败: "+err.Error())
+	}
+}
+
+// refreshDirMetadata 在「重扫但文件没变」时补读目录级 nfo。
+//
+// 为什么需要单独一条路：tvshow.nfo / season.nfo 是在 ensureItem 里读的，
+// 而那条路只在「新建条目 / 文件变更」时才走。重扫时文件没变，
+// 用户手改了 tvshow.nfo 就永远不生效（这个坑在实测里踩到过：
+// 335 条电影/episode 都认领了 nfo，就 2 个剧集还是 TMDB 的标题）。
+//
+// 它靠「文件所属条目的 parent/series 指针」找剧集与季，不靠标题匹配 ——
+// 元数据刮过之后标题可能与扫描时不一致，按标题查会查不到。
+func (w *walker) refreshDirMetadata(ctx context.Context, itemID int64, path, dir string) {
+	if w.dirMetaChecked[itemID] {
+		return
+	}
+	w.dirMetaChecked[itemID] = true
+
+	it, err := w.st.GetItem(ctx, itemID)
+	if err != nil {
+		return
+	}
+
+	switch it.Kind {
+	case "movie":
+		w.applyDirMetadata(ctx, dir, itemID, movieNFONames...)
+	case "episode":
+		if it.SeriesID != nil && *it.SeriesID != 0 {
+			w.applyDirMetadata(ctx, w.seriesDirOf(dir), *it.SeriesID, seriesNFONames...)
+		}
+		if it.ParentID != nil && *it.ParentID != 0 {
+			season := 0
+			if it.SeasonNum != nil {
+				season = int(*it.SeasonNum)
+			}
+			w.applyDirMetadata(ctx, dir, *it.ParentID, seasonNFONames(season)...)
+		}
+	}
+}
+
+// applyDirMetadata 读「目录级」的 nfo 并写进条目：tvshow.nfo / movie.nfo / season.nfo。
+//
+// 为什么需要：同名 nfo（`S01E01.nfo`）是「文件级」的，而作品级元数据
+// （一部剧的标题/简介/流派、外部 id）在 Emby 的布局里存在剧集目录的 `tvshow.nfo`。
+// 不读它的话「本地优先」在剧集层面就失效了 —— 每个剧集都会被 TMDB 覆盖元数据。
+//
+// names 按优先级从高到低试；同一个条目在一次扫描里只处理一次
+// （否则一个剧集的 130 集会把同一个 tvshow.nfo 读 130 遍）。
+func (w *walker) applyDirMetadata(ctx context.Context, dir string, itemID int64, names ...string) {
+	if w.metaApplied[itemID] {
+		return
+	}
+	w.metaApplied[itemID] = true
+
+	// 目标条目已经有「同名 nfo」给的元数据时，目录级 nfo 不越权覆盖它
+	// （同名 nfo 是文件级的，优先级更高）。注意判断的是**目标条目**：
+	// 一集自己有 S01E01.nfo 不应当阻止它所属剧集去认领 tvshow.nfo。
+	if it, err := w.st.GetItem(ctx, itemID); err == nil && it.MetadataSource == store.MetadataSourceNFO {
+		return
+	}
+
+	for _, name := range names {
+		p := filepath.Join(dir, name)
+		md, err := metadata.TryReadNFO(p)
+		if err != nil {
+			w.issue("warning", p, "解析 nfo 失败（已按「无本地元数据」处理）: "+err.Error())
+			return
+		}
+		if md == nil {
+			continue
+		}
+		w.applyNFO(ctx, md, p, itemID)
+		return
+	}
+}
+
+// 目录级 nfo 的候选文件名（按优先级）。
+var (
+	seriesNFONames = []string{"tvshow.nfo", "show.nfo"}
+	movieNFONames  = []string{"movie.nfo", "folder.nfo"}
+)
+
+// seasonNFONames 返回季目录里可能存在的 nfo 名（season.nfo、season01.nfo …）。
+func seasonNFONames(season int) []string {
+	return []string{
+		"season.nfo",
+		fmt.Sprintf("season%02d.nfo", season),
+		fmt.Sprintf("season%d.nfo", season),
+	}
+}
+
+// itemMetaFromNFO 把解析出来的 nfo 转成要落库的元数据。
+func itemMetaFromNFO(md *metadata.Metadata) store.ItemMeta {
 	meta := store.ItemMeta{
 		Title:          md.Title,
 		SortTitle:      md.SortTitle,
@@ -787,20 +915,11 @@ func (w *walker) applyMetadata(ctx context.Context, path string, itemID int64) {
 		ProviderIDs:    md.ProviderIDs,
 		PremiereDate:   md.PremiereDate,
 	}
-	if nfoHasMetadata(md) {
-		// 有 nfo 就标上「元数据来自 nfo（人工整理）」：刮削默认不会碰它。
-		// 这是用户明确拍板的策略 —— nfo 是花了大力气人工做的，TMDB 不许覆盖它，
-		// 只有没 nfo 的条目才去刮（见 docs/REQUIREMENTS.md §0 的决策表）。
-		meta.MatchState = store.MatchStateNFO
-		meta.MetadataSource = store.MetadataSourceNFO
-	}
 	if md.RuntimeMinutes > 0 {
 		t := int64(md.RuntimeMinutes) * metadata.TicksPerMinute
 		meta.RuntimeTicks = &t
 	}
-	if err := w.st.ApplyItemMeta(ctx, itemID, meta); err != nil {
-		w.issue("warning", nfoPath, "写入条目元数据失败: "+err.Error())
-	}
+	return meta
 }
 
 // nfoHasMetadata 判断这份 nfo 是否真的带了人工整理的元数据。

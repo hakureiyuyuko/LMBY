@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,8 +34,10 @@ var _ worker.Handler = (*Handler)(nil)
 // 这个差异必须在取候选之前抹平 —— 打分器会按类型过滤候选，
 // 拿 "series" 去比 "tv" 会把所有候选都筛掉（这个坑踩过一次）。
 const (
-	itemKindMovie  = "movie"
-	itemKindSeries = "series"
+	itemKindMovie   = "movie"
+	itemKindSeries  = "series"
+	itemKindSeason  = "season"
+	itemKindEpisode = "episode"
 )
 
 // providerKind 把库里的条目类型映射成 provider 的条目类型。
@@ -81,6 +84,9 @@ type Store interface {
 	SeriesStructure(ctx context.Context, seriesID int64) (season, episodes int, err error)
 	ApplyItemMeta(ctx context.Context, itemID int64, m store.ItemMeta) error
 	SaveMatchOutcome(ctx context.Context, itemID int64, o store.MatchOutcome) error
+	// EnqueueSeriesScrapes 在剧集匹配上之后，把它的季与集排上队
+	// （它们要靠剧集的 provider id 才能定位）。
+	EnqueueSeriesScrapes(ctx context.Context, seriesID int64) (int64, error)
 }
 
 // Handler 处理 scrape 任务。
@@ -131,9 +137,9 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 		return err
 	}
 
-	if it.Kind != itemKindMovie && it.Kind != itemKindSeries {
-		// 季/集/花絮不单独刮：拿「第 3 集」去搜标题没有意义，
-		// 它们的元数据应当由所属剧集带下来。
+	if it.Kind != itemKindMovie && it.Kind != itemKindSeries &&
+		it.Kind != itemKindSeason && it.Kind != itemKindEpisode {
+		// 花絮不单独刮：它没有 provider 侧的对应物，元数据从属于父条目。
 		h.log.Debug("这类条目不单独刮削", "itemId", it.ID, "kind", it.Kind)
 		return nil
 	}
@@ -153,6 +159,14 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 	} else if it.MatchState == store.MatchStateNFO || it.MetadataSource == store.MetadataSourceNFO {
 		h.log.Warn("force 刮削将覆盖 nfo 导入的元数据",
 			"itemId", it.ID, "title", it.Title, "source", it.MetadataSource)
+	}
+
+	// 季与集不用搜索：按 (剧集 provider id, 季号, 集号) 直接对应。
+	switch it.Kind {
+	case itemKindSeason:
+		return h.scrapeSeason(ctx, it)
+	case itemKindEpisode:
+		return h.scrapeEpisode(ctx, it)
 	}
 
 	local := h.localFacts(ctx, it)
@@ -203,7 +217,13 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 
 	switch top.Decision {
 	case match.DecisionAuto:
-		meta := itemMeta(it, details[top.CandidateID])
+		d, ok := details[top.CandidateID]
+		if !ok {
+			// 详情没取到（网络失败）：不能拿空元数据把条目标成「已匹配」，
+			// 返回错误让队列重试一次。
+			return fmt.Errorf("取候选 %d（%s）的详情失败，稍后重试", top.CandidateID, top.Title)
+		}
+		meta := itemMeta(it, d)
 		if err := h.st.ApplyItemMeta(ctx, it.ID, meta); err != nil {
 			// 同一个作品被扫成了两个条目时，刮削改名会撞上唯一索引：
 			// 这是「需要人工确认是否重复」的业务结论，不是可以重试的环境问题
@@ -213,7 +233,7 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 					"itemId", it.ID, "title", meta.Title, "err", err.Error())
 				return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
 					State:      store.MatchStateReview,
-					Score:      top.Score,
+					Score:      ptrFloat(top.Score),
 					Candidates: ranked,
 					Error: fmt.Sprintf("库里已有同名同年条目（《%s》），改名会撞唯一索引 —— "+
 						"可能是同一个作品被扫成了两个条目，需人工确认", meta.Title),
@@ -225,12 +245,19 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 			"itemId", it.ID, "kind", it.Kind, "title", it.Title,
 			"provider", top.CandidateID, "candidate", top.Title,
 			"score", top.Score, "margin", top.Margin)
-		return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
+		if err := h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
 			State:      store.MatchStateMatched,
-			Score:      top.Score,
+			Score:      ptrFloat(top.Score),
 			Source:     h.client.Name(),
 			Candidates: ranked,
-		})
+		}); err != nil {
+			return err
+		}
+		if it.Kind == itemKindSeries {
+			// 剧集匹配上了，它下面的季与集才有得刮（要靠这个 provider id 定位）
+			h.enqueueSeriesChildren(ctx, it.ID)
+		}
+		return nil
 
 	case match.DecisionReview:
 		h.log.Info("候选需要人工确认",
@@ -239,7 +266,7 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 			"score", top.Score, "margin", top.Margin)
 		return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
 			State: store.MatchStateReview,
-			Score: top.Score,
+			Score: ptrFloat(top.Score),
 			// 存下候选：人工界面直接展示，不用让用户重新搜一遍
 			Candidates: ranked,
 			Error: fmt.Sprintf("最高分 %.2f、领先第二名 %.2f，需要人工确认（候选：《%s》）",
@@ -251,7 +278,7 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 			"itemId", it.ID, "title", it.Title, "score", top.Score, "candidate", top.Title)
 		return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
 			State:      store.MatchStateFailed,
-			Score:      top.Score,
+			Score:      ptrFloat(top.Score),
 			Candidates: ranked,
 			Error:      fmt.Sprintf("候选都不像（最高分 %.2f：《%s》）", top.Score, top.Title),
 		})
@@ -395,6 +422,239 @@ func itemMeta(it *store.Item, d Detail) store.ItemMeta {
 	}
 
 	return m
+}
+
+// ---------------------------------------------------------------- 季与集
+//
+// 季与集不用搜索：它们与 provider 上的对象是**按位置直接对应**的
+// （剧集的 tmdb id + 季号 + 集号），没有候选可比、也没有相似度分数。
+// 所以它们走单独一条路：定位不到就等剧集匹配好之后再入队（见 EnqueueSeriesScrapes）。
+
+// enqueueSeriesChildren 把剧集下的季与集排上队。
+func (h *Handler) enqueueSeriesChildren(ctx context.Context, seriesID int64) {
+	n, err := h.st.EnqueueSeriesScrapes(ctx, seriesID)
+	if err != nil {
+		h.log.Warn("入队剧集下的季/集失败", "seriesId", seriesID, "err", err)
+		return
+	}
+	if n > 0 {
+		h.log.Info("已入队剧集下的季/集", "seriesId", seriesID, "count", n)
+	}
+}
+
+// scrapeSeason 刮一季。
+func (h *Handler) scrapeSeason(ctx context.Context, it *store.Item) error {
+	series, tmdbID, err := h.seriesOf(ctx, it)
+	if err != nil {
+		return err
+	}
+	if series == nil {
+		h.log.Debug("季没有所属剧集，跳过", "itemId", it.ID)
+		return nil
+	}
+	if tmdbID == 0 {
+		h.log.Debug("剧集还没在 provider 上定位，季的刮削留待剧集匹配之后",
+			"itemId", it.ID, "seriesId", series.ID)
+		return nil
+	}
+
+	season := int(numOr(it.SeasonNum, 0))
+	det, err := h.client.Season(ctx, tmdbID, season, "")
+	if errors.Is(err, provider.ErrNotFound) {
+		return h.providerMissing(ctx, it, fmt.Sprintf("provider 上没有第 %d 季", season))
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := h.st.ApplyItemMeta(ctx, it.ID, seasonMeta(det)); err != nil {
+		return err
+	}
+	h.log.Info("已刮削季",
+		"itemId", it.ID, "seriesId", series.ID, "season", season, "name", det.Name)
+	return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
+		State:  store.MatchStateMatched,
+		Source: h.client.Name(),
+	})
+}
+
+// scrapeEpisode 刮一集。
+func (h *Handler) scrapeEpisode(ctx context.Context, it *store.Item) error {
+	series, tmdbID, err := h.seriesOf(ctx, it)
+	if err != nil {
+		return err
+	}
+	if series == nil {
+		h.log.Debug("集没有所属剧集，跳过", "itemId", it.ID)
+		return nil
+	}
+	if tmdbID == 0 {
+		h.log.Debug("剧集还没在 provider 上定位，集的刮削留待剧集匹配之后",
+			"itemId", it.ID, "seriesId", series.ID)
+		return nil
+	}
+
+	episode := int(numOr(it.EpisodeNum, 0))
+	if episode <= 0 {
+		return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
+			State: store.MatchStateFailed,
+			Error: "这一集没有集号，无法在 provider 上定位",
+		})
+	}
+	// 与扫描器口径一致：没标季号的按第 1 季
+	season := int(numOr(it.SeasonNum, 1))
+	if season <= 0 {
+		season = 1
+	}
+
+	det, err := h.client.Episode(ctx, tmdbID, season, episode, "")
+	if errors.Is(err, provider.ErrNotFound) {
+		return h.providerMissing(ctx, it, fmt.Sprintf("provider 上没有 S%02dE%02d", season, episode))
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := h.st.ApplyItemMeta(ctx, it.ID, episodeMeta(det)); err != nil {
+		return err
+	}
+	h.log.Info("已刮削集",
+		"itemId", it.ID, "seriesId", series.ID, "season", season, "episode", episode,
+		"name", det.Name)
+	return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
+		State:  store.MatchStateMatched,
+		Source: h.client.Name(),
+	})
+}
+
+// seriesOf 取条目所属的剧集条目，以及它在 provider 上的 id（0 表示还没定位）。
+func (h *Handler) seriesOf(ctx context.Context, it *store.Item) (*store.Item, int, error) {
+	if it.SeriesID == nil || *it.SeriesID == 0 {
+		return nil, 0, nil
+	}
+	series, err := h.st.GetItem(ctx, *it.SeriesID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	id, err := h.locateSeries(ctx, series)
+	if err != nil {
+		return series, 0, err
+	}
+	return series, id, nil
+}
+
+// locateSeries 尽力找到剧集在 provider 上的 id。
+//
+// 先看元数据里带的外部 id（nfo 里的 <tmdbid> / <uniqueid type="tmdb"> 会进 provider_ids），
+// 没有就按标题搜一次。
+//
+// **搜索只用于定位，不写剧集自己的元数据** —— 剧集的元数据是 nfo 说了算的。
+// 这是「本地优先」在剧集层面的延伸：本地有 nfo 就用 nfo，
+// 但为了把季/集元数据拉回来，得先知道这部剧在 provider 上是哪一个。
+func (h *Handler) locateSeries(ctx context.Context, series *store.Item) (int, error) {
+	if id, err := strconv.Atoi(strings.TrimSpace(series.ProviderIDs["tmdb"])); err == nil && id > 0 {
+		return id, nil
+	}
+
+	title := strings.TrimSpace(series.Title)
+	if title == "" {
+		title = strings.TrimSpace(series.OriginalTitle)
+	}
+	if title == "" {
+		return 0, nil
+	}
+
+	results, err := h.client.SearchSeries(ctx, title, provider.SearchOptions{})
+	if err != nil {
+		return 0, err
+	}
+	cands := make([]match.Candidate, 0, len(results))
+	for _, r := range results {
+		cands = append(cands, match.FromSearch(r))
+	}
+	if h.topN > 0 && len(cands) > h.topN {
+		cands = cands[:h.topN]
+	}
+	if len(cands) == 0 {
+		return 0, nil
+	}
+
+	local := match.Local{
+		Kind:          provider.KindTV,
+		Title:         series.Title,
+		OriginalTitle: series.OriginalTitle,
+	}
+	if series.Year != nil {
+		local.Year = int(*series.Year)
+	}
+	if season, episodes, err := h.st.SeriesStructure(ctx, series.ID); err == nil {
+		local.SeasonNumber, local.EpisodeCount = season, episodes
+	}
+
+	top, ok := h.scorer.Best(local, cands)
+	if !ok || top.Decision != match.DecisionAuto {
+		h.log.Warn("剧集没有 provider id，按标题也没能确定，季/集的元数据只能跳过",
+			"seriesId", series.ID, "title", title)
+		return 0, nil
+	}
+	h.log.Info("剧集没有 provider id，按标题定位（仅用于取季/集元数据，不写剧集自己的元数据）",
+		"seriesId", series.ID, "provider", top.CandidateID, "candidate", top.Title, "score", top.Score)
+	return top.CandidateID, nil
+}
+
+// providerMissing 把「provider 上就没有这个东西」落成业务失败（不重试）。
+func (h *Handler) providerMissing(ctx context.Context, it *store.Item, reason string) error {
+	h.log.Info("provider 上没有这个条目，记为失败",
+		"itemId", it.ID, "kind", it.Kind, "title", it.Title, "reason", reason)
+	return h.st.SaveMatchOutcome(ctx, it.ID, store.MatchOutcome{
+		State: store.MatchStateFailed,
+		Error: reason,
+	})
+}
+
+// seasonMeta 把季详情映射成要落库的元数据。
+//
+// 刻意**不写标题**：季标题是本地按季号生成的（「第 1 季」），
+// 比 TMDB 的译名稳（TMDB 有时只给英文的 "Season 1"，反而是退化）。
+func seasonMeta(s *provider.Season) store.ItemMeta {
+	meta := store.ItemMeta{
+		Overview:     s.Overview,
+		PremiereDate: parseDate(s.AirDate),
+	}
+	if s.ID > 0 {
+		meta.ProviderIDs = map[string]string{"tmdb": strconv.Itoa(s.ID)}
+	}
+	return meta
+}
+
+// episodeMeta 把单集详情映射成要落库的元数据。
+func episodeMeta(e *provider.Episode) store.ItemMeta {
+	meta := store.ItemMeta{
+		Title:        e.Name,
+		Overview:     e.Overview,
+		PremiereDate: parseDate(e.AirDate),
+	}
+	if e.RuntimeMin > 0 {
+		meta.RuntimeTicks = ptrInt64(runtimeTicks(e.RuntimeMin))
+	}
+	if e.Rating > 0 {
+		meta.Rating = ptrFloat(e.Rating)
+	}
+	if e.ID > 0 {
+		meta.ProviderIDs = map[string]string{"tmdb": strconv.Itoa(e.ID)}
+	}
+	return meta
+}
+
+// numOr 取可空整数的值，为空时返回兜底值。
+func numOr(v *int32, def int32) int32 {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 // sortTitle 生成排序标题：去掉开头的冠词，让《The Matrix》排在 M 而不是 T。
