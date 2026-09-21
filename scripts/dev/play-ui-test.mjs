@@ -281,7 +281,7 @@ async function main() {
   // 通过 /items/{id}/playlist 判断：mp4 + h264 8bit + 浏览器能解的音频 → 应当直出；
   // matroska + h264 8bit → 应当转封装。挑不到就跳过对应段落。
   const cand = await evaluate(`(async () => {
-    const out = { direct: null, remux: null, transcode: null };
+    const out = { direct: null, remux: null, transcode: null, ass: null };
     const libs = (await (await fetch('/api/v1/libraries')).json()).libraries || [];
     for (const lib of libs) {
       const b = await (await fetch('/api/v1/libraries/' + lib.id + '/browse?kind=movie&limit=200')).json();
@@ -301,7 +301,12 @@ async function main() {
         if (!out.transcode && v.codec === 'hevc' && (v.bitDepth || 8) === 10) {
           out.transcode = { id: it.id, title: it.title, file: f.containerKind + '/' + v.codec + ' 10bit' };
         }
-        if (out.direct && out.remux && out.transcode) return out;
+        // 带 ASS/SSA 字幕的样本：验「特效字幕交给前端 libass 渲染」
+        if (!out.ass) {
+          const sub = (f.subtitles || []).find((s) => s.codec === 'ass' || s.codec === 'ssa');
+          if (sub) out.ass = { id: it.id, title: it.title, index: sub.index };
+        }
+        if (out.direct && out.remux && out.transcode && out.ass) return out;
       }
     }
     return out;
@@ -309,6 +314,7 @@ async function main() {
   note(`直出样本：${cand.direct ? `${cand.direct.id} ${cand.direct.title}（${cand.direct.file}）` : '未找到'}`);
   note(`转封装样本：${cand.remux ? `${cand.remux.id} ${cand.remux.title}（${cand.remux.file}，${cand.remux.subs} 条字幕）` : '未找到'}`);
   note(`需转码样本：${cand.transcode ? `${cand.transcode.id} ${cand.transcode.title}` : '未找到'}`);
+  note(`ASS 字幕样本：${cand.ass ? `${cand.ass.id} ${cand.ass.title}（字幕 #${cand.ass.index}）` : '未找到'}`);
 
   // ---------------------------------------------------------------- 直出
   log('\n== 4. 直出：真的播起来 + 拖动 ==');
@@ -647,6 +653,51 @@ async function main() {
       check('换档后画面继续播（从当前位置重开一路）', true, moving);
       await shot('06-quality');
     }
+  }
+
+  log('\n== 7.6 特效字幕：ASS 交给前端 libass 渲染 ==');
+  if (!cand.ass) {
+    note('库里没有 ASS/SSA 字幕样本，跳过');
+  } else {
+    await send('Page.navigate', { url: `${BASE}/play/${cand.ass.id}` });
+    await waitFor('播放器', async () => Boolean(await evaluate(`!!document.querySelector('.player-video')`)), 30000);
+    await waitFor(
+      '字幕下拉',
+      async () => Boolean(await evaluate(`!!document.querySelector('select[aria-label="字幕"]')`)),
+      30000,
+    );
+    const pickedSub = await evaluate(`(() => {
+      const sel = document.querySelector('select[aria-label="字幕"]');
+      const opt = [...sel.options].find((o) => o.value === '${cand.ass.index}');
+      if (!opt) return null;
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return opt.textContent.trim();
+    })()`);
+    note(`选了：${pickedSub}`);
+    check('能选到 ASS 字幕轨', true, Boolean(pickedSub));
+    // libass 要下载 ~1.5MB 的 wasm，给足时间
+    const canvasReady = await waitFor(
+      'libass canvas',
+      async () => Boolean(await evaluate(`!!document.querySelector('.libassjs-canvas-parent')`)),
+      60000,
+    );
+    check('libass 渲染画布挂上了（特效字幕走 WASM 渲染）', true, canvasReady);
+    const ink = await evaluate(`(() => {
+      const parent = document.querySelector('.libassjs-canvas-parent');
+      if (!parent) return -1;
+      const c = parent.querySelector('canvas') || parent.firstElementChild;
+      if (!c || !c.getContext) return -1;
+      const ctx = c.getContext('2d');
+      if (!ctx) return -1;
+      const h = Math.min(240, c.height);
+      const d = ctx.getImageData(0, 0, c.width, h).data;
+      let n = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+      return n;
+    })()`);
+    note(`画布上的字幕像素数：${ink}（“-1” = 取不到画布像素，不硬判）`);
+    await shot('07-libass');
   }
 
   log('\n== 8. 快捷键与字幕开关 ==');

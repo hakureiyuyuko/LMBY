@@ -4,12 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "octopus": "node scripts/copy-octopus.mjs",
+    "predev": "npm run octopus",
     "dev": "vite",
+    "prebuild": "npm run octopus",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "hls.js": "^1.7.3",
+    "libass-wasm": "^4.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4"

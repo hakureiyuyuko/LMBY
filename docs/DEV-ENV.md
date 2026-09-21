@@ -164,14 +164,20 @@ bash scripts/dev/seed-review-item.sh --restore                        # 用完�
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh
 TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 额外验「无人观看 45s 自动回收」
 
-# 播放器界面验收（40 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单，截图到 shots-play/）
+# 播放器界面验收（42 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单、
+# 特效字幕（选 ASS 轨 → libass 画布挂上），截图到 shots-play/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
 
-# M4 转码：真库 HTTP 端到端（66 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
+# 特效字幕真渲染（真 Chrome 选 ASS 轨 → 等 libass canvas → 跳到有对白处 → 截图）：
+# 参数是条目 id 与字幕流序号（可从 verify-transcode.sh 的「特效字幕」节看到）
+BASE=http://<LMBY_DEV_IP>:8099 node scripts/dev/subs-shot.mjs <itemId> <subtitleIndex> subs.png
+
+# M4 转码 + 字幕：真库 HTTP 端到端（72 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
 # 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P、
 # 播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）、
 # 节流（转码跑到客户端前面就暂停 ffmpeg；看 /proc 的 State 确认真的停住了 T）、
-# 会话监控（fps/speed/码率）与管理员一键终止（401 / 200 / 会话消失 / 404）。
+# 会话监控（fps/speed/码率）与管理员一键终止（401 / 200 / 会话消失 / 404）、
+# 特效字幕（ASS 原样抽出 → 前端 libass 渲染：交付形态、.ass 地址、[Script Info]/Dialogue/Style 都在）。
 # 它**不假设本机一定能转**：先读能力表，只有探测到可用的 h264 编码器才断言「能播」，
 # 否则断言「如实说放不了」——所以它在弱机器上同样有意义。样本按编码条件现挑，优先 1080p。
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh

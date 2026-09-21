@@ -191,7 +191,38 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 
 ---
 
-## 三、怎么验证
+## 四、字幕
+
+三种形态，按「能不能还原原意」分：
+
+| 字幕 | 走法 | 为什么 |
+|---|---|---|
+| **ASS/SSA** | **原样抽出（`-c:s copy`）→ 前端 libass（WASM）渲染** | 定位（`\pos`）、轨迹（`\move`）、插值动画（`\t`）、卡拉OK（`\k`）、矢量绘图（`\p`）——只有完整的 ASS 解释器能还原 |
+| SRT 等纯文本 | 转 WebVTT 走浏览器原生轨道 | 轻、起播快；纯对白字幕不需要特效 |
+| 图形字幕（PGS/VobSub） | 目前明确告知「本次不显示」（烧录待接） | 位图，只能烧进画面 |
+
+**ASS 那条链路**（我们库里 145 个文件带 ASS）：
+
+- 服务端：`GET /api/v1/play/{sid}/subtitles/{index}.ass` —— 内嵌字幕用
+  `-map 0:N -c:s copy -f ass` **原样**抽出（落盘缓存，与 WebVTT 共用单飞与 202 轮询逻辑）。
+  决策层在 `StreamPlan.DeliverAs` 里标 `libass`，播放器据此选渲染方式（`webvtt` 走 `<track>`）。
+- 前端：懒加载 `SubtitlesOctopus`（libass 的 WASM 版，MIT；资源在 `/subtitles-octopus/`，
+  构建时从 npm 包 `libass-wasm` 复制，见 `web/scripts/copy-octopus.mjs`）。
+  只有真的要看 ASS 字幕才拉（~1.5MB，浏览器会缓存）。
+  ⚠️ `libass-wasm` 是 **LGPL-2.1-or-later**（含 FFmpeg 组件）：以独立文件形式提供、
+  并保留它的 `COPYRIGHT`，即满足「可替换」的要求。
+- 两条渲染路互不干扰：WebVTT 用 `<track>`，libass 是盖在画面上的 canvas
+  （`pointer-events: none`，不吃鼠标事件）。
+
+实测（本机）：ASS 原文 3.97MB / 274 行 Dialogue 抽取与渲染正常，带定位与装饰的日文
+标题字幕能在浏览器里正确显示（截图见 `shots-play/07-libass.png`）。
+
+**字幕这条线还没做的**：图形字幕烧录（`subtitles=f='…':sub2video=1:fontsdir='…'`）、
+ASS 附件字体（`\fn` 引用的字体常以附件形式存在）、外挂字幕的 GB18030 编码探测。
+
+---
+
+## 五、怎么验证
 
 ```bash
 # 1. 能力表（真跑探测）——接口是登录即可读

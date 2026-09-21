@@ -260,6 +260,8 @@ type playStateResponse struct {
 	DirectURL       string        `json:"directUrl,omitempty"`
 	HLSURL          string        `json:"hlsUrl,omitempty"`
 	SubtitleURL     string        `json:"subtitleUrl,omitempty"`
+	// SubtitleFormat：vtt（浏览器原生轨道）| ass（前端 libass 渲染，保留特效）。
+	SubtitleFormat string `json:"subtitleFormat,omitempty"`
 	// SubtitleState：ready（已可挂上）/ preparing（内嵌字幕还在抽，前端轮询）。
 	SubtitleState   string         `json:"subtitleState,omitempty"`
 	// WindowEndSeconds：转封装模式下这一段预生成窗口的结束位置（秒）。
@@ -626,8 +628,14 @@ func (s *Server) setPlayURLs(resp *playStateResponse, ps *playSession) {
 		resp.HLSURL = "/api/v1/play/" + ps.ID + "/index.m3u8"
 	}
 	if ps.Plan.Subtitle.Action == playback.ActionConvert {
-		resp.SubtitleURL = fmt.Sprintf("/api/v1/play/%s/subtitles/%d.vtt", ps.ID, ps.Plan.Subtitle.Index)
-		if s.subtitleReady(ps.FileID, ps.Plan.Subtitle.Index) {
+		// ASS/SSA 给原文件（前端 libass 渲染，保留特效），其余给 WebVTT。
+		suffix, format := "vtt", "vtt"
+		if ps.Plan.Subtitle.DeliverAs == playback.DeliverLibass {
+			suffix, format = "ass", "ass"
+		}
+		resp.SubtitleURL = fmt.Sprintf("/api/v1/play/%s/subtitles/%d.%s", ps.ID, ps.Plan.Subtitle.Index, suffix)
+		resp.SubtitleFormat = format
+		if s.subtitleReady(ps.FileID, ps.Plan.Subtitle.Index, suffix) {
 			resp.SubtitleState = "ready"
 		} else {
 			resp.SubtitleState = "preparing"
@@ -653,8 +661,8 @@ func (s *Server) windowEnd(ps *playSession) float64 {
 }
 
 // subtitleReady 报告某条字幕的 WebVTT 是否已经在缓存里。
-func (s *Server) subtitleReady(fileID int64, streamIndex int) bool {
-	p := filepath.Join(s.cfg.StreamsDirPath(), "subs", fmt.Sprintf("f%d-s%d.vtt", fileID, streamIndex))
+func (s *Server) subtitleReady(fileID int64, streamIndex int, suffix string) bool {
+	p := filepath.Join(s.cfg.StreamsDirPath(), "subs", fmt.Sprintf("f%d-s%d.%s", fileID, streamIndex, suffix))
 	st, err := os.Stat(p)
 	return err == nil && st.Size() > 0
 }
@@ -932,13 +940,20 @@ func (s *Server) handlePlaySubtitle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw := strings.TrimSuffix(r.PathValue("name"), ".vtt")
-	idx, err := strconv.Atoi(raw)
+	// 扩展名决定交付形态：.vtt（浏览器原生轨道）/ .ass、.ssa（前端 libass 渲染）。
+	name := r.PathValue("name")
+	ext := filepath.Ext(name)
+	suffix := strings.ToLower(strings.TrimPrefix(ext, "."))
+	if suffix != "vtt" && suffix != "ass" && suffix != "ssa" {
+		writeError(w, http.StatusBadRequest, "字幕格式不支持")
+		return
+	}
+	idx, err := strconv.Atoi(strings.TrimSuffix(name, ext))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "字幕序号非法")
 		return
 	}
-	path, err := s.subtitleFile(r.Context(), ps, idx)
+	path, err := s.subtitleFile(r.Context(), ps, idx, suffix)
 	switch {
 	case errors.Is(err, ErrSubtitlePending):
 		w.Header().Set("Retry-After", "3")
@@ -951,7 +966,12 @@ func (s *Server) handlePlaySubtitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "字幕提取失败："+err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	if suffix == "vtt" {
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	} else {
+		// ASS/SSA：前端 libass 按文本读，字符集给清楚。
+		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	}
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeFile(w, r, path)
 }
@@ -959,18 +979,18 @@ func (s *Server) handlePlaySubtitle(w http.ResponseWriter, r *http.Request) {
 // subtitleFile 确保字幕的 VTT 版本已经抽好，返回文件路径。
 //
 // 三种结果：已就绪（返回路径）/ 还在抽（ErrSubtitlePending）/ 抽失败（返回错误）。
-func (s *Server) subtitleFile(ctx context.Context, ps *playSession, streamIndex int) (string, error) {
+func (s *Server) subtitleFile(ctx context.Context, ps *playSession, streamIndex int, suffix string) (string, error) {
 	dir := filepath.Join(s.cfg.StreamsDirPath(), "subs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	out := filepath.Join(dir, fmt.Sprintf("f%d-s%d.vtt", ps.FileID, streamIndex))
+	out := filepath.Join(dir, fmt.Sprintf("f%d-s%d.%s", ps.FileID, streamIndex, suffix))
 	if st, err := os.Stat(out); err == nil && st.Size() > 0 {
 		return out, nil
 	}
 
 	job := s.subs.start(out, func() error {
-		return s.extractSubtitle(ps.FilePath, streamIndex, out)
+		return s.extractSubtitle(ps.FilePath, streamIndex, out, suffix)
 	})
 	select {
 	case <-job.done:
@@ -990,7 +1010,7 @@ func (s *Server) subtitleFile(ctx context.Context, ps *playSession, streamIndex 
 //
 // 用独立的 context（不受请求生命周期影响）：用户切走了、刷新了页面，
 // 这次抽取仍然值得做完 —— 否则网络盘上那一分钟的读盘就白费了。
-func (s *Server) extractSubtitle(path string, streamIndex int, out string) error {
+func (s *Server) extractSubtitle(path string, streamIndex int, out, suffix string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), subtitleExtractTimeout)
 	defer cancel()
 
@@ -999,11 +1019,20 @@ func (s *Server) extractSubtitle(path string, streamIndex int, out string) error
 		ffmpeg = "ffmpeg"
 	}
 	tmp := out + ".tmp"
-	cmd := exec.CommandContext(ctx, ffmpeg,
+	args := []string{
 		"-hide_banner", "-nostdin", "-loglevel", "error",
 		"-i", path,
-		"-map", "0:"+strconv.Itoa(streamIndex),
-		"-f", "webvtt", "-y", tmp)
+		"-map", "0:" + strconv.Itoa(streamIndex),
+	}
+	// ASS/SSA 要**原样抽出**（-c:s copy）：定位、动画、样式全在原文件里，
+	// 前端用 libass 解释它；转成 WebVTT 这些就没了。
+	if suffix == "ass" || suffix == "ssa" {
+		args = append(args, "-c:s", "copy", "-f", "ass")
+	} else {
+		args = append(args, "-f", "webvtt")
+	}
+	args = append(args, "-y", tmp)
+	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

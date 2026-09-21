@@ -61,6 +61,36 @@ function readQuality(): QualityChoice {
   }
 }
 
+/** octopus 实例的最小接口（它是外部脚本，没有 .d.ts）。 */
+interface OctopusInstance {
+  destroy(): void;
+}
+
+/**
+ * 懒加载 libass（SubtitlesOctopus）—— ASS/SSA 的特效字幕交给它渲染。
+ *
+ * 为什么不用现成的 WebVTT：转成 WebVTT 会把定位（\pos）、轨迹（\move）、
+ * 插值动画（\t）、卡拉OK（\k）、矢量绘图（\p）全丢掉，而带特效的字幕正是
+ * ASS 的常态。资源在 /subtitles-octopus/（构建时从 libass-wasm 复制，见
+ * web/scripts/copy-octopus.mjs），只有真要看 ASS 字幕才拉（~1.5MB，会缓存）。
+ */
+let octopusPromise: Promise<void> | null = null;
+
+function loadOctopusScript(): Promise<void> {
+  if ((window as { SubtitlesOctopus?: unknown }).SubtitlesOctopus) return Promise.resolve();
+  if (!octopusPromise) {
+    octopusPromise = new Promise<void>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/subtitles-octopus/subtitles-octopus.js';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('libass 渲染器加载失败'));
+      document.head.appendChild(s);
+    });
+  }
+  return octopusPromise;
+}
+
 export function Player() {
   const params = useParams();
   const [search] = useSearchParams();
@@ -72,6 +102,7 @@ export function Player() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const octopusRef = useRef<OctopusInstance | null>(null);
 
   // 这些值变化频繁（每帧都可能动），放 ref 里避免把整页重渲染成幻灯片
   const sessionIdRef = useRef('');
@@ -537,6 +568,47 @@ export function Player() {
     for (let i = 0; i < tracks.length; i++) tracks[i].mode = subSel === -1 ? 'disabled' : 'showing';
   }, [subReady, subSel]);
 
+  // 特效字幕（ASS/SSA）：交给 libass 画在 canvas 上（WebVTT 装不下那些特效）。
+  // 关字幕 / 换字幕轨 / 换片子时销毁重建 —— 比增量控制简单且不会漏。
+  useEffect(() => {
+    const v = videoRef.current;
+    const url = state?.subtitleUrl;
+    if (!v || !url || !subReady || subSel === -1 || state?.subtitleFormat !== 'ass') return;
+    let cancelled = false;
+    let inst: OctopusInstance | null = null;
+    void (async () => {
+      try {
+        await loadOctopusScript();
+        if (cancelled) return;
+        const Ctor = (
+          window as unknown as {
+            SubtitlesOctopus?: new (o: Record<string, unknown>) => OctopusInstance;
+          }
+        ).SubtitlesOctopus;
+        if (!Ctor) throw new Error('libass 渲染器未就绪');
+        inst = new Ctor({
+          video: v,
+          subUrl: url,
+          workerUrl: '/subtitles-octopus/subtitles-octopus-worker.js',
+          legacyWorkerUrl: '/subtitles-octopus/subtitles-octopus-worker-legacy.js',
+          renderMode: 'js-blend',
+        });
+        octopusRef.current = inst;
+      } catch {
+        if (!cancelled) setNotice('特效字幕渲染器加载失败，本条字幕暂不显示');
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try {
+        inst?.destroy();
+      } catch {
+        /* 已经销毁过 */
+      }
+      octopusRef.current = null;
+    };
+  }, [state?.subtitleUrl, state?.subtitleFormat, subReady, subSel]);
+
   if (!Number.isFinite(itemId) || itemId <= 0) {
     return (
       <div className="card">
@@ -604,7 +676,8 @@ export function Player() {
             setLoading(false);
           }}
         >
-          {subtitleOn && state?.subtitleUrl && (
+          {/* ASS/SSA 由 libass 画在 canvas 上，不走原生轨道 */}
+          {subtitleOn && state?.subtitleUrl && state.subtitleFormat !== 'ass' && (
             <track kind="subtitles" src={state.subtitleUrl} srcLang="zh" label="字幕" default />
           )}
         </video>

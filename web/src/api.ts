@@ -696,6 +696,8 @@ export interface PlaybackState {
   directUrl?: string;
   hlsUrl?: string;
   subtitleUrl?: string;
+  /** vtt：浏览器原生轨道；ass：前端 libass（SubtitlesOctopus）渲染，保留特效。 */
+  subtitleFormat?: 'vtt' | 'ass';
   /** ready：字幕已可挂；preparing：内嵌字幕还在抽（后端异步任务）。 */
   subtitleState?: 'ready' | 'preparing';
   /** 转封装模式：这一段预生成窗口的结束位置（秒）。0 = 直出或未知。 */

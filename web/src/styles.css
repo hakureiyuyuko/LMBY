@@ -1152,3 +1152,18 @@ th {
   border-radius: var(--radius-sm);
   background: var(--bg-elev-2);
 }
+
+/* libass（特效字幕）的渲染画布：绝对定位盖在画面上，不吃鼠标事件。
+   octopus 自己会给它加 position:relative，所以这里要用 !important 盖回去 ——
+   否则它会当成普通块级元素占位，把控制条挤下去。 */
+.player-stage .libassjs-canvas-parent {
+  position: absolute !important;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.player-stage .libassjs-canvas-parent canvas {
+  max-width: 100%;
+  max-height: 100%;
+}

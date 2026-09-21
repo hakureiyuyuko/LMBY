@@ -113,6 +113,9 @@ type StreamPlan struct {
 	// 字幕专用
 	Image  bool `json:"image,omitempty"`
 	Forced bool `json:"forced,omitempty"`
+	// DeliverAs 是字幕交给前端的形态：webvtt 或 libass（见 DeliverWebVTT /
+	// DeliverLibass）。空 = 不送字幕（没字幕 / 被用户关掉 / 图形字幕且不烧录）。
+	DeliverAs string `json:"deliverAs,omitempty"`
 
 	// 转码专用（Action == ActionTranscode 时有意义）：目标与处理方式。
 	// 「用哪个编码器、拼什么参数」不在这里 —— 那是执行层照本机能力表的活。
@@ -585,8 +588,17 @@ func planSubtitle(file *File, want int) StreamPlan {
 		return out
 	}
 
+	codec := strings.ToLower(ss.Codec)
 	out.Action = ActionConvert
-	out.Reason = fmt.Sprintf("字幕 #%d（%s）转成 WebVTT 由浏览器渲染", ss.Index, ss.Codec)
+	switch codec {
+	case "ass", "ssa":
+		// 交给前端 libass 渲染：转 WebVTT 会把定位、动画、样式全丢掉。
+		out.DeliverAs = DeliverLibass
+		out.Reason = fmt.Sprintf("字幕 #%d（%s）交给前端的 libass 渲染（保留特效与样式）", ss.Index, ss.Codec)
+	default:
+		out.DeliverAs = DeliverWebVTT
+		out.Reason = fmt.Sprintf("字幕 #%d（%s）转成 WebVTT 由浏览器渲染", ss.Index, ss.Codec)
+	}
 	return out
 }
 

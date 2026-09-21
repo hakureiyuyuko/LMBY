@@ -37,6 +37,19 @@ const (
 	ActionNone = "none"
 )
 
+// 字幕的交付形态。
+const (
+	// DeliverWebVTT 转成 WebVTT 走浏览器原生轨道：轻、起播快，适合纯对白字幕。
+	DeliverWebVTT = "webvtt"
+	// DeliverLibass 原样交给前端 libass（WASM）渲染。
+	//
+	// 为什么必须分两种：ASS/SSA 的定位（\pos）、轨迹（\move）、插值动画（\t）、
+	// 卡拉OK（\k）、矢量绘图（\p）—— 只有完整的 ASS 解释器能还原，转成
+	// WebVTT 这些全丢（而带特效的字幕正是 ASS 的常态）。
+	// 我们库里 145 个文件带 ASS，这是它们能不能「对味」的关键。
+	DeliverLibass = "libass"
+)
+
 // 容器归一化后的取值。
 const (
 	ContainerMP4   = "mp4"

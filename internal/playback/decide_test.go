@@ -155,7 +155,7 @@ func TestDecide(t *testing.T) {
 					[]probe.SubtitleStream{textSub(2, "ass", true, true)})}},
 			mode: ModeRemux, playable: true, segFormat: "fmp4",
 			videoAction: ActionCopy, audioAction: ActionCopy, subAction: ActionConvert,
-			wantContains: "WebVTT",
+			wantContains: "libass",
 		},
 		{
 			name: "PGS 图形字幕：不烧录，明确告知本次不显示",
@@ -293,5 +293,37 @@ func TestPlanAudioExplicitIndex(t *testing.T) {
 	got = Decide(Request{Profile: BrowserProfile(), Files: []File{f}, AudioIndex: 99})
 	if got.Audio.Index != 1 {
 		t.Errorf("指定不存在的音轨应当回退到默认轨，实际 #%d", got.Audio.Index)
+	}
+}
+
+func TestSubtitleDelivery(t *testing.T) {
+	// ASS/SSA 交给前端 libass（保留定位/动画/样式）：转成 WebVTT 这些全丢。
+	ass := movie("/m/a.mkv", "matroska,webm",
+		[]probe.VideoStream{h264(1920, 1080, 8, true)},
+		[]probe.AudioStream{audio(1, "aac", 2, true)},
+		[]probe.SubtitleStream{textSub(2, "ass", true, false)})
+	got := Decide(Request{Profile: BrowserProfile(), Files: []File{ass}, SubtitleIndex: 2})
+	if got.Subtitle.DeliverAs != DeliverLibass {
+		t.Errorf("ASS 应当交给 libass，得到 %q（理由：%s）", got.Subtitle.DeliverAs, got.Subtitle.Reason)
+	}
+
+	// SRT 这类纯对白字幕转 WebVTT 更轻（浏览器原生轨道，起播快）。
+	srt := movie("/m/b.mkv", "matroska,webm",
+		[]probe.VideoStream{h264(1920, 1080, 8, true)},
+		[]probe.AudioStream{audio(1, "aac", 2, true)},
+		[]probe.SubtitleStream{textSub(3, "subrip", true, false)})
+	got = Decide(Request{Profile: BrowserProfile(), Files: []File{srt}, SubtitleIndex: 3})
+	if got.Subtitle.DeliverAs != DeliverWebVTT {
+		t.Errorf("SRT 应当转 WebVTT，得到 %q", got.Subtitle.DeliverAs)
+	}
+
+	// SSA 与 ASS 同样处理（同一套语法）。
+	ssa := movie("/m/c.mkv", "matroska,webm",
+		[]probe.VideoStream{h264(1920, 1080, 8, true)},
+		[]probe.AudioStream{audio(1, "aac", 2, true)},
+		[]probe.SubtitleStream{textSub(4, "ssa", true, false)})
+	got = Decide(Request{Profile: BrowserProfile(), Files: []File{ssa}, SubtitleIndex: 4})
+	if got.Subtitle.DeliverAs != DeliverLibass {
+		t.Errorf("SSA 应当交给 libass，得到 %q", got.Subtitle.DeliverAs)
 	}
 }
