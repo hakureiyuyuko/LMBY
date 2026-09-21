@@ -100,6 +100,27 @@ async function waitVideoSized(v: HTMLVideoElement, tries = 50): Promise<void> {
   }
 }
 
+/**
+ * 服务端的兑底字体：部署时放哪种格式都行（ttf / ttc / otf），按顺序挑第一个存在的。
+ *
+ * 为什么不在前端写死一个文件名：字体是**部署资产**（几 MB 二进制不进仓库），
+ * 换字体（比如思源黑体 / 阿里巴巴普惠体）不该需要改代码重新发版；
+ * 而 octopus 的默认值 `default.woff2` 在包里根本不存在，缺了它 worker 会直接崩。
+ * 都没找到就返回空串，调用方据此优雅降级（而不是让 worker 崩掉）。
+ */
+async function pickFallbackFont(): Promise<string> {
+  for (const name of ['fallback.ttf', 'fallback.ttc', 'fallback.otf']) {
+    const u = absUrl(`/api/v1/fonts/${name}`);
+    try {
+      const r = await fetch(u, { method: 'HEAD', credentials: 'same-origin' });
+      if (r.ok) return u;
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return '';
+}
+
 /** octopus 实例的最小接口（它是外部脚本，没有 .d.ts）。 */
 interface OctopusInstance {
   destroy(): void;
@@ -645,6 +666,13 @@ export function Player() {
           }
         ).SubtitlesOctopus;
         if (!Ctor) throw new Error('libass 渲染器未就绪');
+        const font = await pickFallbackFont();
+        if (!font) {
+          if (!cancelled) {
+            setNotice('服务端没配兑底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了');
+          }
+          return;
+        }
         inst = new Ctor({
           video: v,
           // 直接喂字幕**文本**（见 fetchSubtitleText 的注释）。
@@ -659,7 +687,7 @@ export function Player() {
           timeOffset: baseRef.current,
           // 兑底字体由服务端提供：libass/WASM 看不到客户端的系统字体，而 octopus
           // 默认要的 `default.woff2` 在 npm 包里根本不存在 —— 缺了它 worker 直接崩。
-          fallbackFont: absUrl('/api/v1/fonts/fallback.ttf'),
+          fallbackFont: font,
           onError: () => {
             if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
           },

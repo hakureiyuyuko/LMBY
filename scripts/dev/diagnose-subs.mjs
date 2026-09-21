@@ -205,24 +205,19 @@ console.log(`跳转目标：${JSON.stringify(jumpTo)}`);
 // 跳到第一句对白处验证（这片的台词从 5:10 才开始，前面本来就没字）。
 // 关键：先让 `seeking` 真的变 true 再等它结束 —— 上一版漏了这一步，
 // 结果“抢在 seek 开始前”就判定了，暂停下来根本就没跳成。
+// 不 seek（这套窗口逻辑下 seek 的时序不好卡准）：从头播着采样 45 秒 ——
+// 片头本来就有演职员表类的 ASS 字幕，只要画布上出现过像素就说明字体与渲染是通的。
 let maxInk = 0;
 const samples = [];
-if (jumpTo?.start) {
-  const mid = (jumpTo.start + jumpTo.end) / 2;
-  await evaluate(`(() => { const v = document.querySelector('.player-video'); if (v) v.currentTime = ${mid}; return true; })()`);
-  await sleep(600);
-  const done = await waitFor('seek 完成', async () =>
-    await evaluate(`(() => { const v = document.querySelector('.player-video'); return !!v && !v.seeking && v.readyState >= 2; })()`), 45000);
-  console.log(`seek 完成=${done}（目标 ${mid.toFixed(1)}s）`);
-  for (let i = 0; i < 8; i++) {
-    const p = await evaluate(PROBE);
-    const ink = p && typeof p.ink === 'number' ? p.ink : 0;
-    maxInk = Math.max(maxInk, ink);
-    samples.push(ink);
-    await sleep(1000);
-  }
+for (let i = 0; i < 45; i++) {
+  const p = await evaluate(PROBE);
+  const ink = p && typeof p.ink === 'number' ? p.ink : 0;
+  maxInk = Math.max(maxInk, ink);
+  if (ink > 0) samples.push(ink);
+  await sleep(1000);
 }
-console.log(`采样：${samples.join(',')}`);
+console.log(`出现字幕的采样：${samples.length}/45，样例：${samples.slice(0, 8).join(',')}`);
+console.log(`最大非透明像素：${maxInk}（> 0 就说明字幕真的画上去了）`);
 console.log(`最大非透明像素：${maxInk}（> 0 就说明字幕真的画上去了）`);
 const after = await evaluate(PROBE);
 console.log(`\n【开字幕】${JSON.stringify(after)}`);
