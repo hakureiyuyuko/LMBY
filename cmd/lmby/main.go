@@ -289,6 +289,19 @@ func newLogger(level string) *slog.Logger {
 	return newLoggerTo(os.Stdout, level)
 }
 
+// encoderPreference 把配置里的字符串转成后端偏好；auto / 空 = 自动挑。
+//
+// 这里刻意**不**做白名单校验：认不出的值会在选择时因为「本机没有这个后端」
+// 而回退到自动选择，并记一条告警 —— 比启动就报错友好。
+func encoderPreference(v string) encoder.Kind {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "auto":
+		return ""
+	default:
+		return encoder.Kind(strings.ToLower(strings.TrimSpace(v)))
+	}
+}
+
 // newCLILogger 把日志写到 stderr。
 //
 // CLI 工具的 stdout 要留给数据（方便 jq/脚本处理），否则日志会和 JSON 结果
@@ -493,12 +506,14 @@ func cmdServe(args []string) error {
 
 	// 编码能力表：启动时后台真跑探测一次（约 1~3 秒，不阻塞启动）。
 	// 这样第一次点播放时不用现等，界面一打开也能看到「这台机器能用什么」。
-	encStore := encoder.NewStore(
-		cfg.FFmpeg.Path,
-		filepath.Join(cfg.DataDir, "capabilities.json"),
-		filepath.Join(cfg.DataDir, "probe"),
-		log,
-	)
+	encStore := encoder.NewStore(encoder.StoreOptions{
+		FFmpeg:         cfg.FFmpeg.Path,
+		CachePath:      filepath.Join(cfg.DataDir, "capabilities.json"),
+		WorkDir:        filepath.Join(cfg.DataDir, "probe"),
+		DeviceOverride: cfg.Playback.VAAPIDevice,
+		Prefer:         encoderPreference(cfg.Playback.Encoder),
+		Log:            log,
+	})
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()

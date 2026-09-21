@@ -55,7 +55,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 	}
 	if encoders == nil {
 		// 同理：未接能力表时给个空仓库，接口会现场探测，不会 nil panic。
-		encoders = encoder.NewStore(cfg.FFmpeg.Path, "", "", log)
+		encoders = encoder.NewStore(encoder.StoreOptions{FFmpeg: cfg.FFmpeg.Path, Log: log})
 	}
 	return &Server{
 		cfg:      cfg,

@@ -19,6 +19,20 @@ import (
 // 应该自动生效，所以给一个不算长的有效期，并且提供手动刷新（界面/接口）。
 const DefaultCacheTTL = 24 * time.Hour
 
+// StoreOptions 建能力表仓库的参数。
+type StoreOptions struct {
+	FFmpeg string
+	// CachePath 为磁盘缓存位置（空 = 不落盘，测试用）。
+	CachePath string
+	// WorkDir 探测时放小样文件的目录（空 = 系统临时目录）。
+	WorkDir string
+	// DeviceOverride 显式指定的硬件设备节点（空 = 自动从 /dev/dri 里挑）。
+	DeviceOverride string
+	// Prefer 强制指定后端；为空按默认顺序（硬件优先、最后兜底软编）。
+	Prefer Kind
+	Log    *slog.Logger
+}
+
 // Store 持有当前机器的能力表，并负责「首次懒探测 + 落盘缓存 + 手动刷新」。
 //
 // 并发下只允许一次探测（single-flight）：界面刷新按钮连点、或者多个请求
@@ -29,6 +43,8 @@ type Store struct {
 	ttl     time.Duration
 	log     *slog.Logger
 	workDir string
+	device  string
+	prefer  Kind
 
 	mu    sync.Mutex
 	caps  *Capabilities
@@ -36,9 +52,39 @@ type Store struct {
 	force bool          // 手动刷新时置上：下一次 Get 跳过内存与磁盘缓存，真探一遍
 }
 
-// NewStore 建一个能力表仓库。path 为空表示不落盘（测试用）。
-func NewStore(ffmpeg, path, workDir string, log *slog.Logger) *Store {
-	return &Store{ffmpeg: ffmpeg, path: path, ttl: DefaultCacheTTL, log: log, workDir: workDir}
+// NewStore 建一个能力表仓库。
+func NewStore(opts StoreOptions) *Store {
+	return &Store{
+		ffmpeg:  opts.FFmpeg,
+		path:    opts.CachePath,
+		ttl:     DefaultCacheTTL,
+		log:     opts.Log,
+		workDir: opts.WorkDir,
+		device:  opts.DeviceOverride,
+		prefer:  opts.Prefer,
+	}
+}
+
+// Preferred 给出运行时该用的后端：先看配置指定，再按默认顺序。
+//
+// 配置里指定的后端在本机不可用时**回退到自动选择并告警**，而不是直接报错：
+// 配置文件往往是在另一台机器上写好后拷过来的，因为一个后端不可用就打不开
+// 播放，比“先跑起来但画质不如预期”糟糕得多。
+func (s *Store) Preferred(caps *Capabilities) Backend {
+	if s.prefer != "" {
+		if s.prefer == KindSoftware {
+			return caps.Software
+		}
+		for _, b := range caps.Backends {
+			if b.Kind == s.prefer && b.Usable() {
+				return b
+			}
+		}
+		if s.log != nil {
+			s.log.Warn("配置指定的转码后端在本机不可用，回退自动选择", "want", s.prefer, "fallback", caps.Best().Kind)
+		}
+	}
+	return caps.Best()
 }
 
 // Get 返回能力表：内存 → 磁盘缓存 → 现场探测。
@@ -125,7 +171,7 @@ func (s *Store) GetCached() *Capabilities {
 
 func (s *Store) probe(ctx context.Context) (*Capabilities, error) {
 	start := time.Now()
-	caps, err := Probe(ctx, s.ffmpeg, ProbeOptions{WorkDir: s.workDir})
+	caps, err := Probe(ctx, s.ffmpeg, ProbeOptions{WorkDir: s.workDir, DeviceOverride: s.device})
 	if err != nil {
 		return nil, err
 	}

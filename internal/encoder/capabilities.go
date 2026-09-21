@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -55,6 +56,53 @@ var interestingFilters = []string{
 	"hwupload", "hwdownload", "hwmap", "format",
 }
 
+// hwAttempt 是一次真跑尝试：一段编码参数 + 它验证的能力标签。
+//
+// 为什么要按「尝试列表」而不是写一段参数：硬件编码的**码率模式**在各家驱动上
+// 差别很大 —— 老 Intel i965 只吃 CQP、新 iHD 与 AMD 的 VAAPI 更习惯 VBR、
+// QSV 常用 ICQ（global_quality）、NVENC 用 CQ。只拿其中一种当真跑判据，
+// 就会在别的机器上把**本来可用的后端误判成不可用**。
+type hwAttempt struct {
+	Label string   // 写进能力表的标签：cqp / vbr / cbr / icq / cq …
+	Args  []string // 追加在 -c:v <encoder> 后面的参数
+}
+
+// attemptsFor 给出「这个后端的这个编码该试哪几种码率模式」。
+// 刻意不预设哪种能用：全都真跑一遍，能用的都记下来，运行时直接用结果，不再猜。
+func attemptsFor(kind Kind, codec string) []hwAttempt {
+	switch kind {
+	case KindVAAPI:
+		// av1 的硬件编码器对 CQP 的支持晚于 h264/hevc，先试 VBR 更稳
+		if codec == "av1" {
+			return []hwAttempt{
+				{Label: "vbr", Args: []string{"-rc_mode", "VBR", "-b:v", "4M"}},
+				{Label: "cqp", Args: []string{"-rc_mode", "CQP", "-qp", "30"}},
+			}
+		}
+		return []hwAttempt{
+			{Label: "cqp", Args: []string{"-rc_mode", "CQP", "-qp", "23"}},
+			{Label: "vbr", Args: []string{"-rc_mode", "VBR", "-b:v", "4M"}},
+			{Label: "cbr", Args: []string{"-rc_mode", "CBR", "-b:v", "4M", "-maxrate", "4M", "-bufsize", "8M"}},
+		}
+	case KindQSV:
+		return []hwAttempt{
+			{Label: "icq", Args: []string{"-global_quality", "26"}},
+			{Label: "vbr", Args: []string{"-b:v", "4M"}},
+		}
+	case KindNVENC:
+		return []hwAttempt{
+			{Label: "cq", Args: []string{"-rc", "vbr", "-cq", "26"}},
+			{Label: "vbr", Args: []string{"-b:v", "4M"}},
+		}
+	case KindAMF:
+		return []hwAttempt{
+			{Label: "cqp", Args: []string{"-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
+			{Label: "cbr", Args: []string{"-b:v", "4M"}},
+		}
+	}
+	return []hwAttempt{{Label: "default", Args: []string{"-b:v", "4M"}}}
+}
+
 // Backend 是某个后端在**这台机器上**的真实能力。
 type Backend struct {
 	Kind      Kind            `json:"kind"`
@@ -63,7 +111,9 @@ type Backend struct {
 	Available bool            `json:"available"`
 	Encode    map[string]bool `json:"encode,omitempty"` // 编码："h264"/"hevc"/"av1"
 	Decode    map[string]bool `json:"decode,omitempty"` // 解码："h264"/"hevc"
-	Quality   []string        `json:"quality,omitempty"`
+	Quality   []string        `json:"quality,omitempty"` // 真跑通过的码率模式（cqp/vbr/cbr/icq…）
+	Prefer    string          `json:"preferQuality,omitempty"` // 上面第一个能用的：运行时直接用，不再猜
+	LowPower  bool            `json:"lowPower,omitempty"` // VAAPI 低功耗模式是否可用
 	Filters   []string        `json:"filters,omitempty"`
 	Notes     []string        `json:"notes,omitempty"`
 }
@@ -116,6 +166,17 @@ func (c *Capabilities) DeviceFor(k Kind) string {
 	return ""
 }
 
+// hwSpec 是「某个后端该怎么试」的描述。
+//
+// 放在包级而不是 Probe 内部：探测小样的那个方法（encodeSmoke）也要用它。
+type hwSpec struct {
+	kind     Kind
+	name     string
+	encoders map[string]string // codec（h264/hevc/av1）→ ffmpeg 里的编码器名
+	filters  []string          // 该后端常用到的滤镜（存在性会记进能力表）
+	device   string            // 设备节点（只有 VAAPI 需要）
+}
+
 // ProbeOptions 控制探测范围。
 type ProbeOptions struct {
 	// WorkDir 放小样文件与临时输出（默认 os.TempDir()）。
@@ -124,6 +185,9 @@ type ProbeOptions struct {
 	Timeout time.Duration
 	// SkipDecode 跳过解码探测（很快，一般不用跳）。
 	SkipDecode bool
+	// DeviceOverride 指定硬件设备节点：容器里 /dev/dri 不在默认位置、
+	// 或者一台机器有多张卡要挑一张时用。空 = 自动从 /dev/dri 里挑。
+	DeviceOverride string
 }
 
 // Probe 真跑一遍能力探测。耗时通常 1~3 秒（lavfi 小样 + 两个真解测试）。
@@ -192,29 +256,37 @@ func Probe(ctx context.Context, ffmpeg string, opts ProbeOptions) (*Capabilities
 	}
 
 	// ---- 真跑层：硬件后端 ----
-	type hwSpec struct {
-		kind     Kind
-		name     string
-		encoders map[string]string // codec → 编码器名
-		filters  []string          // 该后端用到的滤镜
-		device   string
-	}
 	var hw []hwSpec
-	if len(caps.Devices) > 0 {
-		dev := ""
-		for _, d := range caps.Devices {
-			if strings.Contains(d, "renderD") {
-				dev = d
-				break
-			}
-			if dev == "" {
-				dev = d
+	// 后端按平台加：VAAPI 是 Linux 的通用接口（要看 /dev/dri 在不在）；
+	// macOS 用 VideoToolbox、Windows 上的 AMD 用 AMF —— 不写死只支持 Linux。
+	if runtime.GOOS == "linux" {
+		dev := opts.DeviceOverride
+		if dev == "" {
+			for _, d := range caps.Devices {
+				if strings.Contains(d, "renderD") {
+					dev = d
+					break
+				}
+				if dev == "" {
+					dev = d
+				}
 			}
 		}
-		hw = append(hw, hwSpec{kind: KindVAAPI, name: "VAAPI（Linux 通用）", device: dev,
-			encoders: map[string]string{"h264": "h264_vaapi", "hevc": "hevc_vaapi", "av1": "av1_vaapi"},
-			filters:  []string{"scale_vaapi", "deinterlace_vaapi", "tonemap_vaapi"},
-		})
+		if dev != "" {
+			hw = append(hw, hwSpec{kind: KindVAAPI, name: "VAAPI（Linux 通用）", device: dev,
+				encoders: map[string]string{"h264": "h264_vaapi", "hevc": "hevc_vaapi", "av1": "av1_vaapi"},
+				filters:  []string{"scale_vaapi", "deinterlace_vaapi", "tonemap_vaapi"},
+			})
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		hw = append(hw, hwSpec{kind: KindVideoToolbox, name: "VideoToolbox（macOS）",
+			encoders: map[string]string{"h264": "h264_videotoolbox", "hevc": "hevc_videotoolbox"},
+			filters:  []string{"scale_vt"}})
+	}
+	if runtime.GOOS == "windows" {
+		hw = append(hw, hwSpec{kind: KindAMF, name: "AMD AMF（Windows）",
+			encoders: map[string]string{"h264": "h264_amf", "hevc": "hevc_amf"}})
 	}
 	hw = append(hw,
 		hwSpec{kind: KindQSV, name: "Intel Quick Sync", encoders: map[string]string{"h264": "h264_qsv", "hevc": "hevc_qsv", "av1": "av1_qsv"}, filters: []string{"scale_qsv", "vpp_qsv"}},
@@ -246,48 +318,69 @@ func Probe(ctx context.Context, ffmpeg string, opts ProbeOptions) (*Capabilities
 			}
 		}
 		anyEncoder := false
-		for codec, encName := range spec.encoders {
-			if !hasEncoder(encName) {
+		preferArgs := []string{}
+		// 固定的编码顺序：h264 优先（兼容性最好），然后 hevc、av1。
+		// 不用 map 遍历 —— 那样每次跑的结果顺序都可能不一样，缓存文件会莫名其妙地变。
+		for _, codec := range []string{"h264", "hevc", "av1"} {
+			encName := spec.encoders[codec]
+			if encName == "" || !hasEncoder(encName) {
 				continue
 			}
 			anyEncoder = true
-			args := []string{"-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25", "-t", "1"}
-			if spec.device != "" {
-				args = append([]string{"-vaapi_device", spec.device}, args...)
+			var worked []string
+			var lastReason string
+			for _, att := range attemptsFor(spec.kind, codec) {
+				ok, reason := p.encodeSmoke(spec, encName, att.Args)
+				if !ok {
+					lastReason = reason
+					continue
+				}
+				worked = append(worked, att.Label)
+				if codec == "h264" && b.Prefer == "" {
+					b.Prefer = att.Label
+					preferArgs = att.Args
+				}
+				// 非主编码只确认「能编」就够了，不必把每种码率模式试完（探测要够快）
+				if codec != "h264" {
+					break
+				}
 			}
-			args = append(args, "-vf", "format=nv12,hwupload", "-c:v", encName)
-			if spec.kind == KindVAAPI {
-				args = append(args, "-rc_mode", "CQP", "-qp", "23")
-			} else {
-				args = append(args, "-b:v", "4M")
-			}
-			args = append(args, "-f", "null", "-")
-			if ok, reason := p.smoke(args...); ok {
+			if len(worked) > 0 {
 				b.Encode[codec] = true
-				if spec.kind == KindVAAPI {
-					// 码率模式挨个试：本机实测 CQP 与 CBR 都能用，但不同驱动差别很大，
-					// 所以不靠猜，直接各跑一次。
-					if okCBR, _ := p.smoke("-vaapi_device", spec.device, "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25",
-						"-t", "1", "-vf", "format=nv12,hwupload", "-c:v", encName,
-						"-rc_mode", "CBR", "-b:v", "4M", "-maxrate", "4M", "-bufsize", "8M", "-f", "null", "-"); okCBR {
-						b.Quality = appendUnique(b.Quality, "cbr")
-					}
-					b.Quality = appendUnique(b.Quality, "cqp")
+				for _, l := range worked {
+					b.Quality = appendUnique(b.Quality, l)
 				}
 			} else {
-				b.Notes = append(b.Notes, encName+" 真跑失败："+reason)
+				b.Notes = append(b.Notes, fmt.Sprintf("%s 真跑失败（试了 %d 种码率模式）：%s",
+					encName, len(attemptsFor(spec.kind, codec)), lastReason))
+			}
+		}
+		// 低功耗模式：只对 VAAPI 试（它才有这个概念），能省电/少占 GPU，但画质差一点、
+		// 兼容性也不如普通模式，所以只记录能力，用不用由运行时决定。
+		if spec.kind == KindVAAPI && b.Encode["h264"] && len(preferArgs) > 0 {
+			if ok, _ := p.encodeSmoke(spec, spec.encoders["h264"], append(append([]string{}, preferArgs...), "-low_power", "1")); ok {
+				b.LowPower = true
 			}
 		}
 		if !anyEncoder {
-			b.Notes = append(b.Notes, "ffmpeg 里没有对应的硬件编码器")
+			b.Notes = append(b.Notes, "ffmpeg 里没有对应的硬件编码器（这个构建没编进去）")
 		}
-		// 解码：拿真文件试
-		if spec.device != "" && len(testFiles) > 0 {
-			for codec, path := range testFiles {
-				ok, reason := p.smoke("-vaapi_device", spec.device, "-hwaccel", string(spec.kind),
-					"-hwaccel_output_format", string(spec.kind), "-i", path, "-f", "null", "-")
-				b.Decode[codec] = ok
+		// 解码：拿真文件试（每个后端写自己的 -hwaccel 名字）
+		if len(testFiles) > 0 {
+			hwName := string(spec.kind)
+			for _, codec := range []string{"h264", "hevc"} {
+				path, ok := testFiles[codec]
 				if !ok {
+					continue
+				}
+				args := []string{}
+				if spec.device != "" {
+					args = append(args, "-hwaccel_device", spec.device)
+				}
+				args = append(args, "-hwaccel", hwName, "-hwaccel_output_format", hwName, "-i", path, "-f", "null", "-")
+				okDecode, reason := p.smoke(args...)
+				b.Decode[codec] = okDecode
+				if !okDecode {
 					b.Notes = append(b.Notes, "解 "+codec+" 失败："+reason)
 				}
 			}
@@ -305,6 +398,33 @@ func Probe(ctx context.Context, ffmpeg string, opts ProbeOptions) (*Capabilities
 	caps.ElapsedMS = time.Since(start).Milliseconds()
 	caps.ProbedAt = time.Now()
 	return caps, nil
+}
+
+// encodeSmoke 用 lavfi 小样真编一次（1 秒 720p）。
+func (p *prober) encodeSmoke(spec hwSpec, encName string, extra []string) (bool, string) {
+	args := []string{}
+	if spec.device != "" {
+		args = append(args, "-vaapi_device", spec.device)
+	}
+	args = append(args, "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25", "-t", "1",
+		"-vf", uploadFilter(spec.kind), "-c:v", encName)
+	args = append(args, extra...)
+	args = append(args, "-f", "null", "-")
+	return p.smoke(args...)
+}
+
+// uploadFilter 是「把帧交给硬件编码器」的那一段滤镜。
+//
+// 各后端写法不同，也没法用一套参数走天下：VAAPI 需要显式的 hwupload，
+// QSV 还要限制硬件帧池大小（不给会在部分驱动上直接失败）。
+func uploadFilter(kind Kind) string {
+	switch kind {
+	case KindVAAPI:
+		return "format=nv12,hwupload"
+	case KindQSV:
+		return "format=nv12,hwupload=extra_hw_frames=64"
+	}
+	return "format=nv12"
 }
 
 // ---------------------------------------------------------------- 内部

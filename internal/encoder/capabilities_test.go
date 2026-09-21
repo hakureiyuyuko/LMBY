@@ -1,6 +1,9 @@
 package encoder
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // 真实机器上的输出片段（ffmpeg 7.1.5 / Intel iHD）。解析器要用真实格式钉住 ——
 // 这张表每个 ffmpeg 版本都会动一点，靠肉眼看「大概对」是靠不住的。
@@ -59,6 +62,54 @@ func TestParseHWAccels(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("第 %d 项：得到 %q 想要 %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestAttemptsFor(t *testing.T) {
+	// 关键性质：每种后端都要给出**多个**候选（只试一种码率模式，
+	// 到了别家驱动上就会把本来可用的后端误判成不可用），
+	// 且每种候选都带真实参数（不能出现“标签好看但什么都不传”的占位）。
+	tests := []struct {
+		kind      Kind
+		codec     string
+		wantFirst string
+		minModes  int
+	}{
+		{KindVAAPI, "h264", "cqp", 3},
+		{KindVAAPI, "hevc", "cqp", 3},
+		{KindVAAPI, "av1", "vbr", 2}, // av1 的硬件编码器对 CQP 支持较晚，先试 VBR
+		{KindQSV, "h264", "icq", 2},
+		{KindNVENC, "h264", "cq", 2},
+		{KindVideoToolbox, "h264", "default", 1},
+		{KindAMF, "h264", "cqp", 2},
+		{Kind("unknown-backend"), "h264", "default", 1}, // 没见过的后端也得有兜底尝试
+	}
+	for _, tt := range tests {
+		got := attemptsFor(tt.kind, tt.codec)
+		if len(got) < tt.minModes {
+			t.Errorf("%s/%s 只有 %d 种尝试，至少要 %d 种", tt.kind, tt.codec, len(got), tt.minModes)
+		}
+		if got[0].Label != tt.wantFirst {
+			t.Errorf("%s/%s 第一种尝试应当是 %q，得到 %q", tt.kind, tt.codec, tt.wantFirst, got[0].Label)
+		}
+		for _, a := range got {
+			if a.Label == "" || len(a.Args) == 0 {
+				t.Errorf("%s/%s 的尝试 %+v 不完整", tt.kind, tt.codec, a)
+			}
+		}
+	}
+}
+
+func TestUploadFilterPerBackend(t *testing.T) {
+	// VAAPI 与 QSV 的“上传”写法不同，不能一套参数走天下
+	if got := uploadFilter(KindVAAPI); got != "format=nv12,hwupload" {
+		t.Errorf("VAAPI 上传滤镜不对：%q", got)
+	}
+	if got := uploadFilter(KindQSV); !strings.Contains(got, "extra_hw_frames") {
+		t.Errorf("QSV 上传滤镜应当限制硬件帧池：%q", got)
+	}
+	if got := uploadFilter(KindNVENC); strings.Contains(got, "hwupload") {
+		t.Errorf("NVENC 不需要 hwupload：%q", got)
 	}
 }
 

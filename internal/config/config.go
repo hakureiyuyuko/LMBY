@@ -63,6 +63,21 @@ type PlaybackConfig struct {
 	MaxSessions int `toml:"max_sessions"`
 	// IdleSeconds 是无客户端访问后回收会话的秒数，默认 45。
 	IdleSeconds int `toml:"idle_seconds"`
+
+	// VAAPIDevice 显式指定硬件设备节点（例如 "/dev/dri/renderD128"）。
+	//
+	// 留空 = 自动探测：从 /dev/dri 里挑第一个 renderD*。
+	// 什么时候要手写：一台机器有多张卡要挑其中一张；或者容器里设备映射到
+	// 非默认路径。故意不写死默认值 —— 写死了别的机器就对不上。
+	VAAPIDevice string `toml:"vaapi_device"`
+
+	// Encoder 强制指定转码后端：auto（默认）/ vaapi / qsv / nvenc /
+	// videotoolbox / amf / software。
+	//
+	// 留空或 auto = 按「硬件优先、最后兜底软编」的顺序自动挑。
+	// 只在**真的需要**时指定（比如用户更在意画质、宁愿用 CPU 软编）。
+	// 指定的后端在本机不可用时会回退自动选择并在日志里告警，不会导致播放失败。
+	Encoder string `toml:"encoder"`
 }
 
 // StreamsDirPath 返回解析过默认值的分片目录。

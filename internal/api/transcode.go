@@ -17,7 +17,7 @@ func (s *Server) handleTranscodeCapabilities(w http.ResponseWriter, r *http.Requ
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"capabilities": caps,
-		"best":         caps.Best(),
+		"best":         s.encoders.Preferred(caps),
 	})
 }
 
@@ -31,6 +31,6 @@ func (s *Server) handleRefreshTranscodeCapabilities(w http.ResponseWriter, r *ht
 		s.serverError(w, "重新探测编码能力失败", err)
 		return
 	}
-	s.log.Info("已手动重新探测编码能力", "首选", caps.Best().Name, "耗时ms", caps.ElapsedMS)
-	writeJSON(w, http.StatusOK, map[string]any{"capabilities": caps, "best": caps.Best()})
+	s.log.Info("已手动重新探测编码能力", "首选", s.encoders.Preferred(caps).Name, "耗时ms", caps.ElapsedMS)
+	writeJSON(w, http.StatusOK, map[string]any{"capabilities": caps, "best": s.encoders.Preferred(caps)})
 }

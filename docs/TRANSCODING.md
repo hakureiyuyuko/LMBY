@@ -8,6 +8,23 @@
 
 ## 一、本机能力矩阵（2026-09-21 实测）
 
+> ⚠️ **下面这张表是「某一次在某台机器上」的实例测量值，不是项目的常量。**
+> LMBY 自己不知道也不写死你是 Intel 还是 AMD、有没有显卡、ffmpeg 在哪个路径 ——
+> 这些全部由运行时的**真跑探测**得出（见 `internal/encoder`）：静态层读
+> `-version/-hwaccels/-encoders/-filters` 与设备节点；真跑层用 lavfi 生成 1 秒小样，
+> **逐个后端、逐个码率模式真编一遍**，再用真文件测硬件解码。只有真跑通过的后端
+> 才会被使用。所以换一台机器（甚至换一版驱动）结果就会不同。
+>
+> 也正因为如此，探测**不会**只试一种码率模式：老 Intel i965 只吃 CQP、
+> 新 iHD 与 AMD 的 VAAPI 更习惯 VBR、QSV 常用 ICQ、NVENC 用 CQ ——
+> 只拿一种当真跑判据，到了别的机器上就会把**本来可用的后端误判成不可用**。
+> 后端偏好与设备节点都可以在配置里覆盖：
+> ```toml
+> [playback]
+> encoder = "auto"                 # 或 vaapi / qsv / nvenc / videotoolbox / amf / software
+> # vaapi_device = "/dev/dri/renderD128"
+> ```
+
 宿主：PVE 上的 LXC `lmby-dev`（Intel **i5-10500T**，4 核 8 线程 2.3GHz，`/dev/dri` 直通）
 ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 
