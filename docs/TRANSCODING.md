@@ -221,7 +221,7 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
    缺了它 worker 会 fetch 失败并**直接崩掉**（控制台只有一句 `Worker error: ErrorEvent`）。
    部署时把一个中文字体放到 `<数据目录>/fonts/fallback.ttf`，前端通过
    `/api/v1/fonts/fallback.ttf` 取（接口有登录校验，且 `filepath.Base` 挡路径穿越）。
-   **字体选择与许可**：默认用**阿里巴巴普惠体 Regular**（官方声明免费商用，
+   **字体**：**阿里巴巴普惠体 3.0 Regular**（官方全量包里的 `AlibabaPuHuiTi-3-55-Regular.ttf`，8.5MB；官方声明免费商用，
    用于避免版权糾纷）；想要许可最硬的可以用**思源黑体 / Noto Sans SC**
    （SIL OFL 1.1 —— 明确允许嵌入、再分发与商用，Linux/Android 都用它）。
    字体文件**不入库**（几 MB 的二进制），部署时自己放。
