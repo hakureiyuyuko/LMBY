@@ -40,11 +40,15 @@ func TestHLSArgs(t *testing.T) {
 			"-map_chapters -1",
 			"/var/lib/lmby/streams/x/seg_%05d.m4s",
 			"/var/lib/lmby/streams/x/index.m3u8",
-			"-nostdin",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("缺少参数 %q：\n%s", want, s)
 			}
+		}
+		// 节流走 SIGSTOP/SIGCONT（不是 keys），所以照旧带 -nostdin：
+		// 免得 ffmpeg 去读我们这个后台进程的 stdin。
+		if !strings.Contains(s, "-nostdin") {
+			t.Error("应当带 -nostdin：节流走信号，不需要 stdin 通道")
 		}
 		if strings.Contains(s, "-tag:v") {
 			t.Error("h264 不该打 hvc1 标签")

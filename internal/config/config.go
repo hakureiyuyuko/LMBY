@@ -79,6 +79,14 @@ type PlaybackConfig struct {
 	// 指定的后端在本机不可用时会回退自动选择并在日志里告警，不会导致播放失败。
 	Encoder string `toml:"encoder"`
 
+	// ThrottleSeconds 是转码/转封装时的「预生成提前量」（秒），默认 60；
+	// 填 0 = 关闭节流。
+	//
+	// 已生成位置比客户端消费到的位置超前这么多时，服务端会把 ffmpeg 暂停
+	// （SIGSTOP）让它歇着，等客户端追上来再恢复（SIGCONT）。转码比实时快得多
+	//（本机 1080p 实测 20x+），不节流就是「用户刚点开、CPU 已把 300 秒窗口编完」。
+	ThrottleSeconds int `toml:"throttle_seconds"`
+
 	// TranscodeMaxHeight 是转码输出的高度上限（像素），默认 1080；
 	// 竖填 0 = 不限（目标分辨率只用客户端上报的上限）。
 	//
@@ -187,6 +195,7 @@ func Default() *Config {
 			MaxSessions:        4,
 			IdleSeconds:        45,
 			TranscodeMaxHeight: 1080,
+			ThrottleSeconds:    60,
 		},
 	}
 }
@@ -334,6 +343,10 @@ func (c *Config) Validate() error {
 	// 0 = 不限（合法的显式选择），负数与超过 8K 的值当写错处理。
 	if c.Playback.TranscodeMaxHeight < 0 || c.Playback.TranscodeMaxHeight > 4320 {
 		c.Playback.TranscodeMaxHeight = 1080
+	}
+	// 0 = 关闭节流（合法），负数与超过 1 小时的值当写错处理。
+	if c.Playback.ThrottleSeconds < 0 || c.Playback.ThrottleSeconds > 3600 {
+		c.Playback.ThrottleSeconds = 60
 	}
 	return nil
 }

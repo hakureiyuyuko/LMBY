@@ -167,9 +167,10 @@ TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 
 # 播放器界面验收（40 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单，截图到 shots-play/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
 
-# M4 转码：真库 HTTP 端到端（51 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
+# M4 转码：真库 HTTP 端到端（57 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
 # 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P、
-# 播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）。
+# 播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）、
+# 节流（转码跑到客户端前面就暂停 ffmpeg；看 /proc 的 State 确认真的停住了 T）。
 # 它**不假设本机一定能转**：先读能力表，只有探测到可用的 h264 编码器才断言「能播」，
 # 否则断言「如实说放不了」——所以它在弱机器上同样有意义。样本按编码条件现挑，优先 1080p。
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh

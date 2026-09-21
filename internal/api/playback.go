@@ -781,6 +781,11 @@ func (s *Server) handlePlayProgress(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	// 进度上报是最准的「客户端看到哪了」：转封装/转码的节流用它来判断
+	// 要不要暂停 ffmpeg（分片请求只能推出「下载到哪」，下载可以跑在播放前面）。
+	if sess := s.streams.Get(ps.StreamKey); sess != nil {
+		sess.MarkClientPosition(ticksToSeconds(body.PositionTicks))
+	}
 	p, err := s.saveProgress(r.Context(), ps, body.PositionTicks, body.DurationTicks)
 	if err != nil {
 		s.serverError(w, "保存播放进度失败", err)
@@ -891,7 +896,13 @@ func (s *Server) handlePlaySegment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "转封装会话已回收，请重新开始播放")
 		return
 	}
-	path, err := sess.SegmentPath(r.PathValue("name"))
+	name := r.PathValue("name")
+	// 客户端拉分片 = 它消费到那个位置了：节流器据此决定要不要让 ffmpeg 歇一会儿。
+	// 用「该分片的末尾」而不是开头：分片是整块下载的。
+	if idx, ok := stream.SegmentIndex(name); ok {
+		sess.MarkClientPosition(sess.Spec.StartSeconds + float64(idx+1)*float64(sess.SegmentSeconds()))
+	}
+	path, err := sess.SegmentPath(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "分片不存在")
 		return

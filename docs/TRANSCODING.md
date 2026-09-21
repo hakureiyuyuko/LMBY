@@ -166,9 +166,25 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 
 ### 节流（M4）
 
-不用 `SIGSTOP`，而是**往 ffmpeg 的 stdin 写 `p`（暂停）/ `u`（恢复）**——
-这是 Jellyfin 的做法（`TranscodingThrottler.cs`），比发信号温和：ffmpeg 会正常
-收尾当前分片并 flush 索引，在网络盘上不会留下半写状态。
+转码比实时快得多（本机 1080p 实测 20x+），不节流的话用户刚点开几秒、CPU 就把整个
+300 秒窗口编完了。所以：**已生成位置 − 客户端消费到的位置 > 阈值**（默认 60 秒）
+就让 ffmpeg 歇着，等客户端追上来再继续（开关与阈值见 `[playback] throttle_seconds`）。
+
+⚠️ **用的是 `SIGSTOP` / `SIGCONT`，不是 Jellyfin 那套「往 stdin 写 `p`/`u`」**：
+实测 Debian 的 ffmpeg 7.1.5 **在 stdin 是管道时根本不处理按键**（显式加 `-stdin`
+也一样，帧数一路涨）。SIGSTOP 唯一的顾虑是「暂停时留下半写分片」，而这一点我们已经用
+`-hls_flags temp_file`（分片先写临时文件、写完才改名）堵住了。
+
+其余要点：
+
+- 「客户端消费到哪」取两个来源的**较大值**：分片请求（拉到哪个分片）与进度上报
+  （真实播放位置）。取小会导致「刚恢复又暂停」来回抖。
+- 恢复阈值取「提前量的一半」，避开在阀值上反复横跳。
+- **取证方式**：暂停后 ffmpeg 的 `/proc/<pid>/status` 里 `State` 是 `T`（stopped）——
+  验收脚本靠这个确认「真的停了」，而不是我们单方面记了个状态位；
+  会话状态接口（`/api/v1/playback/sessions`）里也能直接看到
+  `generatedSeconds` / `clientSeconds` / `aheadSeconds` / `throttled`。
+- Windows 上没法暂停进程，节流退化为「不节流」（记一次日志，不影响播放）。
 
 判定依据：**已生成位置 − 客户端最近请求到的分片位置 > 阈值（默认 60 秒）** 就暂停，
 差值回落再恢复。注意命令行**不能带 `-nostdin`**，否则按键通道不存在。

@@ -323,7 +323,61 @@ else
 fi
 
 echo
-echo "== 12. 收尾：没有会话/进程残留 =="
+echo "== 12. 节流：转码跑到客户端前面就暂停 ffmpeg =="
+# 必须挑够长的片子：短片（几十秒）整个窗口会被几秒编完、ffmpeg 正常退出，
+# 根本没机会节流 —— 这一条踩过（60 秒的样本 9 秒就 finished 了）。
+LONG=$(pick_file "$SDR10_COND and coalesce(f.duration_ticks,0) > 36000000000")
+if [[ -z "$LONG" || "$CAN_TRANSCODE" != "true" ]]; then
+  note "没有「1 小时以上的 10bit HEVC」样本，跳过节流验证"
+else
+  note "长片样本：file=$LONG $(basename "$(file_path "$LONG")")"
+  sstat() { bd -b "$JAR" "$BASE/api/v1/playback/sessions" | jq -c '.transcodeSessions[0] // {}'; }
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$(item_of "$LONG")/play" -H 'Content-Type: application/json' -d '{"restart":true}')
+  TS=$(jq -r '.playSessionId // ""' <<<"$r")
+  if [[ -z "$TS" || "$TS" == "null" ]]; then
+    note "起播失败，跳过节流验证"
+  else
+    # 这里**故意不拉分片**：客户位置停在起点，转码很快就跑到前面去。
+    # 转码比实时快得多（实测 20x+），300 秒窗口十几秒就编完 —— 必须用密集轮询
+    # 在这段时间里抓住「暂停」，等固定秒数会错过（ffmpeg 已经正常退出了）。
+    paused=0; s1='{}'
+    for _ in $(seq 1 24); do
+      sleep 0.5
+      s1=$(sstat)
+      [[ "$(jq -r '.throttled // false' <<<"$s1")" == "true" ]] && { paused=1; break; }
+      [[ "$(jq -r '.state // ""' <<<"$s1")" == "finished" ]] && break
+    done
+    note "节流时状态：$(jq -c '{generatedSeconds,clientSeconds,aheadSeconds,throttled,segments,state}' <<<"$s1")"
+    check "ffmpeg 还在跑（短片会几秒编完，那样没机会节流）" ready "$(jq -r '.state // ""' <<<"$s1")"
+    check "转码跑到客户端前面后，ffmpeg 被暂停" 1 "$paused"
+
+    if [[ "$paused" == "1" ]]; then
+      n1=$(jq -r '.segments // 0' <<<"$s1")
+      FPID=$(pgrep -f 'ffmpeg .*hls_segment_filename' | head -1)
+      check "ffmpeg 进程真的被停住（/proc 状态 = T）" T "$(awk '/^State:/{print $2}' "/proc/$FPID/status" 2>/dev/null)"
+      sleep 6
+      n2=$(jq -r '.segments // 0' <<<"$(sstat)")
+      check "暂停期间不再产出分片（还在涨就说明没停住）" "$n1" "$n2"
+
+      if [[ "${n2:-0}" -ge 1 ]]; then
+        # 把最后几个分片拉一遍 = 客户端消费到那里 → 差值回落 → 应当恢复
+        for i in $(seq "$(( n2 > 4 ? n2 - 4 : 0 ))" "$(( n2 - 1 ))"); do
+          bd -b "$JAR" -o /dev/null "$BASE/api/v1/play/$TS/$(printf 'seg_%05d.m4s' "$i")"
+        done
+        sleep 7
+        s3=$(sstat)
+        note "客户端追上后：$(jq -c '{generatedSeconds,clientSeconds,aheadSeconds,throttled,segments,state}' <<<"$s3")"
+        check "恢复后继续产出分片（真的从暂停里回来了）" true "$(bool "$([[ "$(jq -r '.segments // 0' <<<"$s3")" -gt "$n2" ]] && echo true)")"
+        RPID=$(pgrep -f 'ffmpeg .*hls_segment_filename' | head -1)
+        check "恢复后进程不再处于暂停态" true "$(bool "$([[ "$(awk '/^State:/{print $2}' "/proc/$RPID/status" 2>/dev/null)" != "T" ]] && echo true)")"
+      fi
+    fi
+    json -b "$JAR" -X POST "$BASE/api/v1/play/$TS/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  fi
+fi
+
+echo
+echo "== 13. 收尾：没有会话/进程残留 =="
 json -b "$JAR" -X POST "$BASE/api/v1/auth/logout" -o /dev/null >/dev/null 2>&1 || true
 sleep 2
 check "跑完没有 ffmpeg 残留" 0 "$(ffmpeg_count)"

@@ -40,6 +40,7 @@ func CopyAudioEncode() AudioEncode { return AudioEncode{Copy: true} }
 //
 // 逐段的用意：
 //   - `-nostdin`：ffmpeg 会抢 stdin，作为后台进程跑时会导致它在收到 EOF 后退出；
+//     （节流走的是 SIGSTOP/SIGCONT，不靠 stdin 按键 —— 原因见 proc_unix.go）
 //   - `-ss` 放在 `-i` **之前**：输入侧快速跳转（对 `-c copy` 是唯一可行的做法，
 //     也是转码时最快起播的做法）。代价是只能落到关键帧上，与 Jellyfin 行为一致；
 //   - `-map 0:<绝对序号>`：不用「第几个视频流」这种相对序号，避免决策层

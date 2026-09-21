@@ -33,6 +33,9 @@ var ErrTooMany = errors.New("同时播放的路数已达上限，请稍后再试
 // ErrStartTimeout 表示等第一个分片超时（源文件读不动或参数不对）。
 var ErrStartTimeout = errors.New("等待转封装起步超时")
 
+// errThrottleUnsupported 表示这个平台没法暂停/恢复 ffmpeg 进程（Windows）。
+var errThrottleUnsupported = errors.New("这个平台不支持暂停 ffmpeg 进程")
+
 // Options 是转封装会话的运行参数（由 config.Playback 派生）。
 type Options struct {
 	// FFmpeg 是 ffmpeg 可执行文件路径。
@@ -47,6 +50,13 @@ type Options struct {
 	MaxSessions int
 	// IdleSeconds 是无客户端访问后回收会话的秒数。
 	IdleSeconds int
+	// ThrottleSeconds 是「预生成提前量」（秒）：已生成位置比客户端位置**超前**
+	// 这么多时就暂停 ffmpeg，等客户端追上来再恢复。0 = 不节流（一口气把窗口生成完）。
+	//
+	// 为什么需要：转码比实时快得多（本机 1080p 实测 11x），不节流的话用户刚点开
+	// 几秒，CPU 就把整个 300 秒窗口编完了 —— 剩下的时间机器白烧，
+	// 并发几路时还会互相抢资源。
+	ThrottleSeconds int
 }
 
 // Normalize 修正非法取值（配置已经在启动时校验过一次，这里是防御性的第二道）。
@@ -65,6 +75,10 @@ func (o Options) Normalize() Options {
 	}
 	if o.IdleSeconds < 10 || o.IdleSeconds > 3600 {
 		o.IdleSeconds = 45
+	}
+	// 0 是合法的（= 关闭节流），只挡负数与离谱的大值。
+	if o.ThrottleSeconds < 0 || o.ThrottleSeconds > 3600 {
+		o.ThrottleSeconds = 60
 	}
 	return o
 }
@@ -110,6 +124,17 @@ type Session struct {
 	started time.Time
 	last    atomic.Int64
 	ready   atomic.Bool
+
+	// 节流：segSecs 是分片时长（算「已生成到哪」要用）；clientSec 是客户端最近
+	// 消费到的媒体位置（毫秒，原子读写）。pauseFn/resumeFn 是「让 ffmpeg 歇一会」
+	// 的平台实现（Unix 用 SIGSTOP/SIGCONT），做成字段是为了单测能替换掉真发信号。
+	// throttleOff 表示这个平台不支持节流（Windows）：置位后不再重试也不刷日志。
+	segSecs     int
+	clientSec   atomic.Int64
+	paused      atomic.Bool
+	throttleOff atomic.Bool
+	pauseFn     func() error
+	resumeFn    func() error
 
 	exitOnce sync.Once
 	exited   chan struct{}
@@ -177,7 +202,28 @@ func (m *Manager) reapLoop() {
 			return
 		case <-t.C:
 			m.reap()
+			m.throttleAll()
 		}
+	}
+}
+
+// throttleAll 按「已生成 vs 客户端已消费」的差值暂停/恢复每个会话的 ffmpeg。
+//
+// 跟回收放在同一个 5 秒周期里：这两个都是「后台维护」类的事，
+// 没必要各开一个定时器。
+func (m *Manager) throttleAll() {
+	limit := m.opts.ThrottleSeconds
+	if limit <= 0 {
+		return
+	}
+	m.mu.Lock()
+	list := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		list = append(list, s)
+	}
+	m.mu.Unlock()
+	for _, s := range list {
+		s.throttle(limit)
 	}
 }
 
@@ -331,8 +377,15 @@ type SessionStat struct {
 	UptimeSec int     `json:"uptimeSec"`
 	IdleSec   int     `json:"idleSec"`
 	Segments  int     `json:"segments"`
-	Error     string  `json:"error,omitempty"`
-	Log       string  `json:"log,omitempty"`
+	// GeneratedSec / ClientSec / AheadSec 是节流用的三个位置（绝对秒）：
+	// 已生成到哪、客户端消费到哪、两者之差。Throttled 表示因此被暂停。
+	// 监控页与验收脚本靠它们判断节流是不是真的在工作（不用去数分片）。
+	GeneratedSec float64 `json:"generatedSeconds"`
+	ClientSec    float64 `json:"clientSeconds"`
+	AheadSec     float64 `json:"aheadSeconds"`
+	Throttled    bool    `json:"throttled"`
+	Error        string  `json:"error,omitempty"`
+	Log          string  `json:"log,omitempty"`
 }
 
 func newSession(opts Options, spec Spec) *Session {
@@ -341,13 +394,17 @@ func newSession(opts Options, spec Spec) *Session {
 		window = opts.WindowSeconds
 	}
 	spec.WindowSeconds = window
-	return &Session{
-		Key:    spec.Key,
-		Spec:   spec,
-		dir:    filepath.Join(opts.Root, safeDirName(spec.Key)),
-		exited: make(chan struct{}),
-		logs:   newRingLog(120),
+	s := &Session{
+		Key:     spec.Key,
+		Spec:    spec,
+		dir:     filepath.Join(opts.Root, safeDirName(spec.Key)),
+		segSecs: opts.SegmentSeconds,
+		exited:  make(chan struct{}),
+		logs:    newRingLog(120),
 	}
+	s.pauseFn = func() error { return pauseProcess(s.cmd) }
+	s.resumeFn = func() error { return resumeProcess(s.cmd) }
+	return s
 }
 
 // safeDirName 把会话键变成安全的目录名（键里有 id 与冒号）。
@@ -453,6 +510,122 @@ func (s *Session) segmentCount() int {
 // hasSegments 报告播放列表里是否已经有分片。
 func (s *Session) hasSegments() bool { return s.segmentCount() > 0 }
 
+// ---------------------------------------------------------------- 节流
+
+// GeneratedSeconds 返回已经生成到哪个媒体位置（绝对秒）。
+//
+// 用「播放列表里的分片数 × 分片时长」估算，不去读 ffmpeg 的实时进度：
+// 这个值只用来做「跑得太靠前就歇一会儿」的粗判断，不需要精确到帧。
+func (s *Session) GeneratedSeconds() float64 {
+	return s.Spec.StartSeconds + float64(s.segmentCount()*s.segSecs)
+}
+
+// SegmentSeconds 返回分片时长（秒）。
+func (s *Session) SegmentSeconds() int { return s.segSecs }
+
+// MarkClientPosition 记录客户端最近消费到的媒体位置（秒）。
+//
+// 两个来源都会调它：分片请求（拉到哪个分片）与进度上报（真实播放位置）。
+// 取较大值：两者偶尔会一前一后，取小会导致「刚恢复又暂停」来回抽。
+func (s *Session) MarkClientPosition(sec float64) {
+	if sec <= 0 {
+		return
+	}
+	ms := int64(sec * 1000)
+	for {
+		cur := s.clientSec.Load()
+		if ms <= cur || s.clientSec.CompareAndSwap(cur, ms) {
+			return
+		}
+	}
+}
+
+// ClientSeconds 返回客户端最近消费到的位置（秒）。
+func (s *Session) ClientSeconds() float64 { return float64(s.clientSec.Load()) / 1000 }
+
+// AheadSeconds 返回「已生成」领先客户端多少秒（负数表示还落后于客户端）。
+func (s *Session) AheadSeconds() float64 { return s.GeneratedSeconds() - s.ClientSeconds() }
+
+// Paused 报告当前是否因节流而暂停。
+func (s *Session) Paused() bool { return s.paused.Load() }
+
+// throttle 按「已生成 vs 客户端」的差值暂停或恢复 ffmpeg。
+//
+// 用按键（'p' / 'u'）而不是 SIGSTOP：ffmpeg 会正常收尾当前分片并 flush 索引，
+// 在网络盘（CIFS）上不会留下半写的分片，客户端也不会拿到截断的字节。
+//
+// 恢复阀值取「提前量的一半」，避开在阀值上反复暂停/恢复。
+func (s *Session) throttle(limit int) {
+	if limit <= 0 || s.throttleOff.Load() || s.exitedNow() {
+		return
+	}
+	ahead := s.AheadSeconds()
+	switch {
+	case !s.paused.Load() && ahead > float64(limit):
+		if err := s.pause(); err != nil {
+			s.throttleFailed(err)
+			return
+		}
+		s.paused.Store(true)
+		s.logf("节流：已生成 %.0fs，客户端才到 %.0fs（领先 %.0fs）→ 暂停 ffmpeg",
+			s.GeneratedSeconds(), s.ClientSeconds(), ahead)
+	case s.paused.Load() && ahead < float64(limit)/2:
+		if err := s.resume(); err != nil {
+			s.throttleFailed(err)
+			return
+		}
+		s.paused.Store(false)
+		s.logf("节流：客户端追到 %.0fs（领先 %.0fs）→ 恢复 ffmpeg",
+			s.ClientSeconds(), ahead)
+	}
+}
+
+// pause / resume 走平台实现（单测里会把它们换成计数器，不发真信号）。
+func (s *Session) pause() error {
+	if s.pauseFn == nil {
+		return errThrottleUnsupported
+	}
+	return s.pauseFn()
+}
+
+func (s *Session) resume() error {
+	if s.resumeFn == nil {
+		return errThrottleUnsupported
+	}
+	return s.resumeFn()
+}
+
+// throttleFailed：平台不支持（Windows）就永久关掉节流并只记一次日志——
+// 每 5 秒刷一次「不支持」没有任何意义；其它错误则如实记下。
+func (s *Session) throttleFailed(err error) {
+	if errors.Is(err, errThrottleUnsupported) {
+		if !s.throttleOff.Swap(true) {
+			s.logf("这个平台不支持暂停 ffmpeg 进程，节流已关闭（转码会把窗口一口气生成完）")
+		}
+		return
+	}
+	s.logf("节流操作失败：%v", err)
+}
+
+// logf 往会话日志（环形缓冲）写一行：/playback/sessions 与播放器都能看见，
+// 排查「为什么转码停住了」时这是第一条线索。
+func (s *Session) logf(format string, args ...any) {
+	_, _ = s.logs.Write([]byte("[lmby] " + fmt.Sprintf(format, args...) + "\n"))
+}
+
+// SegmentIndex 从分片文件名解析序号（seg_00012.m4s → 12）。
+func SegmentIndex(name string) (int, bool) {
+	base := strings.TrimSuffix(strings.TrimSuffix(name, ".m4s"), ".ts")
+	if !strings.HasPrefix(base, "seg_") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(base, "seg_"))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // waitReady 等待出现第一个分片。
 //
 // 一个容易踩的竞态：短文件（几十秒）的 ffmpeg 会在几百毫秒内跑完并退出，
@@ -553,11 +726,15 @@ func (s *Session) close() {
 // Stat 返回会话状态。
 func (s *Session) Stat() SessionStat {
 	st := SessionStat{
-		Key:       s.Key,
-		StartSec:  s.Spec.StartSeconds,
-		UptimeSec: int(time.Since(s.started).Seconds()),
-		IdleSec:   int(time.Since(s.LastActive()).Seconds()),
-		Segments:  s.segmentCount(),
+		Key:          s.Key,
+		StartSec:     s.Spec.StartSeconds,
+		UptimeSec:    int(time.Since(s.started).Seconds()),
+		IdleSec:      int(time.Since(s.LastActive()).Seconds()),
+		Segments:     s.segmentCount(),
+		GeneratedSec: s.GeneratedSeconds(),
+		ClientSec:    s.ClientSeconds(),
+		AheadSec:     s.AheadSeconds(),
+		Throttled:    s.Paused(),
 	}
 	switch {
 	case s.ready.Load() && s.exitedNow() && s.err() == nil:

@@ -491,10 +491,11 @@ func cmdServe(args []string) error {
 	streams := stream.NewManager(stream.Options{
 		FFmpeg:         cfg.FFmpeg.Path,
 		Root:           cfg.StreamsDirPath(),
-		SegmentSeconds: cfg.Playback.HLSSegmentSeconds,
-		WindowSeconds:  cfg.Playback.HLSWindowSeconds,
-		MaxSessions:    cfg.Playback.MaxSessions,
-		IdleSeconds:    cfg.Playback.IdleSeconds,
+		SegmentSeconds:  cfg.Playback.HLSSegmentSeconds,
+		WindowSeconds:   cfg.Playback.HLSWindowSeconds,
+		MaxSessions:     cfg.Playback.MaxSessions,
+		IdleSeconds:     cfg.Playback.IdleSeconds,
+		ThrottleSeconds: cfg.Playback.ThrottleSeconds,
 	}, log)
 	streams.Start()
 	defer streams.StopAll()
