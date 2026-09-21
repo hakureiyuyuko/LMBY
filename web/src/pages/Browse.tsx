@@ -36,8 +36,23 @@ export function Browse() {
 
   const [data, setData] = useState<BrowsePage | null>(null);
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  // 库列表：多个库时在顶上给出切换入口（只有一个库就不显示，免得白占一行）
+  const [libs, setLibs] = useState<LibrarySummary[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .libraries()
+      .then((r) => {
+        if (alive) setLibs(r.libraries ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!Number.isFinite(libraryId) || libraryId <= 0) {
@@ -89,6 +104,29 @@ export function Browse() {
 
   return (
     <>
+      {libs.length > 1 && (
+        <div className="card">
+          <div className="row">
+            <strong className="small">媒体库</strong>
+            <div className="tabs" style={{ marginBottom: 0 }}>
+              {libs.map((l) => (
+                <Link
+                  key={l.id}
+                  className={l.id === libraryId ? 'tab active' : 'tab'}
+                  to={`/library/${l.id}`}
+                >
+                  {l.name}
+                  <span className="faint small">
+                    {' '}
+                    {(l.counts?.movie ?? 0) + (l.counts?.series ?? 0)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="row">
           <h2 style={{ margin: 0 }}>{library?.name ?? '海报墙'}</h2>

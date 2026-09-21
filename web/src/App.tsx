@@ -10,6 +10,7 @@ import { Libraries } from './pages/Libraries';
 import { Login } from './pages/Login';
 import { Match } from './pages/Match';
 import { Player } from './pages/Player';
+import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { SeriesView } from './pages/Series';
 import { Settings } from './pages/Settings';
@@ -82,6 +83,8 @@ function AppRoutes() {
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
         <Route path="/libraries" element={<Libraries />} />
+        {/* 海报墙入口：一个库时直接进那面墙，多个库时先挑 */}
+        <Route path="/posters" element={<Posters />} />
         <Route path="/library/:id" element={<Browse />} />
         <Route path="/series/:id" element={<SeriesView />} />
         <Route path="/settings" element={<Settings />} />

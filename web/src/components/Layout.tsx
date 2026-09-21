@@ -1,9 +1,13 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { ThemeToggle } from './ThemeToggle';
 
 export function Layout() {
   const { user, meta, signOut } = useAuth();
+  const loc = useLocation();
+  // 「海报墙」在只有一个库时会重定向到 /library/{id}，所以在库/剧集/番剧页里
+  // 也要把它标成当前项 —— 否则点进去之后导航栏看起来“没选中任何东西”。
+  const inBrowse = loc.pathname.startsWith('/library/') || loc.pathname.startsWith('/series/');
 
   return (
     <div className="shell">
@@ -15,8 +19,11 @@ export function Layout() {
           <NavLink to="/search" className={({ isActive }) => (isActive ? 'active' : '')}>
             搜索
           </NavLink>
+          <NavLink to="/posters" className={({ isActive }) => (isActive || inBrowse ? 'active' : '')}>
+            海报墙
+          </NavLink>
           <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
-            媒体库
+            库管理
           </NavLink>
           <NavLink to="/match" className={({ isActive }) => (isActive ? 'active' : '')}>
             人工匹配
