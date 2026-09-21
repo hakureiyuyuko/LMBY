@@ -773,6 +773,12 @@ func (s *Server) handlePlayPlaylist(w http.ResponseWriter, r *http.Request) {
 //
 // 路径故意做成「与 index.m3u8 同级」：m3u8 里是相对文件名，
 // 客户端会拿播放列表 URL 作基准拼接。
+//
+// 为什么**不能**允许缓存：换一段窗口（seek）时分片文件名是一模一样的
+//（都是从 seg_00000.m4s 开始），而内容完全不同。若允许浏览器缓存，
+// seek 之后 hls.js 再要 seg_00000.m4s 就会拿回上一段的字节 ——
+// 表现是「拖到 1:30 却从头开始放」，而且时间轴显示的是新位置（实测踩到）。
+// 分片是“写一次、读一次”的临时文件，禁缓存没有任何代伷。
 func (s *Server) handlePlaySegment(w http.ResponseWriter, r *http.Request) {
 	ps, ok := s.playSessionForRequest(w, r)
 	if !ok {
@@ -788,9 +794,19 @@ func (s *Server) handlePlaySegment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "分片不存在")
 		return
 	}
+	f, err := os.Open(path)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "分片读不到")
+		return
+	}
+	defer func() { _ = f.Close() }()
+
 	w.Header().Set("Content-Type", segmentContentType(path))
-	w.Header().Set("Cache-Control", "private, max-age=300")
-	http.ServeFile(w, r, path)
+	// 分片名在不同窗口里是复用的，绝不能缓存（见上面的说明）。
+	w.Header().Set("Cache-Control", "no-store")
+	// 传零值 modtime：不要 Last-Modified，也就不会再出现条件请求回 304
+	// 而这种「304 = 用旧窗口的字节」正是我们要堵死的路径。
+	http.ServeContent(w, r, filepath.Base(path), time.Time{}, f)
 }
 
 // handlePlaySubtitle 输出 WebVTT 字幕。

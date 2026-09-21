@@ -227,6 +227,15 @@ check "m3u8 引用了分片" true "$(bool "$([[ -n "$SEG" ]] && echo true)")"
 check "init.mp4 = 200" 200 "$(st -b "$JAR" "$BASE/api/v1/play/$MSID/init.mp4")"
 check "首个分片 = 200" 200 "$(st -b "$JAR" "$BASE/api/v1/play/$MSID/$SEG")"
 check "不存在的分片 = 404" 404 "$(st -b "$JAR" "$BASE/api/v1/play/$MSID/seg_99999.m4s")"
+
+# 分片名在不同窗口里是复用的（都是从 seg_00000.m4s 开始），所以绝对不能允许缓存：
+# 否则 seek 以后浏览器会把上一个窗口（片子开头）的字节吐回去 ——
+# 表现就是「拖到后面却从头开始放」，而时间轴显示的是新位置。
+SH=$(hdrs -b "$JAR" "$BASE/api/v1/play/$MSID/$SEG")
+check "分片声明 no-store" "no-store" "$(hval "$SH" Cache-Control)"
+check "分片不带 Last-Modified（避免条件请求回 304 旧字节）" "" "$(hval "$SH" Last-Modified)"
+check "带 If-Modified-Since 也不回 304" 200 \
+  "$(st -b "$JAR" -H 'If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT' "$BASE/api/v1/play/$MSID/$SEG")"
 check "路径穿越被拒（非 200）" true \
   "$(bool "$([[ "$(st -b "$JAR" "$BASE/api/v1/play/$MSID/..%2F..%2Fetc%2Fpasswd")" != "200" ]] && echo true)")"
 # 分片 URL 必须是「播放列表同级」：客户端拿 m3u8 的 URL 作基准拼相对文件名

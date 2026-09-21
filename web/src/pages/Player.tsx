@@ -46,6 +46,10 @@ export function Player() {
   const windowEndRef = useRef(0);
   const advancingRef = useRef(false);
   const loadingRef = useRef(true);
+  // 拖动进度条相关：拖动中的显示值、在途 seek 结束后要补做的目标、防抖定时器
+  const dragValueRef = useRef<number | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  const seekTimerRef = useRef<number | null>(null);
   const lastReportRef = useRef(0);
   const stateRef = useRef<PlaybackState | null>(null);
 
@@ -58,6 +62,7 @@ export function Player() {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [position, setPosition] = useState(0);
+  const [dragValue, setDragValue] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -272,8 +277,7 @@ export function Player() {
   const advance = useCallback(async (at: number) => {
     const sid = sessionIdRef.current;
     const v = videoRef.current;
-    if (!sid || !v || advancingRef.current) return;
-    advancingRef.current = true;
+    if (!sid || !v) return;
     setNotice(`续下一段（${formatClock(at)}）…`);
     const wasPaused = v.paused;
     try {
@@ -292,8 +296,6 @@ export function Player() {
       void report(true);
     } catch (e) {
       setError(messageOf(e, '续下一段失败'));
-    } finally {
-      advancingRef.current = false;
     }
   }, [report]);
 
@@ -311,6 +313,99 @@ export function Player() {
     if (!wasPaused) void v.play().catch(() => undefined);
   }, []);
 
+  /**
+   * 真正执行一次跳转。
+   *
+   * 为什么要排队：拖进度条时浏览器会连发上百个事件（几乎每个像素一个），
+   * 而转封装模式下每个「窗口外」的位置都要服务端重开一段 ffmpeg —— 不可能全执行。
+   * 早先的写法是直接丢弃后来的请求，后果是「拖到 1:30，结果只跳到第一个事件的位置」
+   * （用户的原话：拖到后面却从头开始放）。现在改成：在途时只记下最后的目标，
+   * 上一次完成后补做最后那一个 —— 拖到哪，最终就停在哪。
+   */
+  const doSeek = useCallback(
+    async (target: number) => {
+      const v = videoRef.current;
+      const st = stateRef.current;
+      if (!v || !st) return;
+      if (advancingRef.current) {
+        pendingSeekRef.current = target;
+        return;
+      }
+      advancingRef.current = true;
+      try {
+        if (st.mode === 'direct') {
+          v.currentTime = target;
+          setPosition(target);
+          void report(true);
+        } else {
+          // 能不能就地跳？必须同时满足：
+          //   1. 目标在本段窗口里；
+          //   2. 目标已经在**浏览器已加载的区间**里。
+          //
+          // 第 2 条是踩出来的：hls.js 的可用区间只是「已下载的那几个分片」，
+          // 只按窗口判断的话，跳到一个还没下载到的位置会被浏览器夹回去 ——
+          // 表现就是「拖到 1:18，却从 0:00 继续放」。不在已加载区间就老老实实
+          // 让服务端从目标位置重开一段（`-c copy` 很快，一两秒事）。
+          const loaded = v.seekable.length > 0 ? v.seekable.end(v.seekable.length - 1) : 0;
+          const inLocalRange =
+            target >= baseRef.current &&
+            target < baseRef.current + loaded - 1 &&
+            target < windowEndRef.current - 1;
+          if (inLocalRange) {
+            v.currentTime = target - baseRef.current;
+            setPosition(target);
+            void report(true);
+          } else {
+            await advance(target);
+            setPosition(target);
+          }
+        }
+      } finally {
+        advancingRef.current = false;
+        setDragValue(null);
+        const next = pendingSeekRef.current;
+        pendingSeekRef.current = null;
+        if (next !== null && Math.abs(next - target) > 2) void doSeek(next);
+      }
+    },
+    [advance, report],
+  );
+
+  /** 拖动中：只改显示，250ms 防抖后才真提交（松手时立即提交）。 */
+  const scheduleSeek = useCallback(
+    (target: number) => {
+      dragValueRef.current = target;
+      setDragValue(target);
+      if (seekTimerRef.current !== null) window.clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = window.setTimeout(() => {
+        seekTimerRef.current = null;
+        void doSeek(target);
+      }, 250);
+    },
+    [doSeek],
+  );
+
+  /** 松手（鼠标抬起 / 键盘调整）：不等防抖，立即提交。 */
+  const commitSeek = useCallback(() => {
+    if (seekTimerRef.current !== null) {
+      window.clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = null;
+    }
+    const target = dragValueRef.current;
+    dragValueRef.current = null;
+    if (target !== null) void doSeek(target);
+  }, [doSeek]);
+
+  /** 快捷键用的相对跳转。 */
+  const nudge = useCallback(
+    (delta: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      void doSeek(Math.max(0, baseRef.current + v.currentTime + delta));
+    },
+    [doSeek],
+  );
+
   const onTimeUpdate = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -318,38 +413,15 @@ export function Player() {
     //（续窗口之后 reload 期间会重新置上，靠这一句兜底）。
     if (loadingRef.current) setLoading(false);
     const abs = baseRef.current + v.currentTime;
-    setPosition(abs);
+    // 拖动中不要用播放位置盖掉滑块，否则滑块会被拽回去
+    if (dragValueRef.current === null) setPosition(abs);
 
     const st = stateRef.current;
     if (!st || st.mode === 'direct' || advancingRef.current) return;
     const we = windowEndRef.current;
     if (!we || we >= durationRef.current - 1) return;
-    if (abs >= we - ADVANCE_MARGIN_S) void advance(we);
-  }, [advance]);
-
-  /** 拖动：窗口内直接拖（瞬时），窗口外让服务端重开一段。 */
-  const seekTo = useCallback(
-    async (target: number) => {
-      const v = videoRef.current;
-      const st = stateRef.current;
-      if (!v || !st) return;
-      if (st.mode === 'direct') {
-        v.currentTime = target;
-        setPosition(target);
-        void report(true);
-        return;
-      }
-      const inWindow = target >= baseRef.current && target < windowEndRef.current - 1;
-      if (inWindow) {
-        v.currentTime = target - baseRef.current;
-        setPosition(target);
-        void report(true);
-        return;
-      }
-      await advance(target);
-    },
-    [advance, report],
-  );
+    if (abs >= we - ADVANCE_MARGIN_S) void doSeek(we);
+  }, [doSeek]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -384,10 +456,10 @@ export function Player() {
           togglePlay();
           break;
         case 'ArrowLeft':
-          void seekTo(Math.max(0, baseRef.current + v.currentTime - 10));
+          nudge(-10);
           break;
         case 'ArrowRight':
-          void seekTo(baseRef.current + v.currentTime + 10);
+          nudge(10);
           break;
         case 'f':
           toggleFullscreen();
@@ -402,7 +474,7 @@ export function Player() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, toggleFullscreen, seekTo]);
+  }, [togglePlay, toggleFullscreen, nudge]);
 
   // 字幕开关（<track> 用 textTracks 控制显示）
   useEffect(() => {
@@ -573,8 +645,11 @@ export function Player() {
           type="range"
           min={0}
           max={Math.max(1, Math.floor(duration))}
-          value={Math.min(Math.floor(position), Math.floor(duration))}
-          onChange={(e) => void seekTo(Number(e.target.value))}
+          value={Math.min(Math.floor(dragValue ?? position), Math.floor(duration))}
+          onChange={(e) => scheduleSeek(Number(e.target.value))}
+          onPointerUp={commitSeek}
+          onKeyUp={commitSeek}
+          onBlur={commitSeek}
           disabled={!canPlay}
           aria-label="播放进度"
         />

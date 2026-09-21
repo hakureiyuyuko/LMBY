@@ -87,6 +87,8 @@ let id = 0;
 const pending = new Map();
 // 页面里的 JS 报错与控制台错误：界面“没渲染出按钮”时，原因基本都在这里
 const pageErrors = [];
+// 网络记录：验证「seek 之后分片是重新拉的，没命中浏览器缓存」（这是“拖到后面却从头放”的根因）
+const netLog = [];
 function connect(url) {
   return new Promise((resolve, reject) => {
     ws = new WebSocket(url);
@@ -100,6 +102,17 @@ function connect(url) {
         if (msg.error) rej(new Error(msg.error.message));
         else res(msg.result);
         return;
+      }
+      if (msg.method === 'Network.responseReceived') {
+        const r = msg.params?.response;
+        if (r && r.url.includes('/api/v1/play/')) {
+          netLog.push({
+            url: r.url.split('/').pop(),
+            status: r.status,
+            disk: Boolean(r.fromDiskCache),
+            mem: Boolean(r.fromMemoryCache),
+          });
+        }
       }
       if (msg.method === 'Runtime.exceptionThrown') {
         const d = msg.params?.exceptionDetails;
@@ -217,6 +230,15 @@ const videoState = `(() => {
   };
 })()`;
 
+/** 从控制条读时间（hls.js 下 video.duration 只是已缓冲长度，不能当片子总长用）。 */
+const labelTimes = `(() => {
+  const el = document.querySelector('.player-time');
+  if (!el) return null;
+  const parts = el.textContent.split('/').map((s) => s.trim());
+  const sec = (t) => { const p = t.split(':').map(Number); return p.length === 3 ? p[0]*3600 + p[1]*60 + p[2] : p[0]*60 + p[1]; };
+  return { pos: sec(parts[0] || '0'), dur: sec(parts[1] || '0') };
+})()`;
+
 /** 从条目页读出的绝对播放位置（控制条上那个 h:mm:ss）。 */
 const positionText = `(() => {
   const el = document.querySelector('.player-time');
@@ -231,6 +253,7 @@ async function main() {
   await connect(tab.webSocketDebuggerUrl);
   await send('Page.enable');
   await send('Runtime.enable');
+  await send('Network.enable');
 
   log('\n== 1. 登录 ==');
   await send('Page.navigate', { url: `${BASE}/login` });
@@ -272,7 +295,7 @@ async function main() {
         if (!out.direct && f.containerKind === 'mp4' && v.codec === 'h264' && (v.bitDepth || 8) === 8 && browserA) {
           out.direct = { id: it.id, title: it.title, file: f.containerKind + '/' + v.codec };
         }
-        if (!out.remux && f.containerKind === 'mkv' && v.codec === 'h264' && (v.bitDepth || 8) === 8) {
+        if (!out.remux && f.containerKind === 'mkv' && v.codec === 'h264' && (v.bitDepth || 8) === 8 && Math.round(f.durationTicks / 1e7) > 600) {
           out.remux = { id: it.id, title: it.title, file: f.containerKind + '/' + v.codec, subs: (f.subtitles || []).length, audio: a.codec };
         }
         if (!out.transcode && v.codec === 'hevc' && (v.bitDepth || 8) === 10) {
@@ -338,26 +361,29 @@ async function main() {
     check('直出用的是原文件地址（/stream）', true, String(st1?.src || '').includes('/stream'));
     check('时长已就绪（> 60s）', true, (st1?.duration ?? 0) > 60);
 
-    // 拖动到 50%
+    // 拖动到 50%（只等“位置真的变了”，不等固定时长：跳转要等服务端重开一段）
+    const directTarget = Math.floor((st1?.duration ?? 0) / 2);
     await evaluate(
       `(() => {
         const el = document.querySelector('.player-progress');
         const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        s.call(el, String(Math.floor(el.max / 2)));
+        s.call(el, String(${directTarget}));
         el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
         return el.value;
       })()`,
     );
-    check(
-      '拖动后从新位置继续播（currentTime 变大过）',
-      true,
-      await waitFor('拖动生效', async () => {
+    const directSeeked = await waitFor(
+      '直出拖动生效',
+      async () => {
         const st = await evaluate(videoState);
-        return st && st.currentTime > 1;
-      }, 15000),
+        return st && Math.abs(st.currentTime - directTarget) <= 5;
+      },
+      20000,
     );
+    check('直出拖动到目标位置（±5s）', true, directSeeked);
     const pos = await evaluate(positionText);
-    note(`控制条时间：${pos}`);
+    note(`控制条时间：${pos}（目标 ${directTarget}s）`);
     check('控制条显示的是整片时间（不是 0 起步）', true, !pos.startsWith('0:00 '));
     await shot('02-direct');
   }
@@ -398,9 +424,12 @@ async function main() {
     check('转封装走的是 m3u8 地址', true, String(st2?.src || '').includes('.m3u8') || String(st2?.src || '').includes('blob:'));
 
     const meta = await evaluate(apiCall('/api/v1/playback/sessions'));
-    remuxSession = (meta.body?.sessions || [])[0] || null;
-    check('服务端有 1 路播放会话', 1, (meta.body?.sessions || []).length);
-    check('服务端有 1 路转封装会话', 1, (meta.body?.transcodeSessions || []).length);
+    const mine = (body) => (body?.sessions || []).filter((x) => x.itemId === itemId);
+    // 只关心「我们这一路」：之前被强杀的浏览器可能留下未回收的旧会话（它们没有 pagehide）
+    remuxSession = mine(meta.body).sort((a, b) => (a.ageSeconds ?? 0) - (b.ageSeconds ?? 0))[0] || null;
+    check('服务端有本条的播放会话', true, mine(meta.body).length >= 1);
+    const transBefore = (meta.body?.transcodeSessions || []).length;
+    check('本条占用了一路转封装', true, transBefore >= 1);
     const windowEnd = await evaluate(`(async () => {
       const sid = ${JSON.stringify(remuxSession?.playSessionId || '')};
       if (!sid) return 0;
@@ -410,32 +439,36 @@ async function main() {
     })()`);
     note(`本段窗口末端：${windowEnd}s`);
 
-    // 「续下一段」：把进度拖到窗口末端附近，播放器应当让服务端从新位置重开一段
-    if (windowEnd > 30) {
-      const before = await evaluate(positionText);
+    // 「拖到已加载区间之外」：服务端应当从目标位置重开一段，并继续播下去
+    if (windowEnd > 60) {
+      const beforeT = await evaluate(labelTimes);
+      const seekTarget = Math.floor(windowEnd - 6);
       await evaluate(
         `(() => {
           const el = document.querySelector('.player-progress');
           const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          s.call(el, String(${Math.floor(windowEnd - 6)}));
+          s.call(el, String(${seekTarget}));
           el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
           return el.value;
         })()`,
       );
+      // 必须等「新窗口真的起播」再断言：旧实现在拖动后立刻读标签，读到的是旧值（假失败）
       const advanced = await waitFor(
-        '窗口续段',
+        '重开一段并起播',
         async () => {
+          const t = await evaluate(labelTimes);
           const st = await evaluate(videoState);
-          return st && st.currentTime > 0.5 && st.currentTime < windowEnd - 20;
+          return Boolean(t && st && Math.abs(t.pos - seekTarget) <= 10 && st.currentTime > 0.3);
         },
-        40000,
+        45000,
       );
-      check('拖到窗口末端后自动续下一段并继续播', true, advanced);
-      const after = await evaluate(positionText);
-      note(`续段前 ${before} → 续段后 ${after}`);
-      check('续段后整片时间往前跳了', true, after !== before);
+      check('拖到已加载区间之外后从新位置重开一段并起播', true, advanced);
+      const afterT = await evaluate(labelTimes);
+      note(`拖动前 ${beforeT?.pos}s → 拖动后 ${afterT?.pos}s（目标 ${seekTarget}s）`);
+      check('整片时间真的往前跳了', true, (afterT?.pos ?? 0) > (beforeT?.pos ?? 0) + 30);
     } else {
-      note('窗口太短（源文件比窗口还短），跳过续段断言');
+      note('窗口太短，跳过重开一段的断言');
     }
 
     const progReady = await waitFor(
@@ -449,6 +482,45 @@ async function main() {
     const prog = await evaluate(apiCall(`/api/v1/items/${itemId}/progress`));
     note(`服务端进度：${JSON.stringify(prog.body?.progress)}`);
     check('进度已上报到服务端（positionTicks > 0）', true, progReady);
+
+    // --- 回归：真实拖动（连续多个 input 事件）应当停在“最后一个位置” ---
+    // 曾经的 bug：拖动时只执行第一个事件，后面全被丢 —— 用户看到的是“拖到后面却从头放”。
+    const dur2 = (await evaluate(labelTimes))?.dur || 0;
+    if (dur2 > 200) {
+      const mark = netLog.length;
+      const target = Math.floor(dur2 * 0.6);
+      const finalValue = await evaluate(`(async () => {
+        const el = document.querySelector('.player-progress');
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        for (const p of [0.1, 0.2, 0.3, 0.45, 0.6]) {
+          set.call(el, String(Math.floor(${dur2} * p)));
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+        return el.value;
+      })()`);
+      note(`多步拖动到 ${finalValue}s（目标 ${target}s）`);
+      const landed = await waitFor(
+        '拖动落点',
+        async () => {
+          const st = await evaluate(videoState);
+          const t = await evaluate(labelTimes);
+          return Boolean(t && st && Math.abs(t.pos - target) <= 10 && st.currentTime > 0.3);
+        },
+        40000,
+      );
+      check('多步拖动后停在最后一个位置（不是第一次事件的位）', true, landed);
+      const fresh = netLog.slice(mark).filter((r) => r.url.includes('.m4s') || r.url.includes('init.mp4'));
+      note(
+        `拖动后重新拉的分片：${fresh.length} 个，命中缓存：${fresh.filter((r) => r.disk || r.mem).length} 个`,
+      );
+      check('拖动后重新拉了分片（不是空）', true, fresh.length > 0);
+      check('所有分片都是重新拉的（没有命中缓存）', true, fresh.every((r) => !r.disk && !r.mem));
+      check('分片请求都成功', true, fresh.every((r) => r.status === 200));
+    } else {
+      note('样本太短，跳过多步拖动回归');
+    }
     await shot('03-remux');
 
     log('\n== 6. 离开页面后自动回收（DoD：关页面不留 ffmpeg） ==');
@@ -466,7 +538,7 @@ async function main() {
     );
     check('离开播放器后播放会话被回收', true, gone);
     const after = await evaluate(apiCall('/api/v1/playback/sessions'));
-    check('转封装会话也停掉了', 0, (after.body?.transcodeSessions || []).length);
+    check('本条占用的转封装会话已释放', true, (after.body?.transcodeSessions || []).length < transBefore);
   }
 
   // ---------------------------------------------------------------- 决策解释
