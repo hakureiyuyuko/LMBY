@@ -82,6 +82,12 @@ type Request struct {
 	// 所以额外压一档 —— 默认值由配置给（见 [playback] transcode_max_height）。
 	TranscodeMaxHeight int
 
+	// BurnSubtitle 表示用户要求把字幕**烧进画面**。
+	//
+	// 图形字幕（PGS/VobSub 位图）只能这么看 —— 它不是文本，前端没法当普通字幕渲染；
+	// 而且烧录必须重编码，所以它会把本来能直出的片子也拉进转码。
+	BurnSubtitle bool
+
 	// MaxHeight 是**用户在播放器里选的画质档**（输出高度上限）。
 	//
 	// 三态：nil = 没选（按上面的 TranscodeMaxHeight 走）；
@@ -235,7 +241,7 @@ func decideForFile(p Profile, req Request, file *File) Plan {
 	vs, vReason := pickVideo(file, req.VideoIndex)
 	plan.Video = planVideo(p, req, file, vs, vReason)
 	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video)
-	plan.Subtitle = planSubtitle(file, req.SubtitleIndex)
+	plan.Subtitle = planSubtitle(file, req.SubtitleIndex, req.BurnSubtitle)
 	plan.Mode, plan.SegmentFormat, plan.Playable = planMode(p, file, plan)
 
 	for _, r := range []string{plan.Video.Reason, plan.Audio.Reason, plan.Subtitle.Reason} {
@@ -354,6 +360,11 @@ func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix 
 	}
 	// 用户选的档位低于源：这是**用户要求**的转码，不是能力不够 —— 理由要说清楚，
 	// 否则用户会以为是服务端不给他看原画质。
+	// 要烧字幕就必须重编码（图形字幕是位图，只能烧进画面）——哪怕本来能直出。
+	if req.BurnSubtitle {
+		why = append(why, "按你的选择烧录字幕")
+	}
+
 	userAskedLower := req.MaxHeight != nil && *req.MaxHeight > 0 && vs.Height > *req.MaxHeight
 	if userAskedLower {
 		why = append(why, fmt.Sprintf("你选了 %dp 输出（源是 %dp）", *req.MaxHeight, vs.Height))
@@ -558,7 +569,7 @@ func pickAudio(file *File, want int) (probe.AudioStream, bool) {
 //
 // 这里不接 Profile：字幕走的是独立 WebVTT 旁路，与客户端解码能力无关
 // （客户端最后也只用得着 WebVTT 一种形式）。
-func planSubtitle(file *File, want int) StreamPlan {
+func planSubtitle(file *File, want int, burn bool) StreamPlan {
 	out := StreamPlan{Action: ActionNone, Index: -1}
 	if want < 0 {
 		out.Reason = "按用户设置关闭字幕"
@@ -580,10 +591,15 @@ func planSubtitle(file *File, want int) StreamPlan {
 	out.Forced = ss.Forced
 
 	if ss.IsImage || !textSubtitleCodecs[strings.ToLower(ss.Codec)] {
-		// 图形字幕只能烧进画面，而烧录要重编码视频 —— M4 的事。
-		// 这里明确给出「这次不显示」，而不是悄悄丢掉。
-		out.Action = ActionDrop
+		// 图形字幕（PGS/VobSub）是位图，浏览器没法当文本渲染 ——
+		// 要么烧进画面（要重编码），要么明确告诉用户「这次不显示」。
 		out.Image = ss.IsImage
+		if burn {
+			out.Action = ActionBurn
+			out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，按你的选择烧进画面（会重新编码）", ss.Index, ss.Codec)
+			return out
+		}
+		out.Action = ActionDrop
 		out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，需要烧录进画面（烧录链路还没接上），本次不显示", ss.Index, ss.Codec)
 		return out
 	}
