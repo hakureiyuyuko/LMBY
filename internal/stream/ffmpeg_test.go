@@ -33,6 +33,11 @@ func TestHLSArgs(t *testing.T) {
 			"-hls_fmp4_init_filename init.mp4",
 			"-hls_time 4",
 			"-hls_playlist_type event",
+			// 默认值是 5（只留 20 秒），必须显式 0
+			"-hls_list_size 0",
+			"-hls_segment_options movflags=+frag_discont+skip_sidx",
+			"-map_metadata -1",
+			"-map_chapters -1",
 			"/var/lib/lmby/streams/x/seg_%05d.m4s",
 			"/var/lib/lmby/streams/x/index.m3u8",
 			"-nostdin",
@@ -75,8 +80,8 @@ func TestHLSArgs(t *testing.T) {
 		if !strings.Contains(s, "-hls_segment_type ts") || !strings.Contains(s, "seg_%05d.ts") {
 			t.Errorf("ts 分片参数不对：\n%s", s)
 		}
-		if strings.Contains(s, "-hls_fmp4_init_filename") {
-			t.Errorf("ts 分片不该有 fMP4 的 init 段：\n%s", s)
+		if strings.Contains(s, "-hls_fmp4_init_filename") || strings.Contains(s, "-hls_segment_options") {
+			t.Errorf("ts 分片不该有 fMP4 专有参数：\n%s", s)
 		}
 	})
 

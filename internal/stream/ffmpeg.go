@@ -69,16 +69,27 @@ func hlsArgs(opts Options, spec Spec, outDir string) []string {
 	args = append(args,
 		"-f", "hls",
 		"-hls_time", strconv.Itoa(opts.SegmentSeconds),
-		// event 而不是 vod：播放列表只追加、不重写，播放器可以在生成的这段里自由拖动。
-		// 窗口结束时会自动补 EXT-X-ENDLIST，播放器据此知道这一段到底了。
+		// event 而不是 vod：播放列表只追加、不重写。窗口结束时会自动补
+		// EXT-X-ENDLIST，播放器据此知道这一段到底了。
 		"-hls_playlist_type", "event",
+		// ⚠ 必须显式设 0（= 列表里保留全部分片）。默认值是 5 —— 只留最近
+		// 约 20 秒（5×4s），客户端能「就地跳」的区间也就只有 20 秒，
+		// 其余位置都得让服务端重开一段 ffmpeg。
+		// （Jellyfin 在 DynamicHlsController 里也是 `-hls_list_size 0`。）
+		"-hls_list_size", "0",
 		"-hls_segment_type", segFormat,
 		"-hls_flags", "independent_segments+temp_file",
 		"-hls_segment_filename", filepath.Join(outDir, "seg_%05d"+segmentExt(segFormat)),
 	)
 	if segFormat == "fmp4" {
-		args = append(args, "-hls_fmp4_init_filename", "init.mp4")
+		args = append(args, "-hls_fmp4_init_filename", "init.mp4",
+			// 音视频起步时间不一致（转码时常见）也能连贯播放；skip_sidx 只是瘦身。
+			"-hls_segment_options", "movflags=+frag_discont+skip_sidx")
 	}
+	// 源文件的元数据/章节对播放器毫无意义，拷进分片只是白占空间。
+	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1")
+	// 网络盘（CIFS）读源时给输入/输出一点缓冲，避免瞬时抖动直接断流。
+	args = append(args, "-max_delay", "5000000")
 	return append(args, filepath.Join(outDir, "index.m3u8"))
 }
 
