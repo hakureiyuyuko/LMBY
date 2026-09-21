@@ -84,6 +84,10 @@ IFS='|' read -r SUBF SUBIDX SUBDEF SUBFORCED <<<"$(PSQL "select f.id, (s.value->
   where f.deleted_at is null and f.probe_state='ok'
     and (f.video_streams->0)->>'codec'='h264' and coalesce((f.video_streams->0)->>'bitDepth','8')='8'
     and (s.value->>'isImage')::bool is not true
+    -- 必须排除 ASS/SSA：它们走前端 libass（交 .ass 原文），不是 WebVTT。
+    -- 不过滤的话会挑到 ASS 轨，再拿 ASS 原文去断言「首行是 WEBVTT」（真跑踩到；
+    -- 命中哪个文件取决于返回顺序，表现为“时好时坏”）。
+    and lower(coalesce(s.value->>'codec','')) not in ('ass','ssa')
     and coalesce(f.duration_ticks,0) > 600000000
   order by f.size_bytes asc limit 1")"
 IFS='|' read -r PGSF PGSIDX <<<"$(PSQL "select f.id, (s.value->>'index')
@@ -356,7 +360,7 @@ out=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$MP4I/play" -H 'Content-Type: a
 check "客户端上报乱值不会崩（能力被清洗）" 200 "$out"
 
 echo
-echo "== 9. 字幕：文本 → WebVTT，图形 → 明确不显示 =="
+echo "== 9. 字幕：文本 → WebVTT，图形 → 不选烧录就明确告知怎么看得到 =="
 if [[ -z "$SUBF" ]]; then
   note "没有「h264 + 文本字幕」样本，跳过"
 else
@@ -391,8 +395,8 @@ if [[ -z "$PGSF" ]]; then
 else
   r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$PGSI/play" -H 'Content-Type: application/json' \
     -d "$(jq -nc --argjson i "$PGSIDX" '{restart:true, subtitleStreamIndex:$i}')")
-  check "图形字幕动作 = drop（M4 才能烧录）" drop "$(jq -r '.plan.subtitle.action' <<<"$r")"
-  check "理由里说明要烧录" true "$(bool "$(jq -r '[.reasons[]|test("烧录")]|any' <<<"$r")")"
+  check "图形字幕动作 = drop（需要在播放器里选「烧进画面」）" drop "$(jq -r '.plan.subtitle.action' <<<"$r")"
+  check "理由里说清要选烧录才能看到" true "$(bool "$(jq -r '[.reasons[]|test("烧进画面")]|any' <<<"$r")")"
   check "没有 subtitleUrl（不假装能显示）" "" "$(jq -r '.subtitleUrl // ""' <<<"$r")"
   PSID=$(jq -r '.playSessionId' <<<"$r")
   r2=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$PGSI/play" -H 'Content-Type: application/json' \

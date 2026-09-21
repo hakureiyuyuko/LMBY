@@ -164,20 +164,23 @@ bash scripts/dev/seed-review-item.sh --restore                        # 用完�
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh
 TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 额外验「无人观看 45s 自动回收」
 
-# 播放器界面验收（42 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单、
-# 特效字幕（选 ASS 轨 → libass 画布挂上），截图到 shots-play/）
+# 播放器界面验收（47 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单、
+# 特效字幕（选 ASS 轨 → libass 画布挂上）、图形字幕烧录（菜单标「需烧录」、
+# 前端真把 burnSubtitle 传下去、烧录时不挂独立字幕轨道），截图到 shots-play/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
 
-# 特效字幕真渲染（真 Chrome 选 ASS 轨 → 等 libass canvas → 跳到有对白处 → 截图）：
-# 参数是条目 id 与字幕流序号（可从 verify-transcode.sh 的「特效字幕」节看到）
-BASE=http://<LMBY_DEV_IP>:8099 node scripts/dev/subs-shot.mjs <itemId> <subtitleIndex> subs.png
+# 特效字幕诊断（开/关对照：画布像素 + 截图 + console/网络）：
+# 参数是条目 id 与字幕流序号（都可省略，省略时会自己挑一个带 ASS 的条目）；
+# 序号可从 verify-transcode.sh 的「特效字幕」节看到
+BASE=http://<LMBY_DEV_IP>:8099 node scripts/dev/diagnose-subs.mjs [itemId] [subtitleIndex]
 
-# M4 转码 + 字幕：真库 HTTP 端到端（72 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
-# 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P、
-# 播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）、
-# 节流（转码跑到客户端前面就暂停 ffmpeg；看 /proc 的 State 确认真的停住了 T）、
+# M4 转码 + 字幕：真库 HTTP 端到端（92 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
+# 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P（含硬解
+# 起不来时自动降级软解）、播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）、
+# 节流（转码跑到客户端前面就暂停 ffmpeg；看 /proc 的 State 确认真的停住了 T；中途续播不该被卡死）、
 # 会话监控（fps/speed/码率）与管理员一键终止（401 / 200 / 会话消失 / 404）、
-# 特效字幕（ASS 原样抽出 → 前端 libass 渲染：交付形态、.ass 地址、[Script Info]/Dialogue/Style 都在）。
+# 特效字幕（ASS 原样抽出 → 前端 libass 渲染：交付形态、.ass 地址、[Script Info]/Dialogue/Style 都在）、
+# 图形字幕烧录（真叠进画面：子步与不烧录逐帧对照，blend=difference 的 YMAX 有字幕 208 / 无字幕 0）。
 # 它**不假设本机一定能转**：先读能力表，只有探测到可用的 h264 编码器才断言「能播」，
 # 否则断言「如实说放不了」——所以它在弱机器上同样有意义。样本按编码条件现挑，优先 1080p。
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh
@@ -209,6 +212,14 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-caps.sh
    素材没有 → 滤镜报错 → **整路转码起不来**，用户看到的是「放不了」）；而且**缩放要放在
    色调映射之前**（先在显存里 `scale_vaapi` 再 `hwdownload`），否则 4K 连 20 秒起播超时
    都过不去。这两条都是真跑才拓出来的，细节与实测数字见 `docs/TRANSCODING.md`。
+7. **环境必须干净才能跑计数类断言**：`verify-play.sh` 会断言「转封装会话只有 1 路」
+   「stop 后没有残留」，本机若有别的播放（别人正在看、或**上一个会话遗留、卡了一整天的
+   验收脚本进程**）就必然假失败 —— 真踩到过：一个 9/20 起的 `verify-play.sh` 一直在后台
+   循环播片，把四项计数断言全弄红了。跑验收前先 `ps -ef | grep -E 'verify-|play-ui'` 看一眼。
+8. **拿 ffmpeg 从 HLS 取帧做开/关对照时，必须加 `-live_start_index 0`**：我们的播放列表是
+   EVENT（没有 ENDLIST），ffmpeg 会把它当直播、**默认从倒数第三个分片开始**（`-3`）。
+   不加的话两路会从各自列表的不同位置起读（实测一个 4s、一个 40s），对照就变成
+   「两个不同时刻的画面」在比 —— 连对照组都会报出两三百的帧差，看着像“烧录成功了”。
 
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
 脚本跑到一半报「引号未闭合」，很难看出在哪一行。

@@ -1,6 +1,6 @@
 # LMBY 开发 Todolist
 
-> 状态：**M0 / M1 / M2 / M3 均已完成并实测验收**，下一步 M4（转码与硬件加速）。
+> 状态：**M0 / M1 / M2 / M3 均已完成并实测验收；M4（转码与硬件加速）除少数项外已完成**（逐项见下）。
 > 已完成项标 `[x]`，未完成/改期的项保留在下方并注明原因。
 > 原则：先打通端到端最小闭环（扫描→入库→播放），再堆功能；**转码是唯一高风险块，尽早真机验证**。
 > 参考代码：`C:\Users\admin\Desktop\dev\_ref\jellyfin`（只读阅读，不复制文件）、`C:\Users\admin\Desktop\dev\TV`（自研，可复用）。
@@ -491,20 +491,26 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 
 **参考**：`Encoder/EncoderValidator.cs` ⭐（能力探测）、`Transcoding/TranscodeManager.cs`、`Encoder/MediaEncoder.cs`、`Encoder/EncodingUtils.cs` ⭐（命令拼装）、`DynamicHlsController.cs`
 
-- [ ] ffmpeg 探测：`-hwaccels`/`-encoders`/`-filters` + **真跑 1 秒小样验证** + 结果缓存 + GUI 手动覆盖
-- [ ] 能力矩阵建模：源(视频/音频/字幕/位深/HDR) × 目标 profile × 硬件后端 → 命令模板
-- [ ] CPU 基线：libx264/libx265（preset/CRF/最大码率）
-- [ ] 硬件后端逐个落地并真机验证：**QSV → NVENC/NVDEC → VAAPI → VideoToolbox → AMF**
-- [ ] 音频：AAC/AC3/Opus、多声道 downmix、直通优先
-- [ ] 字幕：文本 → WebVTT 轨道（外挂/内嵌）；图形字幕(PGS/VOBSUB) → burn-in 或明确提示不支持；外挂字幕上传
-- [ ] HDR：HDR10/HLG → SDR tone mapping（含硬件路径）；DV P5 → HDR10 策略
-- [ ] **节流与回收**：预生成 N 片 → `SIGSTOP` ffmpeg → 分片被消费时 `SIGCONT`；空闲 TTL 回收进程 + 清理分片目录（**禁用 `-re`**）
-- [ ] 会话复用（同 item + 同 profile 共享一路）+ 并发上限 + 队列 + 抢占
-- [ ] 质量档位（码率阶梯）+ 手动切换；带宽自适应（可选）
+- [x] ffmpeg 探测：`-hwaccels`/`-encoders`/`-filters` + **真跑 1 秒小样验证** + 结果缓存（界面上的手动覆盖还没做）
+- [x] 能力矩阵建模：源(视频/音频/字幕/位深/HDR) × 目标 profile × 硬件后端 → 命令模板
+- [x] CPU 基线：libx264/libx265（preset/CRF/最大码率）—— 本机实测 `veryfast` 只有 0.9x 实时，所以它只是兜底
+- [x] 硬件后端落地：**VAAPI 真机验证**（硬解硬编 11.8x）；QSV/NVENC/VideoToolbox/AMF 参数照 Jellyfin 写、**未真跑**
+- [x] 音频：AAC/多声道 downmix、能直通就直通
+- [x] 字幕：文本 → WebVTT（外挂还没做）；ASS/SSA → 前端 libass；**图形字幕(PGS/VOBSUB) → burn-in**（外挂字幕上传未做）
+- [x] HDR：HDR10/HLG → SDR tone mapping（走软件链，`tonemap_vaapi` 在本机 iHD 上实测用不了）；DV P5 → HDR10 策略未做
+- [x] **节流与回收**：预生成 N 片 → `SIGSTOP` ffmpeg → 分片被消费时 `SIGCONT`；空闲 TTL 回收进程 + 清理分片目录（**禁用 `-re`**）
+- [x] 会话复用（同 item + 同编码参数共享一路）+ 并发上限（队列/抢占未做）
+- [x] 质量档位（码率阶梯）+ 手动切换；带宽自适应未做
 - [ ] Trickplay：章节图 + 时间轴精灵图（异步 + 落盘缓存 + 可关闭）
-- [ ] 转码监控页：活跃会话、实时 fps/speed/码率、一键终止
-- [ ] `docs/TRANSCODING.md`：支持矩阵 + 实测数据
-- [ ] **DoD**：目标机器 1080p HEVC→H264 硬件转码 ≥ 1x 实时；转码中拖动/切集/关页无残留进程；4K→1080p 与 HDR→SDR 各有一条真实通过用例
+- [x] 转码监控页：活跃会话、实时 fps/speed/码率、一键终止
+- [x] `docs/TRANSCODING.md`：支持矩阵 + 实测数据
+- [x] **DoD**：目标机器 1080p HEVC→H264 硬件转码 ≥ 1x 实时（实测 11.8x）；
+      转码中拖动/切集/关页无残留进程；4K→1080p 与 HDR→SDR 各有一条真实通过用例
+
+> 还差的（M4 收尾清单）：`-copyts -avoid_negative_ts disabled`（绝对时间轴，能删掉播放器的窗口簿记，风险最高）、
+> 外挂字幕的 GB18030 编码探测、ASS 附件字体（`fontsdir`）、Trickplay、探测补 `rotation`/`probe_score`、
+> DV P5 → HDR10、带宽自适应、外挂字幕上传。
+> 已顺手修掉的两个真 bug：Hi10P 硬解起不来导致「放不了」（现自动降级软解）、从影片中途续播被节流卡死。
 
 > 📌 **发 v0.1**：M3 结束即可发布（能播 h264 库 + 直出/remux）。M4 结束发 **v0.2**（硬件转码）。
 

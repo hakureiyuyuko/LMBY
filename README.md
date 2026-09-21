@@ -31,9 +31,10 @@ Emby / Jellyfin 功能齐全，代价是重量与兼容性负担。LMBY 反过�
 
 ## 进度与功能
 
-**M0（骨架）、M1（媒体库与扫描）、M2（元数据与刮削）、M3（播放核心）均已完成，并在真实容器 + 真实浏览器上实测验收。**
-下一步是 **M4 转码** —— v0.2 打算发在那里（v0.1 就是现在这个「能看片」的状态）。逐项清单与验收记录见
-[`docs/ROADMAP.md`](docs/ROADMAP.md)。
+**M0（骨架）、M1（媒体库与扫描）、M2（元数据与刮削）、M3（播放核心）均已完成，并在真实容器 + 真实浏览器上实测验收；
+M4（转码）除 Trickplay、带宽自适应等少数项外也已完成。** v0.2 在 M4 收尾后发布（v0.1 是 M3 完成时那个「能看片」的状态）。
+逐项清单与验收记录见 [`docs/ROADMAP.md`](docs/ROADMAP.md)，硬件加速的实测矩阵（含“什么能硬解、什么不行”）见
+[`docs/TRANSCODING.md`](docs/TRANSCODING.md)。
 
 现在能用的：
 
@@ -62,8 +63,20 @@ Emby / Jellyfin 功能齐全，代价是重量与兼容性负担。LMBY 反过�
     直出模式拖动瞬时响应
   - **进度**：服务端每 10 秒收一次心跳，续播、已看标记、首页「继续观看」；
     关闭页面/离开播放器时 `sendBeacon` 上报并**立刻回收 ffmpeg 与分片**（实测 1 秒内）
-  - **字幕**：内嵌文本字幕（ass/subrip…）按需抽成 WebVTT（后台单飞任务 + 落盘缓存），
-    图形字幕（PGS/VobSub）明确告知「需要烧录，M4 支持」
+  - **字幕**：三种形态按「能不能还原原意」分 —— ASS/SSA **原样抽出来交给前端 libass**（定位、
+    动画、卡拉OK、矢量绘图全保住）、纯文本（subrip…）转 WebVTT 走浏览器原生轨道、
+    **图形字幕（PGS/VobSub）烧进画面**（用户显式选择；界面会写明「需重新编码」这个代价）
+- **转码（M4）**：
+  - **硬件能力真跑探测**：启动时后台实测 `-hwaccels` / `-encoders` / `-filters`，并**拿 1 秒小样真编一遍**，
+    结果落盘缓存（`capabilities.json`，接口也能读）——只有真跑通过的编码器才会被用
+  - **转码参数配方**：按后端（VAAPI / QSV / NVENC / VideoToolbox / 软件）拼滤镜链与码率模式
+    （CQP/CBR/VBR 按探测结果选）、强制关键帧对齐分片、HDR→SDR 走软件 `zscale`+`tonemap`
+  - **播放器画质档**：自动 / 原生 / 1080p…144p（只列比源低的档）；选了低档即使能直出也转码，切档从当前位置续播
+  - **节流与回收**：预生成跑到客户端前面超过阀值就 `SIGSTOP` 暂停 ffmpeg（追上来 `SIGCONT`），
+    空闲回收进程与分片
+  - **会话监控页**（管理员）：活跃会话、实时 fps/速度/码率、一键终止
+  - **错误不误伤**：硬解起不来时自动换成软件解码 + 同一个硬件编码器；机器真编不了就如实给出理由，
+    不把能看的片子变成「放不了」
 - **设置页**（管理员）：在界面上填 TMDB 凭据、**保存即生效**（不必重启），
   密钥加密存库且**只写不回显**，带「测试连接」与系统信息（含数据库字符集自检）
 - **Web 界面**：明暗主题（首屏生效、跟随系统、登录后同步账号）、纯浏览器播放（M3）
@@ -78,9 +91,9 @@ Emby / Jellyfin 功能齐全，代价是重量与兼容性负担。LMBY 反过�
 |---|---|---|
 | ![人工匹配](docs/images/manual-match.png) | ![条目编辑](docs/images/item-edit.png) | ![设置](docs/images/settings.png) |
 
-| 播放器（转封装） | 放不了时的理由 | 首页继续观看 |
-|---|---|---|
-| ![播放器](docs/images/player-remux.png) | ![理由](docs/images/player-reasons.png) | ![继续观看](docs/images/continue-watching.png) |
+| 播放器（转封装） | 图形字幕烧录（PGS/VobSub） | 放不了时的理由 | 首页继续观看 |
+|---|---|---|---|
+| ![播放器](docs/images/player-remux.png) | ![烧录](docs/images/player-burn-pgs.png) | ![理由](docs/images/player-reasons.png) | ![继续观看](docs/images/continue-watching.png) |
 
 ### 验收（全部真环境实跑）
 
@@ -98,8 +111,9 @@ Emby / Jellyfin 功能齐全，代价是重量与兼容性负担。LMBY 反过�
 | `scripts/dev/verify-settings.sh` | **38/38** | 密钥不回显、非管理员 403、存库是密文、**保存即生效（填错 token → 真请求立刻失败）**、回落配置文件 |
 | `scripts/dev/m2-ui-test.mjs` | **34/34** | 海报墙、剧集视图、批量选择、设置页（测试连接/保存/恢复）|
 | `scripts/dev/search-ui-test.mjs` | **22/22** | 搜索界面：导航、查询、错字命中、进条目页、URL 参数、筛选、主题 |
-| `scripts/dev/verify-play.sh` | **106/106** | 播放后端：HTTP Range/ETag/条件请求/**字节与原文件逐字节一致**、mkv→HLS fMP4（**用 ffprobe 直接读服务发出的 m3u8 交叉验证编码**）、seek 换窗口、stop 后进程与分片回收、多版本选片、10bit HEVC 明确判「M4 才能放」、上报 Safari 能力后转为可转封装、字幕抽 WebVTT、进度与续播、继续观看 |
-| `scripts/dev/play-ui-test.mjs` | **30/30** | 真浏览器播起来：直出起播+拖动、HLS 分片起播（hls.js）、**拖到窗口末端自动续段**、进度落库、离开页面回收会话、放不了的条目给出理由、快捷键 |
+| `scripts/dev/verify-play.sh` | **108/108** | 播放后端：HTTP Range/ETag/条件请求/**字节与原文件逐字节一致**、mkv→HLS fMP4（**用 ffprobe 直接读服务发出的 m3u8 交叉验证编码**）、seek 换窗口、stop 后进程与分片回收、多版本选片、10bit HEVC 明确判「M4 才能放」、上报 Safari 能力后转为可转封装、字幕抽 WebVTT、进度与续播、继续观看 |
+| `scripts/dev/verify-transcode.sh` | **92/92** | 转码链路：能力表（能不能转由**运行时真跑探测**说话）、决策/目标编码/缩放/位深、**真转真播**（含倍速与超时）、用户画质档（本来能直出的也要转、切档换会话）、节流（`/proc` 里 `State=T` 取证 + 中途续播不该被卡死）、Hardware 解码降级（Hi10P）、监控与一键终止、ASS 交付、**图形字幕烧录的帧级开/关对照**（有字幕 YMAX 208 / 无字幕 0） |
+| `scripts/dev/play-ui-test.mjs` | **47/47** | 真浏览器播起来：直出起播+拖动、HLS 分片起播（hls.js）、**拖到窗口末端自动续段**、进度落库、离开页面回收会话、放不了的条目给出理由、快捷键、画质档菜单、**ASS 走 libass 渲染**、**图形字幕标「需烧录」+ 前端真带上 `burnSubtitle`** |
 
 这些脚本都不依赖测试框架（curl + jq / Node 内置 `WebSocket` 直连 Chrome DevTools Protocol）。
 用法与数据库字符集坑见 [`docs/DEV-ENV.md`](docs/DEV-ENV.md)。
