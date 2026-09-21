@@ -1,0 +1,107 @@
+name: Release
+
+# 打 v* 标签即发版：
+#   1) 先构建前端 —— 二进制里 go:embed 的是 web/dist，顺序反了会把仓库里那份占位页打进去；
+#   2) 四个平台交叉编译（CGO_ENABLED=0，纯静态，运行期不需要 Node）；
+#   3) 汇总 SHA256SUMS；
+#   4) gh release create 把产物挂上（有 docs/releases/<tag>.md 就用它当说明，否则自动生成）。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: armv7
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 构建前端
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: 编译
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          ext=""
+          [ "$GOOS" = "windows" ] && ext=".exe"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w \
+            -X github.com/hakureiyuyuko/lmby/internal/version.Version=${GITHUB_REF_NAME} \
+            -X github.com/hakureiyuyuko/lmby/internal/version.Commit=${GITHUB_SHA::12} \
+            -X github.com/hakureiyuyuko/lmby/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/lmby-${GOOS}-${GOARCH}${ext}" ./cmd/lmby
+          ls -l dist
+
+      - name: 冒烟自检（linux/amd64 直接跑 version）
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: ./dist/lmby-linux-amd64 version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lmby-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # checkout 不能省：gh release create 要在 git 仓库里跑，少了它会报 not a git repository。
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 生成校验和
+        working-directory: artifacts
+        run: |
+          sha256sum lmby* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 建 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="--generate-notes"
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            notes="--notes-file docs/releases/${GITHUB_REF_NAME}.md"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "LMBY ${GITHUB_REF_NAME}" \
+            $notes \
+            artifacts/*
