@@ -250,6 +250,14 @@ func (p Profile) SupportsContainer(kind string) bool {
 }
 
 // SupportsVideo 报告这条视频流能否原样解码。
+// SupportsVideoCodec 只判编码本身能不能解，不管分辨率/位深/容器。
+//
+// 与 SupportsVideo 分开的原因：转码时要先把「为什么不能放」拆成具体条目
+//（编码不支持 / 位深超限 / 分辨率超限），理由链才能说清楚。
+func (p Profile) SupportsVideoCodec(codec string) bool {
+	return contains(p.VideoCodecs, strings.ToLower(codec))
+}
+
 func (p Profile) SupportsVideo(codec string, width, height, bitDepth int) bool {
 	if !contains(p.VideoCodecs, strings.ToLower(codec)) {
 		return false

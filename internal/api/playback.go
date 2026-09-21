@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/playback"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/store"
@@ -346,13 +347,24 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		startTicks = 0
 	}
 
+	// 本机能力：拿不到就退化成「不能转码」—— 此时能直出/能转封装的内容照样能放，
+	// 只是需要转码的文件会如实告知理由，而不是默默失败。
+	machine := playback.Machine{}
+	if caps, err := s.encoders.Get(r.Context()); err == nil && caps != nil {
+		machine = machineForDecision(caps, s.encoders.Preferred(caps))
+	} else if err != nil {
+		s.log.Warn("播放时读不到编码能力，按“不能转码”处理", "err", err)
+	}
+
 	plan := playback.Decide(playback.Request{
-		Profile:       profile,
-		Files:         candidates,
-		VideoIndex:    intValue(req.VideoStreamIndex),
-		AudioIndex:    intValue(req.AudioStreamIndex),
-		SubtitleIndex: intValueOr(req.SubtitleStreamIndex, 0),
-		StartTicks:    startTicks,
+		Profile:            profile,
+		Files:              candidates,
+		Machine:            machine,
+		TranscodeMaxHeight: s.cfg.Playback.TranscodeMaxHeight,
+		VideoIndex:         intValue(req.VideoStreamIndex),
+		AudioIndex:         intValue(req.AudioStreamIndex),
+		SubtitleIndex:      intValueOr(req.SubtitleStreamIndex, 0),
+		StartTicks:         startTicks,
 	})
 
 	// 找到实际使用的文件行（决策只给了 id）。
@@ -378,7 +390,9 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 
 	if !plan.Playable {
 		if plan.Mode == playback.ModeTranscode {
-			resp.Error = "这个文件需要视频转码，当前版本（M3）还不支持；理由见 reasons"
+			resp.Error = "这个文件需要视频转码，但这台机器没有可用的编码器（或者目标编码客户端也不支持）；理由见 reasons"
+		} else {
+			resp.Error = "这个条目现在放不了；理由见 reasons"
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -434,7 +448,7 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		resp.StartSeconds = ps.StartSeconds
 		resp.DirectURL = "/api/v1/play/" + ps.ID + "/stream"
 	default:
-		url, state, errMsg, logTail := s.startRemux(r.Context(), ps, file)
+		url, state, errMsg, logTail := s.startHLS(r.Context(), ps, file)
 		resp.PlaySessionID = ps.ID
 		resp.State = state
 		resp.Error = errMsg
@@ -452,29 +466,86 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// startRemux 启动（或复用）转封装会话，返回播放列表地址与状态。
-func (s *Server) startRemux(ctx context.Context, ps *playSession, file store.PlayableFile) (url, state, errMsg, logTail string) {
+// startHLS 启动（或复用）HLS 会话 —— 转封装与转码走的是同一条路，
+// 区别只在 spec.Video 里是「复制」还是「转码参数」。
+func (s *Server) startHLS(ctx context.Context, ps *playSession, file store.PlayableFile) (url, state, errMsg, logTail string) {
+	if s.streams == nil {
+		return "", "error", "转封装/转码服务未启用（ffmpeg 不可用？）", ""
+	}
+	video, audio, err := s.encodeArgs(ctx, ps)
+	if err != nil {
+		return "", "error", err.Error(), ""
+	}
 	spec := stream.Spec{
 		Key:           streamKey(ps),
 		Path:          ps.FilePath,
 		VideoIndex:    ps.Plan.Video.Index,
 		VideoCodec:    ps.Plan.Video.Codec,
 		AudioIndex:    ps.Plan.Audio.Index,
-		AudioCopy:     ps.Plan.Audio.Action == playback.ActionCopy,
-		Downmix:       ps.Plan.Audio.Downmix,
+		Video:         video,
+		Audio:         audio,
 		SegmentFormat: ps.Plan.SegmentFormat,
 		StartSeconds:  ps.StartSeconds,
 	}
-	if s.streams == nil {
-		return "", "error", "转封装服务未启用（ffmpeg 不可用？）", ""
-	}
 	sess, err := s.streams.Ready(ctx, spec, playStartTimeout)
 	if err != nil {
-		s.log.Warn("转封装启动失败", "item", ps.ItemID, "file", file.ID, "err", err)
+		s.log.Warn("HLS 会话启动失败", "item", ps.ItemID, "file", file.ID, "mode", ps.Plan.Mode, "err", err)
 		return "", "error", err.Error(), ""
 	}
 	ps.StreamKey = spec.Key
 	return "/api/v1/play/" + ps.ID + "/index.m3u8", "ready", "", sess.Stat().Log
+}
+
+// encodeArgs 把决策结果翻译成 stream 层的「这两段怎么送」。
+//
+// 这里是「决策（要什么）」与「执行（怎么拼 ffmpeg 参数）」的交界：
+// 转码时向 internal/encoder 要参数 —— 它才知道本机该用哪个后端、
+// 哪种码率模式（探测出来的），stream 层只负责把它们拼进命令行。
+func (s *Server) encodeArgs(ctx context.Context, ps *playSession) (stream.VideoEncode, stream.AudioEncode, error) {
+	video := stream.CopyVideoEncode()
+	audio := stream.CopyAudioEncode()
+
+	if ps.Plan.Audio.Action != playback.ActionCopy {
+		maxCh := ps.Plan.Audio.Channels
+		if ps.Plan.Audio.Downmix {
+			maxCh = 2
+		}
+		aa := encoder.AudioEncodeArgs(encoder.AudioArgsRequest{
+			SourceCodec: ps.Plan.Audio.Codec,
+			Channels:    ps.Plan.Audio.Channels,
+			MaxChannels: maxCh,
+		})
+		audio = stream.AudioEncode{Args: aa.Args}
+	}
+
+	if ps.Plan.Video.Action != playback.ActionTranscode {
+		return video, audio, nil
+	}
+
+	caps, err := s.encoders.Get(ctx)
+	if err != nil {
+		return video, audio, fmt.Errorf("读不到本机编码能力：%w", err)
+	}
+	backend := s.encoders.Preferred(caps)
+	va := backend.VideoArgs(encoder.ArgsRequest{
+		SourceCodec:     ps.Plan.Video.SourceCodec,
+		Width:           ps.Plan.Video.SourceWidth,
+		Height:          ps.Plan.Video.SourceHeight,
+		BitDepth:        ps.Plan.Video.SourceBitDepth,
+		HDR:             ps.Plan.Video.SourceHDR,
+		Interlaced:      ps.Plan.Video.SourceInterlaced,
+		TargetCodec:     ps.Plan.Video.TargetCodec,
+		TargetWidth:     ps.Plan.Video.TargetWidth,
+		TargetHeight:    ps.Plan.Video.TargetHeight,
+		Quality:         encoder.QualityByName(ps.Plan.Video.Quality),
+		KeyframeSeconds: s.cfg.Playback.HLSSegmentSeconds,
+	})
+	return stream.VideoEncode{
+		InputArgs:  va.InputArgs,
+		FilterArgs: va.FilterArgs,
+		CodecArgs:  va.CodecArgs,
+		Tag:        va.Tag,
+	}, audio, nil
 }
 
 // streamKey 是转封装会话的键：条目 + 文件 + 起播点（取整到秒）。
@@ -607,14 +678,22 @@ func (s *Server) handlePlaySeek(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldKey := ps.StreamKey
+	video, audio, err := s.encodeArgs(r.Context(), ps)
+	if err != nil {
+		writeJSON(w, http.StatusOK, playStateResponse{
+			PlaySessionID: ps.ID, Mode: ps.Plan.Mode, State: "error",
+			Error: err.Error(), Reasons: ps.Plan.Reasons, Plan: ps.Plan, ItemID: ps.ItemID,
+		})
+		return
+	}
 	spec := stream.Spec{
 		Key:           streamKey(ps),
 		Path:          ps.FilePath,
 		VideoIndex:    ps.Plan.Video.Index,
 		VideoCodec:    ps.Plan.Video.Codec,
 		AudioIndex:    ps.Plan.Audio.Index,
-		AudioCopy:     ps.Plan.Audio.Action == playback.ActionCopy,
-		Downmix:       ps.Plan.Audio.Downmix,
+		Video:         video,
+		Audio:         audio,
 		SegmentFormat: ps.Plan.SegmentFormat,
 		StartSeconds:  ps.StartSeconds,
 	}

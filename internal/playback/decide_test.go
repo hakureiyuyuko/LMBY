@@ -97,11 +97,11 @@ func TestDecide(t *testing.T) {
 			wantContains: "转成 AAC 立体声",
 		},
 		{
-			name: "mkv + 10bit HEVC：浏览器档需要转码（M4 才能放）",
+			name: "mkv + 10bit HEVC：浏览器档需要转码，但机器不能转 → 放不了",
 			req:  Request{Profile: BrowserProfile(), Files: []File{mkvHevc10}},
 			mode: ModeTranscode, playable: false,
 			videoAction: ActionTranscode, audioAction: ActionConvert, subAction: ActionNone,
-			wantContains: "需要转码（M4）",
+			wantContains: "没有可用的编码器",
 		},
 		{
 			name: "mkv + 10bit HEVC：Safari 档可以转封装直出",

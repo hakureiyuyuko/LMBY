@@ -157,18 +157,27 @@ bash scripts/dev/seed-review-item.sh                                  # 临时�
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m2-ui-test.mjs
 bash scripts/dev/seed-review-item.sh --restore                        # 用完还原
 
-# M3 播放：真库 HTTP 端到端（106 项）——Range/ETag、mkv→HLS 分片、seek、stop 回收、
-# 多版本选片、10bit HEVC 判「M4」、字幕抽 WebVTT、进度与续播、继续观看。
+# 播放：真库 HTTP 端到端（108 项）——Range/ETag、mkv→HLS 分片、seek、stop 回收、
+# 多版本选片、10bit HEVC 的转码决策、字幕抽 WebVTT、进度与续播、继续观看。
 # 样本（哪个文件走直出/转封装/转码）由脚本按编码条件从库里现挑，不写死文件名；
 # 它用 psql 读库挑样本，所以需要 /etc/lmby/pg-password（默认路径，可用 PGPASSWORD_FILE 覆盖）。
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh
 TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 额外验「无人观看 45s 自动回收」
 
-# M3 播放器界面验收（30 项，真 Chrome 真的把片子放起来，截图到 shots-play/）
+# 播放器界面验收（33 项，真 Chrome 真的把片子放起来，含转码条目真起播，截图到 shots-play/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
+
+# M4 转码：真库 HTTP 端到端（42 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
+# 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P。
+# 它**不假设本机一定能转**：先读能力表，只有探测到可用的 h264 编码器才断言「能播」，
+# 否则断言「如实说放不了」——所以它在弱机器上同样有意义。样本按编码条件现挑，优先 1080p。
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh
+
+# M4 编码能力探测（13 项）：能力表与这台机器的实际表现逐条对照，含缓存命中与强制刷新
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-caps.sh
 ```
 
-■ 播放验收的两个坑（都是实测踩出来的）：
+■ 播放验收的几个坑（都是实测踩出来的）：
 
 1. **分片必须与播放列表同级**（`/api/v1/play/{sid}/seg_00000.m4s`，不是 `/seg/xxx`）。
    m3u8 里写的是相对文件名，hls.js / Safari / ffprobe 都会拿播放列表 URL 作基准拼——
@@ -187,6 +196,10 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 5. **进度条拖动会连发上百个事件**（几乎每个像素一个）。早先的实现用「正在处理就丢弃」
    挡并发，结果是「拖到哪都不算数，只跳到第一个事件的位置」。正确做法：拖动期间只更新
    显示，防抖 + 提交时排队（在途的 seek 结束后补做最后那一个目标）。
+6. **HDR 转码不要用 `tonemap_vaapi`**（iHD 要输入带 mastering display 元数据，库里常见
+   素材没有 → 滤镜报错 → **整路转码起不来**，用户看到的是「放不了」）；而且**缩放要放在
+   色调映射之前**（先在显存里 `scale_vaapi` 再 `hwdownload`），否则 4K 连 20 秒起播超时
+   都过不去。这两条都是真跑才拓出来的，细节与实测数字见 `docs/TRANSCODING.md`。
 
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
 脚本跑到一半报「引号未闭合」，很难看出在哪一行。

@@ -29,6 +29,34 @@ func (f File) Kind() string { return ContainerKind(f.Container, f.Path) }
 // Ext 返回小写扩展名（含点）。
 func (f File) Ext() string { return strings.ToLower(filepath.Ext(f.Path)) }
 
+// Machine 是「这台机器能编什么」的最小视图。
+//
+// 刻意只有几个字段、且**不依赖 internal/encoder**：决策层是纯函数（能离线单测），
+// 而「用哪个编码器、拼什么参数」是执行层的事（见 encoder.VideoArgs）。
+// 零值 = 什么也编不了，此时需要转码的内容会被如实判成放不了。
+type Machine struct {
+	// EncodeCodecs 是**真跑验证过**能编的编码，按偏好排序（如 ["h264","hevc"]）。
+	EncodeCodecs []string
+	// DecodeHW 是能硬件解码的编码（只影响 CPU 占用，不影响能不能播）。
+	DecodeHW []string
+	// Hardware 表示首选后端是硬件（目前只用于措辞与默认质量档）。
+	Hardware bool
+	// Tonemap 表示能不能做 HDR→SDR 色调映射；不能的话 HDR 内容会发灰。
+	Tonemap bool
+	// Name 是后端名（写进理由链，方便用户知道是硬编还是软编）。
+	Name string
+}
+
+// CanEncode 报告能否编指定编码。
+func (m Machine) CanEncode(codec string) bool {
+	for _, c := range m.EncodeCodecs {
+		if c == codec {
+			return true
+		}
+	}
+	return false
+}
+
 // Request 是一次播放决策的输入。
 type Request struct {
 	Profile Profile
@@ -43,6 +71,16 @@ type Request struct {
 
 	// StartTicks 是起播位置（续播用）。
 	StartTicks int64
+
+	// Machine 描述这台机器能编什么。零值 = 不能转码，此时需要转码的内容会被判成放不了。
+	Machine Machine
+
+	// TranscodeMaxHeight 是转码输出的高度上限（像素），0 = 不限。
+	//
+	// 只约束**转码**：直出与转封装不重编码，源多大就送多大（4K 原样送比转成
+	// 1080p 又快又清晰）。转码是「边编边播」，输出分辨率直接决定能不能实时，
+	// 所以额外压一档 —— 默认值由配置给（见 [playback] transcode_max_height）。
+	TranscodeMaxHeight int
 }
 
 // StreamPlan 是一条流的处理决定。
@@ -64,6 +102,27 @@ type StreamPlan struct {
 	// 字幕专用
 	Image  bool `json:"image,omitempty"`
 	Forced bool `json:"forced,omitempty"`
+
+	// 转码专用（Action == ActionTranscode 时有意义）：目标与处理方式。
+	// 「用哪个编码器、拼什么参数」不在这里 —— 那是执行层照本机能力表的活。
+	TargetCodec  string `json:"targetCodec,omitempty"`
+	TargetWidth  int    `json:"targetWidth,omitempty"`
+	TargetHeight int    `json:"targetHeight,omitempty"`
+	Tonemap      bool   `json:"tonemap,omitempty"`       // HDR → SDR
+	Deinterlace  bool   `json:"deinterlace,omitempty"`   // 去隔行
+	TenBit       bool   `json:"tenBitToEight,omitempty"` // 10bit → 8bit
+	Quality      string `json:"quality,omitempty"`       // high / medium / low
+	Backend      string `json:"backend,omitempty"`       // 本机后端名（写给人看）
+
+	// 源信息：执行层要用它们拼转码参数（滤镜链看分辨率与隔行，方式看位深与 HDR）。
+	// 放在结果里而不是让执行层回头去查，是为了让「决策用的输入」与
+	// 「执行用的输入」是同一份，不会两边对不上。
+	SourceCodec      string `json:"sourceCodec,omitempty"`
+	SourceWidth      int    `json:"sourceWidth,omitempty"`
+	SourceHeight     int    `json:"sourceHeight,omitempty"`
+	SourceBitDepth   int    `json:"sourceBitDepth,omitempty"`
+	SourceHDR        bool   `json:"sourceHdr,omitempty"`
+	SourceInterlaced bool   `json:"sourceInterlaced,omitempty"`
 }
 
 // Plan 是决策结果。
@@ -160,8 +219,8 @@ func decideForFile(p Profile, req Request, file *File) Plan {
 		DurationTicks: file.DurationTicks,
 	}
 	vs, vReason := pickVideo(file, req.VideoIndex)
-	plan.Video = planVideo(p, file, vs, vReason)
-	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video.Action == ActionCopy)
+	plan.Video = planVideo(p, req, file, vs, vReason)
+	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video)
 	plan.Subtitle = planSubtitle(file, req.SubtitleIndex)
 	plan.Mode, plan.SegmentFormat, plan.Playable = planMode(p, file, plan)
 
@@ -223,38 +282,168 @@ func pickVideo(file *File, want int) (probe.VideoStream, string) {
 	return file.Video[0], ""
 }
 
+// isHDR 判定源是不是 HDR。
+//
+// 判据用 color_transfer（PQ / HLG）而不是位深：10bit 也可能是 SDR（我们库里
+// 大量 10bit HEVC 就是 SDR），而 HDR 必须做色调映射才能看。
+func isHDR(vs probe.VideoStream) bool {
+	switch strings.ToLower(vs.ColorTransfer) {
+	case "smpte2084", "arib-std-b67":
+		return true
+	}
+	return false
+}
+
+// isInterlaced 判定源是不是隔行。
+//
+// 空值当逐行：探测字段是后加的，老数据里没有它，不能因为“不知道”就去隔行
+//（对着逐行素材做去隔行会真切掉一半垂直分辨率）。
+func isInterlaced(vs probe.VideoStream) bool {
+	switch strings.ToLower(vs.FieldOrder) {
+	case "tt", "bb", "tb", "bt":
+		return true
+	}
+	return false
+}
+
 // planVideo 决定视频流怎么处理。
-func planVideo(p Profile, file *File, vs probe.VideoStream, prefix string) StreamPlan {
+//
+// 三档结果：直接复制（能直出/能转封装）→ 转码（本机能编、目标明确）→ 放不了
+//（本机没有可用的编码器，或者目标编码客户端也不支持）。
+func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix string) StreamPlan {
+	m := req.Machine
 	out := StreamPlan{Action: ActionCopy, Index: vs.Index, Codec: vs.Codec,
-		Language: vs.Language, Title: vs.Title, Default: vs.Default}
+		Language: vs.Language, Title: vs.Title, Default: vs.Default,
+		SourceCodec: vs.Codec, SourceWidth: vs.Width, SourceHeight: vs.Height,
+		SourceBitDepth: vs.BitDepth, SourceHDR: isHDR(vs), SourceInterlaced: isInterlaced(vs)}
 
 	res := fmt.Sprintf("%d×%d %s", vs.Width, vs.Height, vs.Codec)
 	if vs.BitDepth > 0 {
 		res = fmt.Sprintf("%d×%d %dbit %s", vs.Width, vs.Height, vs.BitDepth, vs.Codec)
 	}
 
-	if !p.SupportsVideo(vs.Codec, vs.Width, vs.Height, vs.BitDepth) {
-		out.Action = ActionTranscode
-		out.Reason = join(prefix, fmt.Sprintf("视频 %s 浏览器不能解码，需要转码（M4）", res))
+	// 为什么需要转：先收集原因，再统一决定目标（这样理由链不会丢信息）
+	var why []string
+	if !p.SupportsVideoCodec(vs.Codec) {
+		why = append(why, fmt.Sprintf("视频编码 %s 浏览器不能解", vs.Codec))
+	}
+	if vs.BitDepth > p.MaxBitDepth {
+		why = append(why, fmt.Sprintf("%dbit 超出客户端上限 %dbit", vs.BitDepth, p.MaxBitDepth))
+	}
+	if vs.Width > p.MaxWidth || vs.Height > p.MaxHeight {
+		why = append(why, fmt.Sprintf("分辨率 %d×%d 超出客户端上限 %d×%d", vs.Width, vs.Height, p.MaxWidth, p.MaxHeight))
+	}
+	if vs.Height > 0 && vs.Width > 0 && !p.SupportsContainer(file.Kind()) {
+		if seg := segmentFormat(p, vs.Codec); seg == "" {
+			why = append(why, fmt.Sprintf("视频 %s 无法放进可用的分片格式", vs.Codec))
+		}
+	}
+
+	if len(why) == 0 {
+		out.Reason = join(prefix, fmt.Sprintf("视频 %s 原样复制", res))
 		return out
 	}
 
-	reason := fmt.Sprintf("视频 %s 原样复制", res)
-	// 容器不能直出时，要确认目标分片格式能承载这个编码（vp9 进不了 TS）。
-	if !p.SupportsContainer(file.Kind()) {
-		seg := segmentFormat(p, vs.Codec)
-		if seg == "" {
-			out.Action = ActionTranscode
-			out.Reason = join(prefix, fmt.Sprintf("视频 %s 无法放进 %s 分片，需要转码（M4）", vs.Codec, file.Kind()))
-			return out
+	// 需要转码：目标编码只能从「本机真跑能编」∩「客户端能播」里选。
+	// h264 优先（兼容性最好），其次 hevc（省带宽，但编起来慢）。
+	target := ""
+	if m.CanEncode("h264") {
+		target = "h264"
+	} else if m.CanEncode("hevc") && p.SupportsVideoCodec("hevc") {
+		target = "hevc"
+	}
+	if target == "" {
+		out.Action = ActionTranscode
+		out.Reason = join(prefix, fmt.Sprintf("视频 %s 需要转码（%s），但这台机器没有可用的编码器",
+			res, strings.Join(why, "；")))
+		out.TargetCodec = ""
+		return out
+	}
+
+	out.Action = ActionTranscode
+	out.TargetCodec = target
+	out.Quality = qualityFor(vs)
+	out.Backend = m.Name
+	// 目标分辨率取「客户端上限」与「转码上限」里更严的那个，保持宽高比由滤镜负责。
+	// 转码上限默认压到 1080p：4K 转码（尤其 HDR 色调映射）在多数自托管机器上
+	// 跑不进起播超时，而屏幕上的差别远小于「等 40 秒才出画面」的代价。
+	maxW, maxH := p.MaxWidth, p.MaxHeight
+	if req.TranscodeMaxHeight > 0 && (maxH <= 0 || req.TranscodeMaxHeight < maxH) {
+		maxH = req.TranscodeMaxHeight
+	}
+	if (maxW > 0 && vs.Width > maxW) || (maxH > 0 && vs.Height > maxH) {
+		out.TargetWidth, out.TargetHeight = fitWithin(vs.Width, vs.Height, maxW, maxH)
+		why = append(why, fmt.Sprintf("并缩放到 %d×%d", out.TargetWidth, out.TargetHeight))
+	}
+	if vs.BitDepth > 8 {
+		out.TenBit = true
+		why = append(why, "降到 8bit")
+	}
+	if isHDR(vs) {
+		out.Tonemap = m.Tonemap
+		if m.Tonemap {
+			why = append(why, "并从 HDR 色调映射到 SDR")
+		} else {
+			why = append(why, "HDR 内容将失去色调映射（这台机器没探测到能力），画面会发灰")
 		}
 	}
-	out.Reason = join(prefix, reason)
+	if isInterlaced(vs) {
+		out.Deinterlace = true
+		why = append(why, "去隔行")
+	}
+	out.Reason = join(prefix, fmt.Sprintf("视频 %s 转码为 %s（%s）", res, target, strings.Join(why, "；")))
 	return out
 }
 
-// planAudio 决定音频流怎么处理。videoCopied 为真时才是「直出 / 转封装」的场景。
-func planAudio(p Profile, file *File, want int, videoCopied bool) StreamPlan {
+// qualityFor 选质量档：小片子/低分辨率用低档，4K 用高档。
+//
+// 目标是“别把 4 核机器打死”：硬件后端本来就有余量，所以档位主要是给软编兜底用的。
+func qualityFor(vs probe.VideoStream) string {
+	if vs.Height >= 1800 {
+		return "high"
+	}
+	if vs.Height <= 480 {
+		return "low"
+	}
+	return "medium"
+}
+
+// fitWithin 把 (w,h) 等比缩放到 (maxW,maxH) 之内，并保证是偶数
+//（编码器不吃奇数尺寸，尤其是 h264 的 yuv420p）。
+func fitWithin(w, h, maxW, maxH int) (int, int) {
+	if w <= 0 || h <= 0 {
+		return 0, 0
+	}
+	if maxW <= 0 {
+		maxW = w
+	}
+	if maxH <= 0 {
+		maxH = h
+	}
+	scale := 1.0
+	if w > maxW {
+		scale = float64(maxW) / float64(w)
+	}
+	if h > maxH && float64(maxH)/float64(h) < scale {
+		scale = float64(maxH) / float64(h)
+	}
+	nw := int(float64(w)*scale) &^ 1
+	nh := int(float64(h)*scale) &^ 1
+	if nw < 2 {
+		nw = 2
+	}
+	if nh < 2 {
+		nh = 2
+	}
+	return nw, nh
+}
+
+// planAudio 决定音频流怎么处理。
+//
+// video 是同一个文件上的视频计划：只有视频**真的会转码**（本机有可用编码器）时
+// 音频才跟着转成 AAC；视频根本放不了时只如实标记，不承诺「会降到几声道」——
+// 那是开空头支票，用户看到的理由链会自相矛盾。
+func planAudio(p Profile, file *File, want int, video StreamPlan) StreamPlan {
 	out := StreamPlan{Action: ActionNone, Index: -1}
 	as, ok := pickAudio(file, want)
 	if !ok {
@@ -273,11 +462,20 @@ func planAudio(p Profile, file *File, want int, videoCopied bool) StreamPlan {
 		name = as.Codec
 	}
 
+	copied := video.Action == ActionCopy
+	willTranscode := video.Action == ActionTranscode && video.TargetCodec != ""
+
 	switch {
-	case !videoCopied:
-		// 视频要转码，音频顺带一起转（M4）
+	case willTranscode:
+		// 视频要转码，音频顺带一起转成 AAC（不额外增加什么开销）
 		out.Action = ActionConvert
-		out.Reason = fmt.Sprintf("音频 %s 交给转码流程（M4）", name)
+		out.Downmix = p.MaxAudioChannels > 0 && as.Channels > p.MaxAudioChannels
+		out.Reason = fmt.Sprintf("音频 %s 随视频一起转成 AAC", name)
+	case !copied:
+		// 视频需要转码但本机没有可用编码器：整条放不了。音频如实标记，
+		// 但不写降混——转码根本没发生。
+		out.Action = ActionConvert
+		out.Reason = fmt.Sprintf("音频 %s 需随视频一起转码（视频当前放不了）", name)
 	case p.SupportsAudio(as.Codec, as.Channels):
 		out.Action = ActionCopy
 		out.Reason = fmt.Sprintf("音频 %s 原样复制", name)
@@ -347,7 +545,7 @@ func planSubtitle(file *File, want int) StreamPlan {
 		// 这里明确给出「这次不显示」，而不是悄悄丢掉。
 		out.Action = ActionDrop
 		out.Image = ss.IsImage
-		out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，需要烧录进画面（M4），本次不显示", ss.Index, ss.Codec)
+		out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，需要烧录进画面（烧录链路还没接上），本次不显示", ss.Index, ss.Codec)
 		return out
 	}
 
@@ -380,7 +578,17 @@ func pickSubtitle(file *File, want int) (probe.SubtitleStream, bool) {
 // 参数名刻意不叫 segmentFormat —— 那样会遮蔽同名的辅助函数。
 func planMode(p Profile, file *File, plan Plan) (mode, segFormat string, playable bool) {
 	if plan.Video.Action == ActionTranscode {
-		return ModeTranscode, "", false
+		// 要转码：能不能放取决于「本机有没有可用的编码器」——
+		// 由 planVideo 根据能力表写在 TargetCodec 里（空 = 编不了）。
+		if plan.Video.TargetCodec == "" {
+			return ModeTranscode, "", false
+		}
+		// 转码输出必须能装进分片（h264/hevc 都能进 fMP4，TS 只兼容 h264 系）
+		seg := segmentFormat(p, plan.Video.TargetCodec)
+		if seg == "" {
+			return ModeTranscode, "", false
+		}
+		return ModeTranscode, seg, true
 	}
 	// 视频复制的前提下，只要有一处不能原样送，就得走转封装（HLS）。
 	//
@@ -417,7 +625,10 @@ func modeReason(plan Plan) string {
 	case ModeRemux:
 		return fmt.Sprintf("转封装成 %s 分片（视频不重新编码，几乎不占 CPU）", plan.SegmentFormat)
 	default:
-		return "需要视频转码，当前版本（M3）还不支持"
+		if plan.Video.TargetCodec != "" {
+			return fmt.Sprintf("视频转码为 %s（后端 %s）", plan.Video.TargetCodec, plan.Video.Backend)
+		}
+		return "需要视频转码，但这台机器没有可用的编码器"
 	}
 }
 

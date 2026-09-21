@@ -541,25 +541,60 @@ async function main() {
     check('本条占用的转封装会话已释放', true, (after.body?.transcodeSessions || []).length < transBefore);
   }
 
-  // ---------------------------------------------------------------- 决策解释
-  log('\n== 7. 放不了的条目：给出明确理由（不装死） ==');
+  // ---------------------------------------------------------------- 转码（M4）
+  log('\n== 7. 需要转码的条目：能真播起来（或如实说放不了） ==');
   if (!cand.transcode) {
     note('没有 10bit HEVC 样本，跳过');
   } else {
     await send('Page.navigate', { url: `${BASE}/play/${cand.transcode.id}` });
-    check(
-      '显示「放不了」面板',
-      true,
-      await waitFor('放不了面板', async () => Boolean(await evaluate(`!!document.querySelector('.player-blocked')`)), 30000),
-    );
-    const reasons = await evaluate(
-      `[...document.querySelectorAll('.player-reasons li')].map((li) => li.textContent)`,
-    );
-    note(`理由链：${JSON.stringify(reasons)}`);
-    check('理由链非空', true, (reasons || []).length > 0);
-    check('理由里点名需要转码', true, (reasons || []).some((r) => r.includes('转码')));
-    check('没有出现播放器控件（不假装能播）', false, await evaluate(`!!document.querySelector('.player-controls')`));
-    await shot('04-blocked');
+    // 两种结局都算「就绪」：能转码 → 播放器；本机没编码器 → 放不了面板。
+    // 不能把「一定出现面板」写死 —— 那就是把某台机器能不能硬编当成项目常量了。
+    await waitFor('播放器就绪', async () => {
+      const st = await evaluate(`(() => ({
+        blocked: !!document.querySelector('.player-blocked'),
+        video: !!document.querySelector('.player-video'),
+      }))()`);
+      return st && (st.blocked || st.video);
+    }, 30000);
+    const blocked = await evaluate(`!!document.querySelector('.player-blocked')`);
+    if (blocked) {
+      // 只有「探测不到可用编码器」时才会走到这：必须明确告知，而不是黑屏
+      note('本机探测不到可用的编码器 → 走「放不了」面板');
+      const reasons = await evaluate(
+        `[...document.querySelectorAll('.player-reasons li')].map((li) => li.textContent)`,
+      );
+      note(`理由链：${JSON.stringify(reasons)}`);
+      check('理由链非空（放不了要说清为什么）', true, (reasons || []).length > 0);
+      check('理由里点名转码', true, (reasons || []).some((r) => r.includes('转码')));
+      check('放不了时不给播放控件（不假装能播）', false, await evaluate(`!!document.querySelector('.player-controls')`));
+      await shot('04-blocked');
+    } else {
+      // 真转码：服务端边转边出分片，前端 hls.js 拉起来并推进播放位置
+      const played = await waitFor(
+        '转码起播',
+        async () => {
+          const st = await evaluate(videoState);
+          return st && st.currentTime > 0.5;
+        },
+        60000,
+      );
+      check('转码条目也能起播（画面真的动了）', true, played);
+      // 能播时理由链在「为什么这么播」面板里（默认折叠）——展开再读，
+      // 断言「能播也要说清为什么这么播」而不是「一定出现面板」。
+      await evaluate(`(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').includes('为什么这么播'));
+        if (b) b.click();
+        return !!b;
+      })()`);
+      await sleep(300);
+      const reasons = await evaluate(
+        `[...document.querySelectorAll('.player-reasons li')].map((li) => li.textContent)`,
+      );
+      note(`理由链：${JSON.stringify(reasons)}`);
+      check('理由链非空（能播也要说清为什么这么播）', true, (reasons || []).length > 0);
+      check('理由里点名转码', true, (reasons || []).some((r) => r.includes('转码')));
+      await shot('04-transcode');
+    }
   }
 
   // ---------------------------------------------------------------- 快捷键

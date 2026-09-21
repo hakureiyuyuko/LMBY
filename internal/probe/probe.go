@@ -65,6 +65,9 @@ type VideoStream struct {
 	ColorSpace     string  `json:"colorSpace,omitempty"`
 	ColorTransfer  string  `json:"colorTransfer,omitempty"`
 	ColorPrimaries string  `json:"colorPrimaries,omitempty"`
+	// FieldOrder 是隔行信息（progressive / tt / bb …）。空 = 未知或逐行。
+	// 素材是隔行时转码要先去隔行，否则画面会有梳齿。
+	FieldOrder string `json:"fieldOrder,omitempty"`
 	Language       string  `json:"language,omitempty"`
 	Title          string  `json:"title,omitempty"`
 	Default        bool    `json:"default,omitempty"`
@@ -136,6 +139,7 @@ type rawStream struct {
 	ColorSpace       string            `json:"color_space"`
 	ColorTransfer    string            `json:"color_transfer"`
 	ColorPrimaries   string            `json:"color_primaries"`
+	FieldOrder       string            `json:"field_order"`
 	BitsPerRawSample string            `json:"bits_per_raw_sample"`
 	Tags             map[string]string `json:"tags"`
 	Disposition      map[string]int    `json:"disposition"`
@@ -333,6 +337,7 @@ func normalizeVideo(s rawStream) VideoStream {
 		ColorSpace:     s.ColorSpace,
 		ColorTransfer:  s.ColorTransfer,
 		ColorPrimaries: s.ColorPrimaries,
+		FieldOrder:     s.FieldOrder,
 		Language:       s.Tags["language"],
 		Title:          s.Tags["title"],
 		Default:        s.Disposition["default"] == 1,

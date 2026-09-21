@@ -78,6 +78,18 @@ type PlaybackConfig struct {
 	// 只在**真的需要**时指定（比如用户更在意画质、宁愿用 CPU 软编）。
 	// 指定的后端在本机不可用时会回退自动选择并在日志里告警，不会导致播放失败。
 	Encoder string `toml:"encoder"`
+
+	// TranscodeMaxHeight 是转码输出的高度上限（像素），默认 1080；
+	// 竖填 0 = 不限（目标分辨率只用客户端上报的上限）。
+	//
+	// 为什么要压：转码是「边编边播」，输出分辨率直接决定能不能实时。
+	// 实测（i5-10500T + VAAPI）：4K HDR 做色调映射只有 0.1x —— 一个 4 秒分片
+	// 要 40 秒才出来，起播直接超时；压到 1080p 后回到可播范围。
+	// 直出与转封装不走这个上限（它们不重编码，4K 原样送出更快）。
+	//
+	// 注意：这是**实例测量值推出来的默认值**，不是项目常量 —— 机器够强
+	// （或想保留 4K 输出）就把它调大或改成 0。
+	TranscodeMaxHeight int `toml:"transcode_max_height"`
 }
 
 // StreamsDirPath 返回解析过默认值的分片目录。
@@ -170,10 +182,11 @@ func Default() *Config {
 			MaxCacheMB: 512,
 		},
 		Playback: PlaybackConfig{
-			HLSSegmentSeconds: 4,
-			HLSWindowSeconds:  300,
-			MaxSessions:       4,
-			IdleSeconds:       45,
+			HLSSegmentSeconds:  4,
+			HLSWindowSeconds:   300,
+			MaxSessions:        4,
+			IdleSeconds:        45,
+			TranscodeMaxHeight: 1080,
 		},
 	}
 }
@@ -317,6 +330,10 @@ func (c *Config) Validate() error {
 	}
 	if c.Playback.IdleSeconds < 10 || c.Playback.IdleSeconds > 3600 {
 		c.Playback.IdleSeconds = 45
+	}
+	// 0 = 不限（合法的显式选择），负数与超过 8K 的值当写错处理。
+	if c.Playback.TranscodeMaxHeight < 0 || c.Playback.TranscodeMaxHeight > 4320 {
+		c.Playback.TranscodeMaxHeight = 1080
 	}
 	return nil
 }

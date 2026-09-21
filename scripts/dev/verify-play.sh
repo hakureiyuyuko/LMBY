@@ -5,7 +5,7 @@
 #   1. 直出（DirectPlay）：HTTP Range / ETag / 条件请求 / 出来的字节与原文件一致；
 #   2. 转封装（DirectStream）：mkv → HLS fMP4，视频编码没变、音频按需转 AAC，
 #      并且用 ffprobe 直接读**服务发出的** m3u8 交叉验证；
-#   3. 决策边界：10bit HEVC 明确说「需要转码（M4）」、上报 Safari 能力后变成可以
+#   3. 决策边界：10bit HEVC 需要转码（能不能转由本机能力表说了算）、上报 Safari 能力后变成可以
 #      转封装（且打了 hvc1 标签）、图形字幕明确不显示；
 #   4. 播放会话：进度落库、续播位置、seek 换窗口、stop 后 ffmpeg 与分片都被回收；
 #   5. 会话复用：同一段播放只跑一路 ffmpeg；
@@ -311,17 +311,26 @@ else
 fi
 
 echo
-echo "== 8. 决策边界：10bit HEVC（默认档应当明确说「M4 才支持」） =="
+echo "== 8. 决策边界：10bit HEVC（默认档需要转码；能不能转由本机能力表说话） =="
 if [[ -z "$HEVCI" ]]; then
   note "库里没有 10bit HEVC 样本，跳过"
 else
   r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$HEVCI/play" -H 'Content-Type: application/json' -d '{}')
-  check "不可播放（不假装能播）" false "$(bool "$(jq -r '.playable' <<<"$r")")"
   check "决策 = transcode" transcode "$(jq -r '.mode' <<<"$r")"
   check "视频动作 = transcode" transcode "$(jq -r '.plan.video.action' <<<"$r")"
-  check "理由链里点名 M4" true "$(bool "$(jq -r '[.reasons[]|test("M4")]|any' <<<"$r")")"
-  check "给了明确的错误说明" true "$(bool "$(jq -r '(.error|length)>0' <<<"$r")")"
-  check "没有漏出播放地址" "" "$(jq -r '.hlsUrl // ""' <<<"$r")"
+  check "理由链里说明了为什么要转" true "$(bool "$(jq -r '[.reasons[]|test("转码")]|any' <<<"$r")")"
+  if [[ "$(jq -r '.playable' <<<"$r")" == "true" ]]; then
+    # 这台机器探测到了能真跑的 H.264 编码器 → 必须给出真的能播的转码计划
+    check "目标编码 = h264" h264 "$(jq -r '.plan.video.targetCodec' <<<"$r")"
+    check "给了播放地址" true "$(bool "$(jq -r '(.hlsUrl|length)>0' <<<"$r")")"
+    TVSID=$(jq -r '.playSessionId' <<<"$r")
+    json -b "$JAR" -X POST "$BASE/api/v1/play/$TVSID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  else
+    # 没有可用编码器（比如纯 CPU 且软编也没探测到）：如实说放不了，不假装
+    check "如实说明没有可用编码器" true "$(bool "$(jq -r '[.reasons[]|test("没有可用的编码器")]|any' <<<"$r")")"
+    check "给了明确的错误说明" true "$(bool "$(jq -r '(.error|length)>0' <<<"$r")")"
+    check "没有漏出播放地址" "" "$(jq -r '.hlsUrl // ""' <<<"$r")"
+  fi
 
   # 客户端上报「我支持 hevc 10bit」之后，同一个文件应当变成可以转封装
   SAFARI='{"name":"safari","containers":["mp4","webm"],"videoCodecs":["h264","hevc"],"audioCodecs":["aac","ac3","eac3","flac","mp3"],"maxWidth":3840,"maxHeight":2160,"maxBitDepth":10,"maxAudioChannels":6,"supportsHls":true,"supportsFmp4":true,"supportsTs":true}'

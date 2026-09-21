@@ -58,8 +58,8 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 |---|---|---|
 | `scale_vaapi` | ✅ | 硬解硬编路径上的缩放（不下载到内存） |
 | `deinterlace_vaapi` | ✅ | 硬解去隔行（本库无隔行内容，留作能力） |
-| `tonemap_vaapi` | ⚠️ 存在，**未用真实 HDR 素材验证过** | HDR→SDR |
-| `tonemap` + `zscale`（软件） | ✅ 存在 | HDR→SDR 的软件兜底 |
+| `tonemap_vaapi` | ❌ **实测用不了** | 存在，但 iHD 驱动要求输入带 mastering display 元数据；库里常见的 bt2020+PQ 素材没有那段数据，会直接报 `No mastering display data from input` 并让**整路转码起不来**。所以 HDR 一律走软件链 |
+| `tonemap` + `zscale`（软件） | ✅ 实测可用 | HDR→SDR 的唯一可行路径（硬解时配 `hwdownload`） |
 | `yadif` / `bwdif` | ✅ | 软件去隔行 |
 | `subtitles`（libass） | ✅ | 字幕烧录 |
 
@@ -108,15 +108,39 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 -c:v libx264 -preset veryfast -crf <档位> -sc_threshold:v 0
 -force_key_frames:v 'expr:gte(t,n_forced*<分片秒>)'
 
-# HDR→SDR（仅 source 是 HDR 时）
--vf ...,tonemap_vaapi=format=nv12                 # 硬件
--vf ...,zscale=t=linear:npl=100,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p  # 软件
+# HDR→SDR（仅 source 是 HDR 时）：走**软件**色调查映射，+
+# 硬解时先在显存里缩放再取回内存（见下面「实测踩到的两个坑」）
+-vf "scale_vaapi=w=<宽>:h=<高>,hwdownload,format=p010,zscale=t=linear:npl=100,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=nv12,hwupload"
 ```
+
+实测踩到的两个坑（都是**真跑**才发现的，参数看起来都对）：
+
+1. **`tonemap_vaapi` 会整路失败**：报 `No mastering display data from input` 后滤镜链
+   直接 `Invalid argument`，用户看到的是「放不了」。而 lavfi 探测造不出这种素材，
+   所以能力探测答不了这个问题 —— 解决办法是 HDR 一律走软件链（zscale + tonemap）。
+   能力探测里的 `tonemap` 因此改成只认「zscale + tonemap 两个软件滤镜在不在」。
+2. **缩放不能再放在 tonemap 之后**：先在显存里 `scale_vaapi` 到目标分辨率，
+   再 `hwdownload` 交给 CPU 色调映射，速度差 4 倍（实测 4K@60fps 源：
+   不缩放 0.10x → 先缩到 1080p 0.39x）。4 秒分片的起播耗时从 40 秒降到 10 秒，
+   这才进得了 20 秒的起播超时。
+
+### 转码输出的幅面上限（`[playback] transcode_max_height`，默认 1080）
+
+转码是「边编边播」，**输出分辨率直接决定能不能实时**。所以转码路径额外压一档：
+默认不超过 1080p（`0` = 不限）。
+
+- 只约束**转码**：直出与转封装不重编码，源多大就送多大（4K 原样送又快又清楚）。
+- 判定顺序：`min(源幅面, 客户端上报的上限, transcode_max_height)`，理由链会写出实际缩到多少。
+- 依据是**实例测量值**，不是项目常量：这台机器上 4K HDR 做色调映射只有 0.10x，
+  压到 1080p（并在显存里先缩放）后 0.39x；而 1080p 的 HEVC 10bit 转码起播实测只要 1 秒。
+  机器够强、或就是要 4K 输出，把它调大或写 0。
 
 关键点（为什么这么写，见 `docs/notes/jellyfin-reference.md` 的 `文件:行`）：
 - **关键帧必须对齐分片边界**，否则分片长度漂、播放器起播慢、seek 不准
 - libx264 还要 `-sc_threshold 0`，不然场景切换会插关键帧
 - HDR 素材不能直接丢给 h264：颜色会发灰发暗，必须 tone mapping
+- **10bit 源不缩放也要降位深**：目标 h264 只接受 nv12，帧格式不匹配时编码器
+  会在初始化阶段直接失败（表现为「等待第一个分片超时」而不是画质问题）
 - **不用 `-re`**（那会等速读源，白等）；节流靠下面第三节
 
 ### 节流（M4）

@@ -83,10 +83,12 @@ type Spec struct {
 
 	// AudioIndex 是音频流的绝对序号，-1 表示没有音频。
 	AudioIndex int
-	// AudioCopy 为真时音频原样复制，否则转 AAC。
-	AudioCopy bool
-	// Downmix 为真时音频降到立体声。
-	Downmix bool
+
+	// Video 与 Audio 是「这两段怎么送」，由上层（api/encoder）填好：
+	// Video.Copy / Audio.Copy 为真时是原样复制，否则用它们给的参数转码。
+	// 零值等价于“视频复制”，所以老的调用点（直出/转封装）不用改。
+	Video VideoEncode
+	Audio AudioEncode
 
 	// SegmentFormat 取 fmp4 / ts。
 	SegmentFormat string
