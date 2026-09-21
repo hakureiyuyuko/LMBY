@@ -294,6 +294,30 @@ else
 fi
 
 echo
+echo "== 10.5 换字幕轨（流键不变）时，旧会话 stop 不能误杀新会话的流 =="
+# 换字幕/音轨不改视频编码参数 → 流键不变 → 新老播放会话**共用同一路 ffmpeg**。
+# 前端切字幕时会先停掉旧会话；若无脑 Stop，就把新会话正在看的那路一起杀了，
+# 播放器停在「正在准备播放…」，日志里 index.m3u8 回 410。
+# 真跑踩到：从「自动字幕」切到 ASS 轨必现。
+SUBF=$(pick_file "coalesce(f.duration_ticks,0) > 600000000 and (select count(*) from jsonb_array_elements(coalesce(f.subtitle_streams,'[]'::jsonb)) s where s.value->>'codec' in ('ass','ssa')) > 0")
+if [[ -z "$SUBF" ]]; then
+  note "没有带 ASS 字幕的样本，跳过"
+else
+  SUI=$(item_of "$SUBF")
+  SUIDX=$(PSQL "select (s.value->>'index') from media_files f, jsonb_array_elements(coalesce(f.subtitle_streams,'[]'::jsonb)) s where f.id=$SUBF and s.value->>'codec' in ('ass','ssa') order by (s.value->>'index')::int limit 1")
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$SUI/play" -H 'Content-Type: application/json' -d '{"restart":true}')
+  A_SID=$(jq -r '.playSessionId // ""' <<<"$r")
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$SUI/play" -H 'Content-Type: application/json' -d "{\"restart\":true,\"subtitleStreamIndex\":$SUIDX}")
+  B_SID=$(jq -r '.playSessionId // ""' <<<"$r")
+  B_URL="$BASE$(jq -r '.hlsUrl // ""' <<<"$r")"
+  # 前端切字幕的顺序就是：先停旧会话，再看新的
+  [[ -n "$A_SID" && "$A_SID" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$A_SID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$B_URL")
+  check "停掉旧会话后，新会话的播放列表仍然可用（共用流不被误杀）" 200 "$CODE"
+  [[ -n "$B_SID" && "$B_SID" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$B_SID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+fi
+
+echo
 echo "== 11. 播放器画质档（maxHeight）：能直出的也要按要求转 =="
 if [[ -z "$DIRECT_ID" ]]; then
   note "库里没有「能直出的 1080p+ 单文件条目」，跳过"

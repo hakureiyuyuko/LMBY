@@ -128,9 +128,40 @@ async function pickFallbackFont(): Promise<string> {
 
 /** octopus 实例的最小接口（它是外部脚本，没有 .d.ts）。 */
 interface OctopusInstance {
-  destroy(): void;
+  /**
+   * 销毁：终止 worker 并把画布从 DOM 里摘掉。
+   *
+   * ⚠️ 方法名是 **`dispose`** —— 这个库**没有** `destroy()`（它只在内部向 worker
+   * 发一个 `{target:'destroy'}` 消息）。真跑踩到过：原来写的是 `inst.destroy()`，
+   * 运行时抛 TypeError 又被 catch 沙掉，于是画布永远留在 DOM 里，每重跑一次 effect
+   * （切画质/换会话 → subtitleUrl 变了）就多叠一层 —— 用户看到的是「特效字幕变成重影」。
+   */
+  dispose(): void;
+  /** 按视频元素当前尺寸重算画布（切窗口/进全屏后要对齐）。 */
+  resize?(): void;
   /** 字幕时间基准（秒）：libass 用 `video.currentTime + timeOffset` 作为字幕时间。 */
   timeOffset?: number;
+}
+
+/**
+ * 销毁一个 octopus 实例，并把**残留的画布**一并清掉。
+ *
+ * 画布是 `video` 后面的兄弟节点（`.libassjs-canvas-parent`），一个实例一张。
+ * 只要有一张没清掉，它就会停在前一帧字幕上，与新画布叠在一起 → 重影。
+ * 所以这里除了按对的方名销毁，还多一道兜底：把剩下的画布节点直接移除。
+ */
+function disposeOctopus(inst: OctopusInstance | null | undefined): void {
+  if (inst) {
+    const any = inst as unknown as { dispose?: () => void; destroy?: () => void };
+    try {
+      if (typeof any.dispose === 'function') any.dispose();
+      else if (typeof any.destroy === 'function') any.destroy();
+    } catch {
+      /* 重复销毁不算错 */
+    }
+  }
+  // 兜底：worker 已停但画布还在（例如实例是在 effect 已经取消之后才建出来的）。
+  document.querySelectorAll('.libassjs-canvas-parent').forEach((el) => el.remove());
 }
 
 /**
@@ -691,12 +722,14 @@ export function Player() {
         ).SubtitlesOctopus;
         if (!Ctor) throw new Error('libass 渲染器未就绪');
         const font = await pickFallbackFont();
+        if (cancelled) return;
         if (!font) {
-          if (!cancelled) {
-            setNotice('服务端没配兑底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了');
-          }
+          setNotice('服务端没配兑底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了');
           return;
         }
+        // 建实例之前先把可能残留的画布清掉：万一上次是被中途取消的（见下），
+        // 残留画布会永远停在上一帧字幕上 → 重影。
+        disposeOctopus(null);
         inst = new Ctor({
           video: v,
           // 直接喂字幕**文本**（见 fetchSubtitleText 的注释）。
@@ -716,6 +749,12 @@ export function Player() {
             if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
           },
         });
+        // 创建是同步的，但上面几个 await 期间 effect 可能已经被取消 ——
+        // 那个实例**没被任何人引用**，只能在这里就地销毁，否则它那张画布会留下来。
+        if (cancelled) {
+          disposeOctopus(inst);
+          return;
+        }
         octopusRef.current = inst;
       } catch {
         if (!cancelled) setNotice('特效字幕渲染器加载失败，本条字幕暂不显示');
@@ -727,7 +766,7 @@ export function Player() {
     const ro = new ResizeObserver(() => {
       void (async () => {
         await waitVideoSized(v);
-        (octopusRef.current as { resize?: () => void } | null)?.resize?.();
+        octopusRef.current?.resize?.();
       })();
     });
     ro.observe(v);
@@ -735,11 +774,8 @@ export function Player() {
     return () => {
       cancelled = true;
       ro.disconnect();
-      try {
-        inst?.destroy();
-      } catch {
-        /* 已经销毁过 */
-      }
+      // 实例可能是这个 effect 里建的（inst），也可能是上一次留下来的（octopusRef）
+      disposeOctopus(inst ?? octopusRef.current);
       octopusRef.current = null;
     };
   }, [state?.subtitleUrl, state?.subtitleFormat, subReady, subSel]);

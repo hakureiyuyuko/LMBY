@@ -705,6 +705,32 @@ async function main() {
     })()`);
     note(`画布上的字幕像素数：${ink}（“-1” = 取不到画布像素，不硬判）`);
     await shot('07-libass');
+
+    // 重影回归：切画质/换会话会让特效字幕的 effect 重跑，每跑一次就新建一张画布。
+    // octopus 的销毁方法叫 dispose（**不是** destroy），调错就会把旧画布留在 DOM 里、
+    // 永久停在前一帧字幕上 → 用户看到的是「特效字幕变成重影」（真跑拓出来的）。
+    const canvases0 = await evaluate(`document.querySelectorAll('.libassjs-canvas-parent').length`);
+    note(`初次挂上后 libass 画布数：${canvases0}`);
+    check('libass 画布只有一张（没有残留）', 1, canvases0);
+    const switched = await evaluate(`(() => {
+      const sel = document.querySelector('select[aria-label="画质"]');
+      if (!sel) return false;
+      const opt = [...sel.options].find((o) => o.value !== sel.value);
+      if (!opt) return false;
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    if (!switched) {
+      note('没有画质档可切，跳过重影回归');
+    } else {
+      // 等新会话起来 + 新实例重建（字幕文本会走缓存，这里主要是等 effect 重跑）
+      await new Promise((r) => setTimeout(r, 9000));
+      const canvases1 = await evaluate(`document.querySelectorAll('.libassjs-canvas-parent').length`);
+      note(`切一次画质后 libass 画布数：${canvases1}`);
+      check('切画质后仍然只有一张画布（不会重影）', 1, canvases1);
+      await shot('07b-libass-no-ghost');
+    }
   }
 
   log('\n== 7.7 图形字幕（PGS）烧录：前端要把「需烧录」说清楚并带上参数 ==');

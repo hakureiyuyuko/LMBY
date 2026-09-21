@@ -814,11 +814,31 @@ func (s *Server) handlePlayStop(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if ps.StreamKey != "" {
+	if ps.StreamKey != "" && !s.streamInUseByOthers(ps.StreamKey, ps.ID) {
 		s.streams.Stop(ps.StreamKey)
 	}
 	s.plays.remove(ps.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// streamInUseByOthers 报告这路流是否还被别的播放会话用着。
+//
+// 为什么需要：换字幕/音轨**不会改变流键**（它们不改视频编码参数），所以新会话
+// 常常与旧会话共用同一路 ffmpeg。旧会话结束时若无脑 Stop，就把新会话正在看的那路
+// 一起杀了 —— 表现是播放器一直停在「正在准备播放…」，日志里 index.m3u8 回 410。
+// 真跑踩到：从「自动字幕」切到 ASS 轨时必现（前端会先停旧会话）。
+//
+// 不用额外做引用计数：流管理器自己的空闲回收（久没人拉分片就回收）已经兜住了泄漏，
+// 这里只要别误杀正在被用的那一路。
+func (s *Server) streamInUseByOthers(key, exceptID string) bool {
+	s.plays.mu.Lock()
+	defer s.plays.mu.Unlock()
+	for id, p := range s.plays.m {
+		if id != exceptID && p.StreamKey == key {
+			return true
+		}
+	}
+	return false
 }
 
 // handlePlayProgress 接收播放心跳。
