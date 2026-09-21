@@ -44,10 +44,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 与 setup-go 同理：本地 ~/.npm 已经持久化，不走云端 cache service
+      # （注意 setup-node 的 cache 输入只接受 npm/yarn/pnpm，写 false 会报
+      #  “Caching for 'false' is not supported”，要关就关 package-manager-cache）
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: false
+          package-manager-cache: false
 
       - run: npm ci --no-audit --no-fund
       - name: 类型检查

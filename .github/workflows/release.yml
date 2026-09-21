@@ -8,6 +8,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # 手动触发只跑 build（编译矩阵），release 那步有 tag 判断 ——
+  # 这样可以在不打 tag 的情况下验证四平台交叉编译还通不通。
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -74,6 +77,8 @@ jobs:
 
   release:
     needs: build
+    # 只有真正的 v* tag 才发版；手动触发（ref=分支）跳过这一步。
+    if: startsWith(github.ref, 'refs/tags/v')
     # 这里的 gh CLI 是自托管镜像里 apt 装的（GitHub 托管 runner 预装，自建的要自己装）。
     runs-on: [self-hosted, lmby]
     timeout-minutes: 30
