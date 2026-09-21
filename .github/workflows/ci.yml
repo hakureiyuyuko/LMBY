@@ -5,9 +5,14 @@ on:
     branches: ["**"]
   pull_request:
 
+# 跑在自建 runner 上（PVE 宿主 kyaru 的 LXC 108 = gh-runner-01，自定义 label `lmby`）：
+#   * 公开仓库用 GitHub 托管 runner 本身是免费额度，自托管主要是省排队 + 用本地 12 核 i5 跑得更快；
+#   * 想临时回退到云端 runner：把下面的 runs-on 换回 ubuntu-latest 即可；
+#   * 依赖要求（镜像里已装好）：git/curl/jq/gcc（go test -race 需要 cgo）/gh CLI。
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lmby]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -29,7 +34,8 @@ jobs:
         run: /tmp/lmby version
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lmby]
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: web
@@ -49,7 +55,8 @@ jobs:
         run: npm run build
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lmby]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 自建 runner（LXC 108 gh-runner-01）一次只跑一个 job，matrix 的 4 个平台是串行的。
+    runs-on: [self-hosted, lmby]
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -72,7 +74,9 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    # 这里的 gh CLI 是自托管镜像里 apt 装的（GitHub 托管 runner 预装，自建的要自己装）。
+    runs-on: [self-hosted, lmby]
+    timeout-minutes: 30
     steps:
       # checkout 不能省：gh release create 要在 git 仓库里跑，少了它会报 not a git repository。
       - uses: actions/checkout@v7
