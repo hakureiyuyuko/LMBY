@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/config"
+	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
@@ -39,16 +40,22 @@ type Server struct {
 	plays   *playRegistry
 	// subs 管理「内嵌字幕抽成 WebVTT」的后台任务（同一文件+同一轨只抽一次）。
 	subs *subtitleJobs
+	// encoders 是本机编码能力表（真跑探测过，带磁盘缓存）。
+	encoders *encoder.Store
 }
 
 // New 构造 Server。
 func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,
 	scraper *scrape.Handler, settingsSvc *settings.Service, meta provider.Client,
-	streams *stream.Manager) *Server {
+	streams *stream.Manager, encoders *encoder.Store) *Server {
 	if streams == nil {
 		// 没有 ffmpeg 时也要有个非 nil 的管理器（各处的调用会给出明确的失败原因），
 		// 而不是让每个 handler 都要判一次 nil。
 		streams = stream.NewManager(stream.Options{}, log)
+	}
+	if encoders == nil {
+		// 同理：未接能力表时给个空仓库，接口会现场探测，不会 nil panic。
+		encoders = encoder.NewStore(cfg.FFmpeg.Path, "", "", log)
 	}
 	return &Server{
 		cfg:      cfg,
@@ -65,6 +72,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		streams:  streams,
 		plays:    newPlayRegistry(),
 		subs:     newSubtitleJobs(),
+		encoders: encoders,
 	}
 }
 
@@ -154,6 +162,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/items/played", s.requireAuth(s.handleSetPlayed))
 	mux.Handle("GET /api/v1/continue", s.requireAuth(s.handleContinueWatching))
 	mux.Handle("GET /api/v1/playback/sessions", s.requireAuth(s.handleListPlaySessions))
+
+	// 编码能力（M4）：看这台机器到底能用哪个转码后端。
+	mux.Handle("GET /api/v1/transcode/capabilities", s.requireAuth(s.handleTranscodeCapabilities))
+	mux.Handle("POST /api/v1/transcode/capabilities/refresh", s.requireAdmin(s.handleRefreshTranscodeCapabilities))
 
 	// 播放会话下的媒体分发：直出原文件 / HLS 播放列表与分片 / 字幕。
 	//

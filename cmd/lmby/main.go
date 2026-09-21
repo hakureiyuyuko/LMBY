@@ -29,6 +29,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/api"
 	"github.com/hakureiyuyuko/lmby/internal/auth"
 	"github.com/hakureiyuyuko/lmby/internal/config"
+	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
@@ -490,9 +491,25 @@ func cmdServe(args []string) error {
 		"windowSeconds", cfg.Playback.HLSWindowSeconds,
 		"maxSessions", cfg.Playback.MaxSessions)
 
+	// 编码能力表：启动时后台真跑探测一次（约 1~3 秒，不阻塞启动）。
+	// 这样第一次点播放时不用现等，界面一打开也能看到「这台机器能用什么」。
+	encStore := encoder.NewStore(
+		cfg.FFmpeg.Path,
+		filepath.Join(cfg.DataDir, "capabilities.json"),
+		filepath.Join(cfg.DataDir, "probe"),
+		log,
+	)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if _, err := encStore.Get(ctx); err != nil {
+			log.Warn("启动时编码能力探测失败（首次转码时会再试一次）", "err", err)
+		}
+	}()
+
 	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
-	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams)
+	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {
