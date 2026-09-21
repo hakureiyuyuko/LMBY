@@ -167,7 +167,7 @@ func TestDecide(t *testing.T) {
 				SubtitleIndex: 2},
 			mode: ModeRemux, playable: true, segFormat: "fmp4",
 			videoAction: ActionCopy, audioAction: ActionCopy, subAction: ActionDrop,
-			wantContains: "烧录进画面",
+			wantContains: "烧进画面",
 		},
 		{
 			name: "显式关闭字幕",

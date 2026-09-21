@@ -99,6 +99,12 @@ Jellyfin 是用 `-copyts -avoid_negative_ts disabled` 组合做的，HLS 里配
 
 ### 5.1 烧录（图形字幕 / 用户选择烧录时）
 
+❯ **我们只烧图形字幕（PGS/VobSub 位图），文本字幕不烧**：ASS 交给前端 libass、
+❯ SRT 转 WebVTT，都不需要把画面重编一遍（见 `docs/TRANSCODING.md` 第四节）。
+❯ 另外 Jellyfin 下面这条 `subtitles=sub2video=1` 是**把字幕喂给 subtitles 滤镜**
+❯ （对文本/ASS 也行）；图形位图我们用的是 **`overlay` 两路滤镜图** ——
+❯ 实现与实测见 `internal/encoder/args.go` 的 `assembleVideoArgs`。
+
 `EncodingHelper.cs:1964`
 
 ```

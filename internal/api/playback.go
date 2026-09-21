@@ -242,6 +242,12 @@ type playRequest struct {
 	MaxHeight *int `json:"maxHeight,omitempty"`
 	// HighBitrate 为真 = 选了「Premium」档（同分辨率、更高码率）。
 	HighBitrate bool `json:"highBitrate,omitempty"`
+
+	// BurnSubtitle 为真 = 把选中的字幕**烧进画面**。
+	//
+	// 只对图形字幕（PGS/VobSub）有意义：它不是文本，前端渲染不了；而烧录必须
+	// 重新编码，所以它会把本来能直出的片子也拉进转码（理由链里会写明）。
+	BurnSubtitle bool `json:"burnSubtitle,omitempty"`
 }
 
 // playStateResponse 是播放状态响应（开始播放与查询状态共用）。
@@ -376,6 +382,7 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		VideoIndex:         intValue(req.VideoStreamIndex),
 		AudioIndex:         intValue(req.AudioStreamIndex),
 		SubtitleIndex:      intValueOr(req.SubtitleStreamIndex, 0),
+		BurnSubtitle:       req.BurnSubtitle,
 		StartTicks:         startTicks,
 	})
 
@@ -484,9 +491,28 @@ func (s *Server) startHLS(ctx context.Context, ps *playSession, file store.Playa
 	if s.streams == nil {
 		return "", "error", "转封装/转码服务未启用（ffmpeg 不可用？）", ""
 	}
-	video, audio, err := s.encodeArgs(ctx, ps)
+	sess, err := s.readySession(ctx, ps)
 	if err != nil {
+		s.log.Warn("HLS 会话启动失败", "item", ps.ItemID, "file", file.ID, "mode", ps.Plan.Mode, "err", err)
 		return "", "error", err.Error(), ""
+	}
+	ps.StreamKey = sess.Key
+	return "/api/v1/play/" + ps.ID + "/index.m3u8", "ready", "", sess.Stat().Log
+}
+
+// readySession 起一路（或复用）转封装/转码会话。
+//
+// 硬件解码起不来时**自动降级一次**：改用软件解码，编码器不变 ——
+// 编码才是吃 CPU 的大头，花在解码上的那点开销换「能看」完全值得。
+//
+// 为什么必须有这个降级：能力探测只能验到「编码名」这一层（h264 能不能硬解），
+// 验不到同一个编码的各个变体 —— 实测本机 iHD 解得了 8bit H.264，却解不了
+// H.264 High 10（Hi10P，`Failed setup for format vaapi`）。没有降级的话，
+// 库里那些 Hi10P 文件会直接变成「放不了」，而它们软解 + 硬编跑得好好的。
+func (s *Server) readySession(ctx context.Context, ps *playSession) (*stream.Session, error) {
+	video, audio, err := s.encodeArgs(ctx, ps, false)
+	if err != nil {
+		return nil, err
 	}
 	spec := stream.Spec{
 		Key:           streamKey(ps, video, audio),
@@ -500,12 +526,33 @@ func (s *Server) startHLS(ctx context.Context, ps *playSession, file store.Playa
 		StartSeconds:  ps.StartSeconds,
 	}
 	sess, err := s.streams.Ready(ctx, spec, playStartTimeout)
-	if err != nil {
-		s.log.Warn("HLS 会话启动失败", "item", ps.ItemID, "file", file.ID, "mode", ps.Plan.Mode, "err", err)
-		return "", "error", err.Error(), ""
+	if err == nil {
+		return sess, nil
 	}
-	ps.StreamKey = spec.Key
-	return "/api/v1/play/" + ps.ID + "/index.m3u8", "ready", "", sess.Stat().Log
+	if !hasHWDecode(video.InputArgs) {
+		return nil, err
+	}
+
+	s.log.Warn("硬件解码这路起不来，改用软件解码重试",
+		"item", ps.ItemID, "file", ps.FileID, "err", err)
+	video2, audio2, err2 := s.encodeArgs(ctx, ps, true)
+	if err2 != nil {
+		return nil, err
+	}
+	spec.Key = streamKey(ps, video2, audio2)
+	spec.Video = video2
+	spec.Audio = audio2
+	return s.streams.Ready(ctx, spec, playStartTimeout)
+}
+
+// hasHWDecode 报告编码参数里是不是开了硬件解码。
+func hasHWDecode(inputArgs []string) bool {
+	for _, a := range inputArgs {
+		if a == "-hwaccel" {
+			return true
+		}
+	}
+	return false
 }
 
 // encodeArgs 把决策结果翻译成 stream 层的「这两段怎么送」。
@@ -513,7 +560,10 @@ func (s *Server) startHLS(ctx context.Context, ps *playSession, file store.Playa
 // 这里是「决策（要什么）」与「执行（怎么拼 ffmpeg 参数）」的交界：
 // 转码时向 internal/encoder 要参数 —— 它才知道本机该用哪个后端、
 // 哪种码率模式（探测出来的），stream 层只负责把它们拼进命令行。
-func (s *Server) encodeArgs(ctx context.Context, ps *playSession) (stream.VideoEncode, stream.AudioEncode, error) {
+//
+// noHWDecode 为真时强制软件解码：硬件解码在这台机器上对这类源起不来时的
+// 降级路径（见 readySession）。
+func (s *Server) encodeArgs(ctx context.Context, ps *playSession, noHWDecode bool) (stream.VideoEncode, stream.AudioEncode, error) {
 	video := stream.CopyVideoEncode()
 	audio := stream.CopyAudioEncode()
 
@@ -539,6 +589,12 @@ func (s *Server) encodeArgs(ctx context.Context, ps *playSession) (stream.VideoE
 		return video, audio, fmt.Errorf("读不到本机编码能力：%w", err)
 	}
 	backend := s.encoders.Preferred(caps)
+	// 烧录图形字幕：把「烧哪条」告诉 encoder —— 滤镜图与参数拼装都由它负责
+	//（它是纯函数，能离线单测；api 层不拼 ffmpeg 参数）。
+	var burn *encoder.SubtitleBurn
+	if ps.Plan.Subtitle.Action == playback.ActionBurn && ps.Plan.Subtitle.Index >= 0 {
+		burn = &encoder.SubtitleBurn{Index: ps.Plan.Subtitle.Index}
+	}
 	va := backend.VideoArgs(encoder.ArgsRequest{
 		SourceCodec:     ps.Plan.Video.SourceCodec,
 		Width:           ps.Plan.Video.SourceWidth,
@@ -551,12 +607,17 @@ func (s *Server) encodeArgs(ctx context.Context, ps *playSession) (stream.VideoE
 		TargetHeight:    ps.Plan.Video.TargetHeight,
 		Quality:         encoder.QualityByName(ps.Plan.Video.Quality),
 		KeyframeSeconds: s.cfg.Playback.HLSSegmentSeconds,
+		VideoIndex:      ps.Plan.Video.Index,
+		NoHWDecode:      noHWDecode,
+		BurnSubtitle:    burn,
 	})
 	return stream.VideoEncode{
-		InputArgs:  va.InputArgs,
-		FilterArgs: va.FilterArgs,
-		CodecArgs:  va.CodecArgs,
-		Tag:        va.Tag,
+		InputArgs:     va.InputArgs,
+		FilterArgs:    va.FilterArgs,
+		ComplexFilter: va.ComplexFilter,
+		MapLabel:      va.MapLabel,
+		CodecArgs:     va.CodecArgs,
+		Tag:           va.Tag,
 	}, audio, nil
 }
 
@@ -572,6 +633,9 @@ func streamKey(ps *playSession, video stream.VideoEncode, audio stream.AudioEnco
 	parts := make([]string, 0, 16)
 	parts = append(parts, video.InputArgs...)
 	parts = append(parts, video.FilterArgs...)
+	// 滤镜图（烧录字幕）也进键：同一部片子的同一段，「不烧」与「烧」是两条
+	// 完全不同的命令行，键不能一样，否则切了烧录却复用了上一路。
+	parts = append(parts, video.ComplexFilter, video.MapLabel)
 	parts = append(parts, video.CodecArgs...)
 	parts = append(parts, video.Tag...)
 	parts = append(parts, fmt.Sprintf("vcopy=%v", video.Copy))
@@ -709,7 +773,7 @@ func (s *Server) handlePlaySeek(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldKey := ps.StreamKey
-	video, audio, err := s.encodeArgs(r.Context(), ps)
+	sess, err := s.readySession(r.Context(), ps)
 	if err != nil {
 		writeJSON(w, http.StatusOK, playStateResponse{
 			PlaySessionID: ps.ID, Mode: ps.Plan.Mode, State: "error",
@@ -717,28 +781,9 @@ func (s *Server) handlePlaySeek(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	spec := stream.Spec{
-		Key:           streamKey(ps, video, audio),
-		Path:          ps.FilePath,
-		VideoIndex:    ps.Plan.Video.Index,
-		VideoCodec:    ps.Plan.Video.Codec,
-		AudioIndex:    ps.Plan.Audio.Index,
-		Video:         video,
-		Audio:         audio,
-		SegmentFormat: ps.Plan.SegmentFormat,
-		StartSeconds:  ps.StartSeconds,
-	}
-	sess, err := s.streams.Ready(r.Context(), spec, playStartTimeout)
-	if err != nil {
-		writeJSON(w, http.StatusOK, playStateResponse{
-			PlaySessionID: ps.ID, Mode: ps.Plan.Mode, State: "error",
-			Error: err.Error(), Reasons: ps.Plan.Reasons, Plan: ps.Plan,
-		})
-		return
-	}
-	ps.StreamKey = spec.Key
+	ps.StreamKey = sess.Key
 	// 新的起来之后再回收旧的：先停旧的话，万一起不来就彻底没得看了。
-	if oldKey != "" && oldKey != spec.Key {
+	if oldKey != "" && oldKey != sess.Key {
 		s.streams.Stop(oldKey)
 	}
 	resp.State = "ready"

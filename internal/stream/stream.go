@@ -407,6 +407,13 @@ func newSession(opts Options, spec Spec) *Session {
 		exited:  make(chan struct{}),
 		logs:    newRingLog(120),
 	}
+	// 客户端位置从**窗口起点**算起：续播（从影片中途开一路）时，客户端一开始就在
+	// StartSeconds 那儿，而不是 0。
+	//
+	// 不先垫上这个值的话，节流器会拿「已生成 1403+s」去减「客户端 0s」——
+	// 起播瞬间就把 ffmpeg 停住，20 秒等不到第一个分片，于是被判成「放不了」。
+	// 真跑踩到：从 23:23 续播一部片子，直接开不起来（见 TestThrottleMidMovieResume）。
+	s.clientSec.Store(int64(spec.StartSeconds * 1000))
 	s.pauseFn = func() error { return pauseProcess(s.cmd) }
 	s.resumeFn = func() error { return resumeProcess(s.cmd) }
 	return s

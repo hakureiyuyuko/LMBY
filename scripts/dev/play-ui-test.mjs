@@ -281,7 +281,7 @@ async function main() {
   // 通过 /items/{id}/playlist 判断：mp4 + h264 8bit + 浏览器能解的音频 → 应当直出；
   // matroska + h264 8bit → 应当转封装。挑不到就跳过对应段落。
   const cand = await evaluate(`(async () => {
-    const out = { direct: null, remux: null, transcode: null, ass: null };
+    const out = { direct: null, remux: null, transcode: null, ass: null, pgs: null };
     const libs = (await (await fetch('/api/v1/libraries')).json()).libraries || [];
     for (const lib of libs) {
       const b = await (await fetch('/api/v1/libraries/' + lib.id + '/browse?kind=movie&limit=200')).json();
@@ -306,7 +306,12 @@ async function main() {
           const sub = (f.subtitles || []).find((s) => s.codec === 'ass' || s.codec === 'ssa');
           if (sub) out.ass = { id: it.id, title: it.title, index: sub.index };
         }
-        if (out.direct && out.remux && out.transcode && out.ass) return out;
+        // 图形字幕（PGS/VobSub）样本：验「前端把 burnSubtitle 传下去」
+        if (!out.pgs) {
+          const sub = (f.subtitles || []).find((s) => s.isImage === true);
+          if (sub) out.pgs = { id: it.id, title: it.title, index: sub.index };
+        }
+        if (out.direct && out.remux && out.transcode && out.ass && out.pgs) return out;
       }
     }
     return out;
@@ -315,6 +320,7 @@ async function main() {
   note(`转封装样本：${cand.remux ? `${cand.remux.id} ${cand.remux.title}（${cand.remux.file}，${cand.remux.subs} 条字幕）` : '未找到'}`);
   note(`需转码样本：${cand.transcode ? `${cand.transcode.id} ${cand.transcode.title}` : '未找到'}`);
   note(`ASS 字幕样本：${cand.ass ? `${cand.ass.id} ${cand.ass.title}（字幕 #${cand.ass.index}）` : '未找到'}`);
+  note(`图形字幕样本：${cand.pgs ? `${cand.pgs.id} ${cand.pgs.title}（字幕 #${cand.pgs.index}）` : '未找到'}`);
 
   // ---------------------------------------------------------------- 直出
   log('\n== 4. 直出：真的播起来 + 拖动 ==');
@@ -676,11 +682,12 @@ async function main() {
     })()`);
     note(`选了：${pickedSub}`);
     check('能选到 ASS 字幕轨', true, Boolean(pickedSub));
-    // libass 要下载 ~1.5MB 的 wasm，给足时间
+    // libass 要下载 ~1.5MB 的 wasm，而且内嵌 ASS 首次要先抽出来（网络盘上可能要
+    // 读很久）—— 给足时间。并发转码时机器很忙，60s 会抖（真跑见过），所以放到 2 分钟。
     const canvasReady = await waitFor(
       'libass canvas',
       async () => Boolean(await evaluate(`!!document.querySelector('.libassjs-canvas-parent')`)),
-      60000,
+      120000,
     );
     check('libass 渲染画布挂上了（特效字幕走 WASM 渲染）', true, canvasReady);
     const ink = await evaluate(`(() => {
@@ -698,6 +705,102 @@ async function main() {
     })()`);
     note(`画布上的字幕像素数：${ink}（“-1” = 取不到画布像素，不硬判）`);
     await shot('07-libass');
+  }
+
+  log('\n== 7.7 图形字幕（PGS）烧录：前端要把「需烧录」说清楚并带上参数 ==');
+  if (!cand.pgs) {
+    note('库里没有图形字幕样本，跳过');
+  } else {
+    await send('Page.navigate', { url: `${BASE}/play/${cand.pgs.id}` });
+    await waitFor('播放器', async () => Boolean(await evaluate(`!!document.querySelector('.player-video')`)), 30000);
+    await waitFor(
+      '字幕下拉',
+      async () => Boolean(await evaluate(`!!document.querySelector('select[aria-label="字幕"]')`)),
+      30000,
+    );
+    // 菜单里必须把「图形、需烧录」写出来 —— 用户不该以为选它跟选普通字幕一样便宜
+    const label = await evaluate(`(() => {
+      const sel = document.querySelector('select[aria-label="字幕"]');
+      const opt = [...sel.options].find((o) => o.value === '${cand.pgs.index}');
+      return opt ? opt.textContent.trim() : null;
+    })()`);
+    note(`菜单里这条是：${label}`);
+    check('图形字幕在菜单里标成「需烧录」', true, Boolean(label && label.includes('需烧录')));
+
+    // 记下播放请求体：这是「前端真的把 burnSubtitle 传下去」的直接证据
+    await evaluate(`(() => {
+      window.__playReqs = [];
+      const of = window.fetch;
+      if (!of || of.__lmbyWrapped) return true;
+      const wrapped = function (input, init) {
+        try {
+          const url = typeof input === 'string' ? input : (input && input.url) || '';
+          if (url.includes('/play') && init && typeof init.body === 'string') window.__playReqs.push(init.body);
+        } catch (e) { /* 记录失败不影响播放 */ }
+        return of.apply(this, arguments);
+      };
+      wrapped.__lmbyWrapped = true;
+      window.fetch = wrapped;
+      return true;
+    })()`);
+
+    const picked = await evaluate(`(() => {
+      const sel = document.querySelector('select[aria-label="字幕"]');
+      const opt = [...sel.options].find((o) => o.value === '${cand.pgs.index}');
+      if (!opt) return null;
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return opt.textContent.trim();
+    })()`);
+    check('能选到图形字幕轨', true, Boolean(picked));
+
+    const sent = await waitFor(
+      '带 burnSubtitle 的播放请求',
+      async () => {
+        const reqs = await evaluate(`window.__playReqs || []`);
+        return Array.isArray(reqs) && reqs.some((b) => String(b).includes('"burnSubtitle":true'));
+      },
+      45000,
+    );
+    check('前端把 burnSubtitle 传给了后端', true, sent);
+
+    // 烧录之后字幕在画面里，不该再有独立的 <track>（也不该有 libass 画布）
+    await waitFor('转码起播', async () => {
+      const st = await evaluate(videoState);
+      return Boolean(st && st.readyState >= 2);
+    }, 60000);
+    const tracks = await evaluate(`document.querySelectorAll('.player-video track').length`);
+    check('烧录时不再挂独立的字幕轨道（已经在画面里）', 0, tracks);
+
+    // 「为什么这么播」里要能看出是烧录
+    await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('为什么这么播'));
+      if (b) b.click();
+      return true;
+    })()`);
+    const reasonShown = await waitFor(
+      '详情面板里的烧录理由',
+      async () => {
+        const t = await evaluate(`(() => { const p = document.querySelector('.player-info'); return p ? p.textContent : ''; })()`);
+        return typeof t === 'string' && t.includes('烧录');
+      },
+      20000,
+    );
+    check('「为什么这么播」里能看到烧录', true, reasonShown);
+
+    // 截图：尽量停在字幕出现的时刻（PGS 样本的首条字幕常在十余秒处）。
+    // 停不到也只是截图不好看，不影响上面的断言。
+    await evaluate(`(() => {
+      const el = document.querySelector('.player-progress');
+      if (!el) return false;
+      const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      s.call(el, '12');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 8000));
+    await shot('08-burn-pgs');
   }
 
   log('\n== 8. 快捷键与字幕开关 ==');

@@ -239,9 +239,12 @@ func decideForFile(p Profile, req Request, file *File) Plan {
 		DurationTicks: file.DurationTicks,
 	}
 	vs, vReason := pickVideo(file, req.VideoIndex)
-	plan.Video = planVideo(p, req, file, vs, vReason)
-	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video)
+	// 字幕先算：烧录是**图形字幕专属**的事（文本字幕走 WebVTT / libass 旁路，
+	// 根本不需要重编画面），所以「要不要因为烧录把画面重编一遍」得看字幕决策的
+	// 结果，而不是看用户点没点烧录。
 	plan.Subtitle = planSubtitle(file, req.SubtitleIndex, req.BurnSubtitle)
+	plan.Video = planVideo(p, req, file, vs, vReason, plan.Subtitle.Action == ActionBurn)
+	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video)
 	plan.Mode, plan.SegmentFormat, plan.Playable = planMode(p, file, plan)
 
 	for _, r := range []string{plan.Video.Reason, plan.Audio.Reason, plan.Subtitle.Reason} {
@@ -328,9 +331,12 @@ func isInterlaced(vs probe.VideoStream) bool {
 
 // planVideo 决定视频流怎么处理。
 //
+// burnImage 表示「本次真要把一条**图形**字幕烧进画面」——不是「用户选了烧录」：
+// 选了烧录但选中的是文本字幕时不该重编（见 decideForFile 里的顺序说明）。
+//
 // 三档结果：直接复制（能直出/能转封装）→ 转码（本机能编、目标明确）→ 放不了
 //（本机没有可用的编码器，或者目标编码客户端也不支持）。
-func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix string) StreamPlan {
+func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix string, burnImage bool) StreamPlan {
 	m := req.Machine
 	out := StreamPlan{Action: ActionCopy, Index: vs.Index, Codec: vs.Codec,
 		Language: vs.Language, Title: vs.Title, Default: vs.Default,
@@ -361,7 +367,7 @@ func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix 
 	// 用户选的档位低于源：这是**用户要求**的转码，不是能力不够 —— 理由要说清楚，
 	// 否则用户会以为是服务端不给他看原画质。
 	// 要烧字幕就必须重编码（图形字幕是位图，只能烧进画面）——哪怕本来能直出。
-	if req.BurnSubtitle {
+	if burnImage {
 		why = append(why, "按你的选择烧录字幕")
 	}
 
@@ -600,7 +606,7 @@ func planSubtitle(file *File, want int, burn bool) StreamPlan {
 			return out
 		}
 		out.Action = ActionDrop
-		out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，需要烧录进画面（烧录链路还没接上），本次不显示", ss.Index, ss.Codec)
+		out.Reason = fmt.Sprintf("字幕 #%d（%s）是图形字幕，本次没选烧录（选「烧进画面」才能看到，代价是要重编一遍）", ss.Index, ss.Codec)
 		return out
 	}
 

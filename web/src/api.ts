@@ -737,6 +737,13 @@ export interface StartPlaybackBody {
    * > 0 = 该高度。选了比源低的档会强制转码。
    */
   maxHeight?: number;
+  /**
+   * 把选中的字幕**烧进画面**。
+   *
+   * 只对图形字幕（PGS/VobSub）有意义：它是位图，浏览器渲染不了。
+   * 烧录必须重新编码，所以它会把这个文件强制拉进转码（即使本来能直出）。
+   */
+  burnSubtitle?: boolean;
 }
 
 /** 条目下的文件与流（播放器的音轨/字幕选择器用）。 */

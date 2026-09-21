@@ -69,11 +69,16 @@ function absUrl(p: string): string {
 /**
  * 取回字幕**文本**。内嵌字幕首次要抽（接口回 202 = 还在抽），所以带重试。
  *
+ * 重试预算按**最坏情况**给：抽一条 4MB 的 ASS 要把源文件里那一路读一遍，
+ * 在网络盘（CIFS）上、又赶上同时有转码在跑时，几十秒是常态（实测踩到：
+ * 服务端 15 秒就回 202，而前端只轮询了 18 秒 → “字幕抽取超时”、画布永远挂不上）。
+ * 45 × 1.5s ≈ 70 秒，与后台上限（subtitleExtractTimeout 是 20 分钟）是同一量级。
+ *
  * 为什么不让 libass 自己去拉 subUrl：
  *   1）它拿到 202 里的 JSON 会在 worker 里直接崩掉，而且看不到可读错误；
  *   2）自己取回文本还能把失败原因告诉用户。
  */
-async function fetchSubtitleText(url: string, tries = 12): Promise<string> {
+async function fetchSubtitleText(url: string, tries = 45): Promise<string> {
   for (let i = 0; i < tries; i++) {
     const r = await fetch(url, { credentials: 'same-origin' });
     if (r.status === 202) {
@@ -219,6 +224,17 @@ export function Player() {
   const audioOptions = useMemo(() => playlist?.files[0]?.audio ?? [], [playlist]);
   const subOptions = useMemo(() => playlist?.files[0]?.subtitles ?? [], [playlist]);
 
+  /**
+   * 选中的是不是**图形**字幕（PGS/VobSub）：是的话要烧进画面。
+   *
+   * 为什么只能烧：它是位图，浏览器没法当文本渲染（也不像 ASS 那样能交给
+   * libass）。代价是服务端要重编一遍画面 —— 所以界面要把这件事说出来。
+   */
+  const subBurn = useMemo(
+    () => Boolean(subOptions.find((s) => s.index === subSel)?.isImage),
+    [subOptions, subSel],
+  );
+
   // 画质菜单只列比源低的档（比源高的档没有意义：那等于原生）。
   const sourceHeight = state?.plan.video.sourceHeight ?? 0;
   const qualityTiers = useMemo(
@@ -255,7 +271,14 @@ export function Player() {
   }, [loadSidebar]);
 
   const start = useCallback(
-    async (opts: { restart?: boolean; position: number; audio: number; sub: number; maxHeight?: number }) => {
+    async (opts: {
+      restart?: boolean;
+      position: number;
+      audio: number;
+      sub: number;
+      maxHeight?: number;
+      burn?: boolean;
+    }) => {
       setError('');
       setNotice('');
       setLoading(true);
@@ -274,6 +297,7 @@ export function Player() {
           profile: detectProfile(),
           audioStreamIndex: opts.audio || undefined,
           subtitleStreamIndex: opts.sub,
+          burnSubtitle: opts.burn,
           restart: opts.restart,
           startPositionTicks: opts.position > 0 ? secondsToTicks(opts.position) : undefined,
           maxHeight: opts.maxHeight !== undefined ? opts.maxHeight : maxHeightOf(qualityRef.current),
@@ -305,14 +329,14 @@ export function Player() {
     // 换音轨/字幕/画质时从**当前位置**续播：服务端存的那条进度可能落后几秒，
     // 用它续播会看到画面往回跳一下。
     const here = restart ? 0 : baseRef.current + (videoRef.current?.currentTime ?? 0);
-    void start({ restart, position: here, audio: audioSel, sub: subSel });
+    void start({ restart, position: here, audio: audioSel, sub: subSel, burn: subBurn });
     return () => {
       // 离开页面：停掉转封装会话（服务端会顺手回收 ffmpeg 与分片）
       stopWithBeacon();
     };
     // seq 变化 = 重新载入；音轨/字幕/画质改了 → 用新选择重开一路
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, seq, audioSel, subSel, quality]);
+  }, [itemId, seq, audioSel, subSel, quality, subBurn]);
 
   /** 把媒体挂到 <video> 上（HLS 优先用原生支持，其次 hls.js）。 */
   const attach = useCallback((st: PlaybackState) => {
@@ -950,10 +974,18 @@ export function Player() {
             {subOptions.map((s) => (
               <option key={s.index} value={s.index}>
                 #{s.index} {s.codec} {s.language || ''} {s.title || ''}
-                {s.isImage ? '（图形，本次不显示）' : ''}
+                {s.isImage ? '（图形，需烧录）' : ''}
               </option>
             ))}
           </select>
+        )}
+
+        {/* 图形字幕只能烧进画面（服务端要重编一遍）——这是有代价的选择，
+            所以不在菜单里偷偷做，而是选完就把代价写出来。 */}
+        {subBurn && (
+          <span className="faint" title="图形字幕是位图，只能烧进画面；服务端会重新编码一遍">
+            字幕将烧进画面（需重新编码）
+          </span>
         )}
 
         {sourceHeight > 0 && (

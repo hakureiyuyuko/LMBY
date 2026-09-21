@@ -89,6 +89,58 @@ func TestThrottlePausesAndResumes(t *testing.T) {
 	}
 }
 
+// TestThrottleMidMovieResume 钉住一个真跑踩到的坑：从影片中途续播时，节流器
+// 不该在起播瞬间就暂停 ffmpeg。
+//
+// 「已生成」是**绝对**媒体位置（窗口起点 + 分片数×分片时长），而客户端位置一开始
+// 是空的（还没拉任何分片、也没上报进度）。不把窗口起点先垫成客户端位置的话，
+// 续播（起点 1403s）一算就是「领先 1403s」→ 立即暂停 → 20 秒产不出第一个分片
+// → 整路被判成放不了（表现：从中间接着看直接开不起来）。
+func TestThrottleMidMovieResume(t *testing.T) {
+	opts := Options {FFmpeg: "ffmpeg", Root: t.TempDir(), SegmentSeconds: 4,
+		WindowSeconds: 300, MaxSessions: 2, IdleSeconds: 45, ThrottleSeconds: 60}
+	opts = opts.Normalize()
+	s := newSession(opts, Spec{Key: "k", Path: "/x.mkv", StartSeconds: 1403})
+	if err := os.MkdirAll(s.Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pauses := 0
+	s.pauseFn = func() error { pauses++; return nil }
+	s.resumeFn = func() error { return nil }
+
+	// 刚建好、还没产出分片：客户端就在起点，什么都不该发生
+	s.throttle(60)
+	if pauses != 0 || s.Paused() {
+		t.Fatalf("起播瞬间不该暂停：pauses=%d paused=%v", pauses, s.Paused())
+	}
+
+	// 产出一个分片（已生成 1407s）：领先 4s，仍不该暂停
+	if err := os.WriteFile(s.playlistPath(), []byte("#EXTM3U\nseg_00000.m4s\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.throttle(60)
+	if pauses != 0 {
+		t.Fatalf("领先 4s 不该暂停：pauses=%d", pauses)
+	}
+	if got := s.ClientSeconds(); got != 1403 {
+		t.Fatalf("客户端位置应当从窗口起点算起，得到 %v", got)
+	}
+
+	// 一路编到领先超过阀值（1403 + 19×4 = 1479，领先 76s）→ 这才该暂停
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n")
+	for i := 0; i < 19; i++ {
+		fmt.Fprintf(&b, "seg_%05d.m4s\n", i)
+	}
+	if err := os.WriteFile(s.playlistPath(), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.throttle(60)
+	if pauses != 1 || !s.Paused() {
+		t.Fatalf("领先 76s 应当暂停：pauses=%d paused=%v", pauses, s.Paused())
+	}
+}
+
 func TestThrottleDisabledWithZero(t *testing.T) {
 	opts := Options{FFmpeg: "ffmpeg", Root: t.TempDir(), SegmentSeconds: 4,
 		WindowSeconds: 300, MaxSessions: 2, IdleSeconds: 45, ThrottleSeconds: 0}

@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -104,6 +105,53 @@ func TestHLSArgs(t *testing.T) {
 			t.Errorf("窗口没按会话的值走：\n%s", s)
 		}
 	})
+}
+
+func TestHLSArgsBurnSubtitle(t *testing.T) {
+	// 烧录图形字幕：画面由 -filter_complex 产出，必须 map 它给的标签。
+	//
+	// 这里卡住的是一条真踩过的坑：如果同时保留了 `-map 0:0`（原始视频流）
+	// 与滤镜输出，同一个流会被送两遍，ffmpeg 在过滤器协商阶段直接失败
+	//（"Impossible to convert between the formats supported by…"），
+	// 用户看到的是「放不了」。
+	opts := Options{FFmpeg: "ffmpeg", SegmentSeconds: 4, WindowSeconds: 300, MaxSessions: 2, IdleSeconds: 45}
+	opts = opts.Normalize()
+	spec := Spec{
+		Path: "/mnt/media/a.mkv", VideoIndex: 0, VideoCodec: "hevc", AudioIndex: 1,
+		Audio: AudioEncode{Args: []string{"-c:a", "aac", "-b:a", "192k"}},
+		Video: VideoEncode{
+			InputArgs:     []string{"-vaapi_device", "/dev/dri/renderD128", "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"},
+			ComplexFilter: "[0:2]format=yuva420p[sub];[0:0]hwdownload,format=nv12[main];[main][sub]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload[vout]",
+			MapLabel:      "[vout]",
+			CodecArgs:     []string{"-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", "24"},
+		},
+		SegmentFormat: "fmp4", StartSeconds: 12,
+	}
+	s := argsString(hlsArgs(opts, spec, "/out"))
+
+	for _, want := range []string{
+		"-map [vout]",
+		"-filter_complex [0:2]format=yuva420p[sub]",
+		"-map 0:1", // 音频照旧按绝对序号 map
+		"-c:v h264_vaapi",
+		"-hide_banner",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("缺少参数 %q：\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "-map 0:0") {
+		t.Errorf("烧录时不能再 map 原始视频流（会被送两遍导致协商失败）：\n%s", s)
+	}
+	if strings.Contains(s, "-c:v copy") {
+		t.Errorf("烧录必须重新编码，不能 -c:v copy：\n%s", s)
+	}
+	// -filter_complex 是输出选项，必须在本轮输出文件之前。
+	// 用 filepath.Join 拼期望值：测试在 Windows 上跑时路径分隔符不一样。
+	out := filepath.Join("/out", "index.m3u8")
+	if strings.Index(s, "-filter_complex") > strings.Index(s, out) {
+		t.Errorf("-filter_complex 必须在输出文件之前：\n%s", s)
+	}
 }
 
 func TestFormatSecondsUsesDot(t *testing.T) {

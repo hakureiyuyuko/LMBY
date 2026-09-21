@@ -18,6 +18,14 @@ type VideoEncode struct {
 	InputArgs []string
 	// FilterArgs 是 -vf 的整条链（空表示不加）。
 	FilterArgs []string
+	// ComplexFilter 是 -filter_complex 的整条图（烧录图形字幕时用）：
+	// overlay 有两路输入（画面 + 字幕位图），-vf 只有一路，做不了。
+	ComplexFilter string
+	// MapLabel 是 ComplexFilter 产出画面的标签（如 "[vout]"）。
+	//
+	// 有它时**不能**再 -map 原始视频流：同一个视频流送两遍会让 ffmpeg 在
+	// 过滤器协商阶段直接失败（实测报 "Impossible to convert between…"）。
+	MapLabel string
 	// CodecArgs 是 -c:v 与质量/关键帧参数。
 	CodecArgs []string
 	// Tag 是额外标签（HEVC 装 fMP4 必须打 hvc1，否则部分客户端直接不出画面）。
@@ -48,7 +56,9 @@ func CopyAudioEncode() AudioEncode { return AudioEncode{Copy: true} }
 //   - `-tag:v hvc1`：HEVC 装进 fMP4 必须打这个标签；
 //   - `-t <窗口秒>`：只预生成一小段（`-c copy` 比实时快几十倍，不限制的话
 //     一次拖到片尾会把整部电影拷进磁盘）；
-//   - `-hls_list_size 0`：列表里保留全部分片，客户端才能在窗口内就地跳。
+//   - `-hls_list_size 0`：列表里保留全部分片，客户端才能在窗口内就地跳；
+//   - 烧录图形字幕时改用 `-filter_complex` + `-map [vout]`：overlay 需要两路输入，
+//     `-map 0:<视频序号>` 与滤镜输出同时存在会让同一个流被送两遍（会直接报错）。
 func hlsArgs(opts Options, spec Spec, outDir string) []string {
 	window := opts.WindowSeconds
 	if spec.WindowSeconds > 0 {
@@ -80,10 +90,20 @@ func hlsArgs(opts Options, spec Spec, outDir string) []string {
 		args = append(args, "-ss", formatSeconds(spec.StartSeconds))
 	}
 	args = append(args, "-i", spec.Path)
-	args = append(args, "-map", "0:"+strconv.Itoa(spec.VideoIndex))
+
+	// 视频映射：烧录图形字幕时画面由 -filter_complex 产出，必须 map 它给出的标签
+	//（不能再 map 原始视频流，否则同一个流会被送两遍，滤镜协商直接失败 —— 实测踩到）。
+	if spec.Video.ComplexFilter != "" {
+		args = append(args, "-filter_complex", spec.Video.ComplexFilter)
+		args = append(args, "-map", spec.Video.MapLabel)
+	} else {
+		args = append(args, "-map", "0:"+strconv.Itoa(spec.VideoIndex))
+	}
 	if spec.AudioIndex >= 0 {
 		args = append(args, "-map", "0:"+strconv.Itoa(spec.AudioIndex))
 	}
+	// -sn/-dn：内嵌字幕要么走单独的字幕响应（WebVTT/libass），要么已经被
+	// filter_complex 吃掉；切片里再带一份只会白占地方。
 	args = append(args, "-sn", "-dn")
 
 	// 视频参数

@@ -51,6 +51,13 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 |---|---|
 | H.264 1080p 8bit | ✅ `-hwaccel vaapi -hwaccel_output_format vaapi` |
 | HEVC 1080p **10bit** | ✅ 可用（我们库里最主流的格式） |
+| H.264 **High 10（Hi10P）** / YUV422P10 | ❌ **解不了**：`Failed setup for format vaapi: hwaccel initialisation returned error`。能力探测只能验到「h264 能不能硬解」这一层，验不到同一个编码的各个变体 —— 所以服务端起播失败时会**自动降级成软件解码 + 同一个硬件编码器**（`api.readySession`，见下面「踩到的坑」） |
+
+**硬解起不来时自动降级**：能力探测只能验到「编码名」这一层，验不到同一个编码的各个
+变体（Hi10P 就是反例）。所以真正的判据是**起播那次真跑**：开了硬解的会话如果 20 秒内
+产不出第一个分片，服务端会自动换成软件解码 + **同一个硬件编码器**重试一次
+（`api.readySession`）—— 编码才是吃 CPU 的大头，解码那点开销换「能看」完全值得。
+只换解码不换编码，所以输出画质/码率与原来一致。库里 11 个 Hi10P 文件全靠这条降级才播得出来。
 
 ### 滤镜
 
@@ -186,8 +193,12 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
   `generatedSeconds` / `clientSeconds` / `aheadSeconds` / `throttled`。
 - Windows 上没法暂停进程，节流退化为「不节流」（记一次日志，不影响播放）。
 
-判定依据：**已生成位置 − 客户端最近请求到的分片位置 > 阈值（默认 60 秒）** 就暂停，
-差值回落再恢复。注意命令行**不能带 `-nostdin`**，否则按键通道不存在。
+⚠️ **客户端位置要从窗口起点起算**：`已生成` 是**绝对**媒体位置（窗口起点 + 分片数×分片时长），
+而客户端位置在起播瞬间还是空的（既没拉分片，也没上报进度）。所以会话一建好就把
+「窗口起点」垫成客户端位置 —— 不这么做的话，从影片中途续播（比如 20 分钟处）会一算就
+得出「领先 1200s」，**起播瞬间就把 ffmpeg 停住**，20 秒产不出第一个分片，整路被判成「放不了」。
+真跑踩到过：从 23:23 续播一部片子，直接开不起来。
+（`internal/stream/throttle_test.go` 的 `TestThrottleMidMovieResume` + 验收脚本第 12.5 节）
 
 ---
 
@@ -199,7 +210,7 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 |---|---|---|
 | **ASS/SSA** | **原样抽出（`-c:s copy`）→ 前端 libass（WASM）渲染** | 定位（`\pos`）、轨迹（`\move`）、插值动画（`\t`）、卡拉OK（`\k`）、矢量绘图（`\p`）——只有完整的 ASS 解释器能还原 |
 | SRT 等纯文本 | 转 WebVTT 走浏览器原生轨道 | 轻、起播快；纯对白字幕不需要特效 |
-| 图形字幕（PGS/VobSub） | 目前明确告知「本次不显示」（烧录待接） | 位图，只能烧进画面 |
+| 图形字幕（PGS/VobSub） | **`overlay` 烧进画面**（用户选「烧进画面」时才做，必须重编码） | 位图，前端渲染不了也转不成文本 |
 
 **ASS 那条链路**（我们库里 145 个文件带 ASS）：
 
@@ -221,9 +232,11 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
    缺了它 worker 会 fetch 失败并**直接崩掉**（控制台只有一句 `Worker error: ErrorEvent`）。
    部署时把一个中文字体放到 `<数据目录>/fonts/fallback.ttf`，前端通过
    `/api/v1/fonts/fallback.ttf` 取（接口有登录校验，且 `filepath.Base` 挡路径穿越）。
-   **字体**：**阿里巴巴普惠体 3.0 Regular**（官方全量包里的 `AlibabaPuHuiTi-3-55-Regular.ttf`，8.5MB；官方声明免费商用，
-   用于避免版权糾纷）；想要许可最硬的可以用**思源黑体 / Noto Sans SC**
-   （SIL OFL 1.1 —— 明确允许嵌入、再分发与商用，Linux/Android 都用它）。
+   **字体**：**Noto Sans CJK**（`NotoSansCJK-Regular.ttc`，19MB，SIL OFL 1.1，一个文件覆盖简/繁/日/韩）；安装：
+   `apt-get install -y fonts-noto-cjk`，把 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`
+   拷成 `<数据目录>/fonts/fallback.ttc`。许可演进：文泉驿（GPL 系，嵌入有争议）→
+   阿里普惠体（官方只有「免费商用」声明，不是标准开源协议，包里没有任何许可文本）→
+   **Noto / 思源（SIL OFL 1.1，明确允许嵌入、再分发与商用）**。
    字体文件**不入库**（几 MB 的二进制），部署时自己放。
 2. **资源必须用绝对 URL**。SPA 路由下（`/play/123`）相对路径会被解析成 `/play/xxx.js`，
    静态服务只会回 404 —— 渲染器连 worker 都起不来。
@@ -243,6 +256,65 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 
 实测（本机）：ASS 原文 3.97MB / 274 行 Dialogue 抽取与渲染正常，带定位与装饰的日文
 标题字幕能在浏览器里正确显示（截图见 `shots-play/07-libass.png`）。
+
+### 图形字幕烧录（M4，2026-09-21）
+
+图形字幕（PGS/VobSub）是**位图**：浏览器渲染不了，也转不成文本 —— 唯一的看法就是
+把它叠进画面。代价是必须重新编码，所以决策层会把这个文件**强制拉进转码**
+（即使它本来能直出），理由链里写「按你的选择烧录字幕」。因此它是**用户显式选择**
+（播放器的字幕菜单里标「图形，需烧录」），不是默认行为。
+
+**滤镜图**（`internal/encoder/args.go` 的 `assembleVideoArgs`）：
+
+```
+[0:<字幕绝对序号>]scale=w=<W>:h=<H>:force_original_aspect_ratio=decrease:flags=bilinear,
+                  pad=w=<W>:h=<H>:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0,format=yuva420p[sub];
+[0:<视频绝对序号>]<主链>[main];
+[main][sub]overlay=eof_action=pass:repeatlast=0,<收尾>[vout]
+```
+
+- 位图必须**缩放到输出尺寸**：位图的尺寸是**片源**的（库里带 PGS 的文件基本都是
+  1920×1080 的位图），画质档把画面缩到 720p 之后不跟着缩就会溢出画面；
+- `color=black@0` 是**全透明**黑 —— 位图带 alpha，不透明黑会在画面糊一条边；
+- `eof_action=pass`：字幕轨比视频短时（只有前半段有字幕）放行主输入，不让画面提前结束；
+- `-map [vout]` 取代了平常的 `-map 0:<视频序号>`。
+
+**为什么 overlay 只能在内存里做**：`overlay` 是软件滤镜。硬解时帧在显存里，
+所以主链末尾要 `hwdownload,format=nv12` 取回内存，叠完再 `format=nv12,hwupload` 传回去。
+软解时帧本来就在内存里，不需要这两步。
+
+**实测（本机 i5-10500T / iHD，PGS 测试片 1080p HEVC Main10）**：
+
+| 路径 | 速度 |
+|---|---|
+| VAAPI 硬解 + 烧录，输出原生 1080p | **2.94x** |
+| VAAPI 硬解 + 烧录，输出 720p | **4.11x** |
+| 同条件不烧录（软解 + 硬编） | 40x+ |
+
+⚠️ 这些是**实例测量值，不是项目常量**：换机器/驱动就会变。烧录比不烧录贵一个数量级，
+这就是它做成显式选择的原因。
+
+**踩到并修掉的坑（都是真跑出来的）**：
+
+1. **只能 map 滤镜输出的标签，绝不能同时 `-map 0:<视频序号>`**。同一路视频被送两遍，
+   ffmpeg 在滤镜协商阶段直接失败（`Impossible to convert between the formats
+   supported by…`）—— 表现是「放不了」，不是画面差一点。
+2. **软件帧上不能用硬件滤镜**。`scale_vaapi` / `deinterlace_vaapi` 作用在软解出来的帧上
+   **必然失败**（ffmpeg 不会替你补 hwupload）。原实现在「不硬解 + VAAPI 硬编」时就是
+   这么写的（`-vf scale_vaapi=…` 而没有上传），现在改成软件链
+   （`scale=…,format=nv12,hwupload`）—— 顺手修掉的既有 bug。
+3. **`overlay_vaapi` 在本机 iHD 上不可用**（编码器初始化就失败，与 overlay 无关），
+   所以走的是通用性最好的「取回内存 → 软件叠加 → 传回显存」，而不是硬件叠加。
+4. **决策层要问「字幕是什么」而不是「用户点没点」**：选了烧录但选中的是**文本**字幕时
+   不该重编（它走 WebVTT / libass 旁路）。这个顺序在被单测拓到之前是反的。
+
+验收：`scripts/dev/verify-transcode.sh` 第 15 节做**开/关对照** —— 同一时刻取一帧，
+烧录 vs 不烧录做像素差（`blend=difference` 的 YMAX）：有字幕的时刻差得很大
+（实例 208），没字幕的时刻只差管线噪声（实例 13）。另外还直接看**跑着那个 ffmpeg
+的命令行**，确认 `-filter_complex` / `[0:<字幕序号>]` / `-map [vout]` 真的在里面。
+
+实测：PGS 字幕「让您久等了 / お待たせしました」能正确烧进画面（截图见
+`docs/images/player-burn-pgs.png`）。
 
 **字幕这条线还没做的**：图形字幕烧录（`subtitles=f='…':sub2video=1:fontsdir='…'`）、
 ASS 附件字体（`\fn` 引用的字体常以附件形式存在）、外挂字幕的 GB18030 编码探测。
