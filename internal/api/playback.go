@@ -1082,6 +1082,32 @@ func (s *Server) handleListPlaySessions(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": out, "transcodeSessions": streams})
 }
 
+// handleFont 提供前端的 libass 兑底字体（`<数据目录>/fonts/` 下的文件）。
+//
+// 为什么必须由服务端给：
+//  1. libass(WASM) 只认它自己虚拟文件系统里的字体，看不到客户端的系统字体；
+//  2. subtitles-octopus 的默认 fallbackFont（`default.woff2`）在 npm 包里**根本不存在**
+//     —— 少了这个文件，它会在 worker 里 fetch 失败并直接崩掉，整个渲染器起不来
+//     （实测：控制台只报一句 `Worker error: ErrorEvent`，看小上去很莫名）。
+//
+// 字体本身不入库（几 MB 的二进制）：部署时由 `deploy/install-*.sh` 从系统字体复制，
+// 见 docs/TRANSCODING.md 的字幕一节。
+func (s *Server) handleFont(w http.ResponseWriter, r *http.Request) {
+	// Base 一下：挡掉 `../` 这类路径穿越。
+	name := filepath.Base(r.PathValue("name"))
+	if name == "" || name == "." || name == ".." || name == "/" {
+		writeError(w, http.StatusBadRequest, "字体名非法")
+		return
+	}
+	p := filepath.Join(filepath.Dir(s.cfg.StreamsDirPath()), "fonts", name)
+	if _, err := os.Stat(p); err != nil {
+		writeError(w, http.StatusNotFound, "字体不存在（部署时没放？见 docs/TRANSCODING.md）")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, p)
+}
+
 // handleStopTranscodeSession 强制终止某一路转封装/转码会话（管理员）。
 //
 // 播放会话那边已经有 stop（客户端主动告知「这段看完了」），但监控页还需要处理

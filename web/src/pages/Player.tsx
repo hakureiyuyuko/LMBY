@@ -61,6 +61,45 @@ function readQuality(): QualityChoice {
   }
 }
 
+/** 资源一律用绝对 URL。 */
+function absUrl(p: string): string {
+  return new URL(p, window.location.origin).href;
+}
+
+/**
+ * 取回字幕**文本**。内嵌字幕首次要抽（接口回 202 = 还在抽），所以带重试。
+ *
+ * 为什么不让 libass 自己去拉 subUrl：
+ *   1）它拿到 202 里的 JSON 会在 worker 里直接崩掉，而且看不到可读错误；
+ *   2）自己取回文本还能把失败原因告诉用户。
+ */
+async function fetchSubtitleText(url: string, tries = 12): Promise<string> {
+  for (let i = 0; i < tries; i++) {
+    const r = await fetch(url, { credentials: 'same-origin' });
+    if (r.status === 202) {
+      await new Promise((res) => setTimeout(res, 1500));
+      continue;
+    }
+    if (!r.ok) throw new Error(`字幕取回失败：HTTP ${r.status}`);
+    return await r.text();
+  }
+  throw new Error('字幕抽取超时');
+}
+
+/**
+ * 等视频挂上元数据并有真实尺寸。
+ *
+ * octopus 是用 `setVideo` **那一刻**的尺寸建画布的：拿到 0 就把画布
+ * `display:none`，之后不会自己重算（实测踩到 —— 画布一直在、就是看不见）。
+ * 拿不到就放弃（最多 ~15 秒），让后续流程自己去报错。
+ */
+async function waitVideoSized(v: HTMLVideoElement, tries = 50): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (v.videoWidth > 0 && v.clientWidth > 0) return;
+    await new Promise((res) => setTimeout(res, 300));
+  }
+}
+
 /** octopus 实例的最小接口（它是外部脚本，没有 .d.ts）。 */
 interface OctopusInstance {
   destroy(): void;
@@ -578,6 +617,10 @@ export function Player() {
     let inst: OctopusInstance | null = null;
     void (async () => {
       try {
+        // 先等到视频真的有尺寸，否则画布会被建成 0×0 并隐藏（见 waitVideoSized）。
+        await waitVideoSized(v);
+        const text = await fetchSubtitleText(url);
+        if (cancelled) return;
         await loadOctopusScript();
         if (cancelled) return;
         const Ctor = (
@@ -588,10 +631,19 @@ export function Player() {
         if (!Ctor) throw new Error('libass 渲染器未就绪');
         inst = new Ctor({
           video: v,
-          subUrl: url,
-          workerUrl: '/subtitles-octopus/subtitles-octopus-worker.js',
-          legacyWorkerUrl: '/subtitles-octopus/subtitles-octopus-worker-legacy.js',
+          // 直接喂字幕**文本**（见 fetchSubtitleText 的注释）。
+          subContent: text,
+          // 路径必须是绝对的：SPA 路由下（/play/123）相对路径会被解析成
+          // /play/xxx.js，静态服务只会回 404，渲染器连 worker 都起不来。
+          workerUrl: absUrl('/subtitles-octopus/subtitles-octopus-worker.js'),
+          legacyWorkerUrl: absUrl('/subtitles-octopus/subtitles-octopus-worker-legacy.js'),
           renderMode: 'js-blend',
+          // 兑底字体由服务端提供：libass/WASM 看不到客户端的系统字体，而 octopus
+          // 默认要的 `default.woff2` 在 npm 包里根本不存在 —— 缺了它 worker 直接崩。
+          fallbackFont: absUrl('/api/v1/fonts/fallback.ttc'),
+          onError: () => {
+            if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
+          },
         });
         octopusRef.current = inst;
       } catch {

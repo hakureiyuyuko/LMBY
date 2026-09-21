@@ -162,6 +162,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/items/played", s.requireAuth(s.handleSetPlayed))
 	mux.Handle("GET /api/v1/continue", s.requireAuth(s.handleContinueWatching))
 	mux.Handle("GET /api/v1/playback/sessions", s.requireAuth(s.handleListPlaySessions))
+	// 前端的 libass 兑底字体（libass/WASM 只能用它自己文件系统里的字体，
+	// 看不到客户端的系统字体）。
+	mux.Handle("GET /api/v1/fonts/{name}", s.requireAuth(s.handleFont))
 	// 监控页的一键终止：掐掉某一路转封装/转码进程（管理员）。
 	mux.Handle("POST /api/v1/playback/streams/{key}/stop", s.requireAdmin(s.handleStopTranscodeSession))
 

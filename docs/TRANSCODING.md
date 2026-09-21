@@ -214,6 +214,22 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 - 两条渲染路互不干扰：WebVTT 用 `<track>`，libass 是盖在画面上的 canvas
   （`pointer-events: none`，不吃鼠标事件）。
 
+⚠️ **这一节有四个真坑，都是实盘踩出来的**（前三不解决就是「一片空白、控制台只有一句话」）：
+
+1. **兑底字体必须由服务端提供**。libass(WASM) 只认它自己虚拟文件系统里的字体，看不到
+   客户端的系统字体；而 octopus 默认要的 `default.woff2` 在 npm 包里**根本不存在** ——
+   缺了它 worker 会 fetch 失败并**直接崩掉**（控制台只有一句 `Worker error: ErrorEvent`）。
+   部署时把任一中文字体放到 `<数据目录>/fonts/fallback.ttc`：
+   `apt install fonts-wqy-microhei` 后
+   `cp /usr/share/fonts/truetype/wqy/wqy-microhei.ttc /var/lib/lmby/fonts/fallback.ttc`，
+   前端通过 `/api/v1/fonts/fallback.ttc` 取（接口有登录校验，且 `filepath.Base` 挡路径穿越）。
+2. **资源必须用绝对 URL**。SPA 路由下（`/play/123`）相对路径会被解析成 `/play/xxx.js`，
+   静态服务只会回 404 —— 渲染器连 worker 都起不来。
+3. **要等视频有真实尺寸**再建渲染器。octopus 按 `setVideo` **那一刻**的尺寸建画布，
+   拿到 0 就把画布 `display:none`，而且之后不会自己重算。
+4. **字幕文本由我们自己取回再喂进去**（`subContent`）。内嵌字幕首次要抽（接口回 202），
+   让 worker 自己去拉会拿到 202 里的 JSON 然后崩；自己取回还能把失败原因告诉用户。
+
 实测（本机）：ASS 原文 3.97MB / 274 行 Dialogue 抽取与渲染正常，带定位与装饰的日文
 标题字幕能在浏览器里正确显示（截图见 `shots-play/07-libass.png`）。
 
