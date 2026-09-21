@@ -16,10 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 自建 runner 上不启用云端缓存：GOMODCACHE（~/go/pkg/mod）本来就在本地持久化，
+      # 走 actions/cache 反而多一次 cache service 往返，而且这台 runner 上经常连不通。
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: true
+          cache: false
 
       - name: go vet
         run: go vet ./...
@@ -45,8 +47,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: false
 
       - run: npm ci --no-audit --no-fund
       - name: 类型检查
@@ -62,7 +63,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.27"
-          cache: true
+          cache: false
       - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
