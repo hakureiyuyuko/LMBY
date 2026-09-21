@@ -103,6 +103,8 @@ async function waitVideoSized(v: HTMLVideoElement, tries = 50): Promise<void> {
 /** octopus 实例的最小接口（它是外部脚本，没有 .d.ts）。 */
 interface OctopusInstance {
   destroy(): void;
+  /** 字幕时间基准（秒）：libass 用 `video.currentTime + timeOffset` 作为字幕时间。 */
+  timeOffset?: number;
 }
 
 /**
@@ -142,6 +144,18 @@ export function Player() {
   const stageRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const octopusRef = useRef<OctopusInstance | null>(null);
+
+  /**
+   * 把字幕渲染器的时间基准同步到当前窗口起点。
+   *
+   * 为什么需要：转封装是「一段段窗口」在放，`video.currentTime` 是**相对本窗口**的，
+   * 而字幕时间轴是**片源绝对时间**。窗口一换（续段/拖动），两者的差就变了 ——
+   * 不同步的话表现就是「播一会儿字幕和画面对不上」（实测报过来的现象）。
+   */
+  function syncSubtitleOffset() {
+    const inst = octopusRef.current;
+    if (inst) inst.timeOffset = baseRef.current;
+  }
 
   // 这些值变化频繁（每帧都可能动），放 ref 里避免把整页重渲染成幻灯片
   const sessionIdRef = useRef('');
@@ -250,6 +264,7 @@ export function Player() {
         }
         sessionIdRef.current = st.playSessionId;
         baseRef.current = st.startSeconds;
+        syncSubtitleOffset();
         durationRef.current = st.durationSeconds;
         windowEndRef.current = st.windowEndSeconds ?? 0;
         attach(st);
@@ -411,6 +426,7 @@ export function Player() {
       }
       baseRef.current = st.startSeconds;
       windowEndRef.current = st.windowEndSeconds ?? 0;
+      syncSubtitleOffset();
       setState(st);
       setNotice('');
       reloadStream(st.hlsUrl, wasPaused);
@@ -638,6 +654,9 @@ export function Player() {
           workerUrl: absUrl('/subtitles-octopus/subtitles-octopus-worker.js'),
           legacyWorkerUrl: absUrl('/subtitles-octopus/subtitles-octopus-worker-legacy.js'),
           renderMode: 'js-blend',
+          // HLS 给的是「窗口相对时间」：把窗口起点当偏移，字幕才对得上片源时间轴。
+          // 不传这个，续段之后字幕就会整体偏移（用户报的「播一会就对不上」）。
+          timeOffset: baseRef.current,
           // 兑底字体由服务端提供：libass/WASM 看不到客户端的系统字体，而 octopus
           // 默认要的 `default.woff2` 在 npm 包里根本不存在 —— 缺了它 worker 直接崩。
           fallbackFont: absUrl('/api/v1/fonts/fallback.ttc'),
@@ -650,8 +669,20 @@ export function Player() {
         if (!cancelled) setNotice('特效字幕渲染器加载失败，本条字幕暂不显示');
       }
     })();
+    // 视频尺寸会变（续段换窗口、切画质、进全屏）：octopus 只在创建时和 window resize
+    // 时算尺寸，**视频自己**的尺寸变化它不管 —— 更糟的是尺寸瞬间为 0 时它会把画布
+    // `display:none` 且不恢复（实测：续段之后字幕就没了）。所以自己盯着。
+    const ro = new ResizeObserver(() => {
+      void (async () => {
+        await waitVideoSized(v);
+        (octopusRef.current as { resize?: () => void } | null)?.resize?.();
+      })();
+    });
+    ro.observe(v);
+
     return () => {
       cancelled = true;
+      ro.disconnect();
       try {
         inst?.destroy();
       } catch {

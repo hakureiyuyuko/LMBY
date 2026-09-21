@@ -105,7 +105,7 @@ const PROBE = `(() => {
   try {
     const ctx = c.getContext('2d');
     if (ctx) {
-      const d = ctx.getImageData(0, 0, c.width, Math.min(300, c.height)).data;
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
       ink = 0;
       for (let i = 3; i < d.length; i += 4) if (d[i] > 8) ink++;
     } else { ink = -2; }
@@ -197,19 +197,23 @@ const jumpTo = await evaluate(`(async () => {
     if (!m) continue;
     const a = toSec(m[1], m[2], m[3]);
     const b = toSec(m[4], m[5], m[6]);
-    if (b - a >= 1.5 && a > 1) return { start: a, end: b, raw: l.slice(0, 80) };
+    if (b - a >= 1.5 && a > 310 && a < 400) return { start: a, end: b, raw: l.slice(0, 80) };
   }
   return { err: '没有合适的对白行', dialogues: lines.length };
 })()`);
 console.log(`跳转目标：${JSON.stringify(jumpTo)}`);
 if (jumpTo?.start) {
-  // 跳到这里并**暂停**：让那一句字幕定在画面上，好做像素对照。
-  await evaluate(`(() => {
-    const v = document.querySelector('.player-video');
-    if (v) { v.currentTime = ${(jumpTo.start + jumpTo.end) / 2}; v.pause(); }
-    return true;
-  })()`);
-  await sleep(5000);
+  const mid = (jumpTo.start + jumpTo.end) / 2;
+  // 先 seek 并**等它真的到位**再暂停：暂停状态下的 seek 在这套窗口逻辑里不一定走通
+  await evaluate(`(() => { const v = document.querySelector('.player-video'); if (v) v.currentTime = ${mid}; return true; })()`);
+  const arrived = await waitFor('seek 完成', async () => {
+    // 注意：续段后 `currentTime` 是**相对新窗口**的，不能拿它跟绝对值比；
+    // 看 seeking 是否结束才靠谱。
+    return await evaluate(`(() => { const v = document.querySelector('.player-video'); return !!v && !v.seeking && v.readyState >= 2; })()`);
+  }, 35000);
+  console.log(`seek 到位：${arrived}（目标 ${mid.toFixed(1)}s）`);
+  await evaluate(`(() => { const v = document.querySelector('.player-video'); if (v) v.pause(); return true; })()`);
+  await sleep(4000);
 }
 const after = await evaluate(PROBE);
 console.log(`\n【开字幕】${JSON.stringify(after)}`);
