@@ -19,14 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: linux
-            goarch: armv7
-          - goos: windows
-            goarch: amd64
+          # 注意 GOARCH 是 arm（不是 armv7）+ GOARM=7 —— 目标产物仍叫 armv7。
+          - { goos: linux, goarch: amd64, asset: lmby-linux-amd64 }
+          - { goos: linux, goarch: arm64, asset: lmby-linux-arm64 }
+          - { goos: linux, goarch: arm, goarm: "7", asset: lmby-linux-armv7 }
+          - { goos: windows, goarch: amd64, asset: lmby-windows-amd64.exe }
     steps:
       - uses: actions/checkout@v7
 
@@ -51,22 +48,21 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
           mkdir -p dist
           go build -trimpath -ldflags "-s -w \
             -X github.com/hakureiyuyuko/lmby/internal/version.Version=${GITHUB_REF_NAME} \
             -X github.com/hakureiyuyuko/lmby/internal/version.Commit=${GITHUB_SHA::12} \
             -X github.com/hakureiyuyuko/lmby/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o "dist/lmby-${GOOS}-${GOARCH}${ext}" ./cmd/lmby
+            -o "dist/${{ matrix.asset }}" ./cmd/lmby
           ls -l dist
 
       - name: 冒烟自检（linux/amd64 直接跑 version）
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: ./dist/lmby-linux-amd64 version
+        if: matrix.asset == 'lmby-linux-amd64'
+        run: ./dist/${{ matrix.asset }} version
 
       - uses: actions/upload-artifact@v7
         with:
