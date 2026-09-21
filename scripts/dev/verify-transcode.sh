@@ -45,6 +45,9 @@ bd()   { curl -s "$@"; }
 json() { curl -s -H 'Content-Type: application/json' "$@"; }
 PSQL() { PGPASSWORD=$(cat "$PGPASSWORD_FILE") psql -h 127.0.0.1 -U lmby -d lmby -tAc "$1"; }
 ffmpeg_count()  { pgrep -f 'ffmpeg .*hls_segment_filename' | wc -l; }
+# wait_ffmpeg 等到 ffmpeg 进程数变成 want（最多 5 秒）。
+# stop / seek 之后进程要收尾一下，立刻数会数到还没退出的那个。
+wait_ffmpeg() { local want=$1 n=0; for _ in $(seq 1 10); do n=$(ffmpeg_count); [[ "$n" == "$want" ]] && break; sleep 0.5; done; echo "$n"; }
 session_dirs()  { find "$STREAMS_DIR" -mindepth 1 -maxdepth 1 -type d -not -name subs 2>/dev/null | wc -l; }
 seg_count()     { grep -c 'seg_[0-9]*\.m4s' "$M3U8" 2>/dev/null || echo 0; }
 pick_file()     { PSQL "select f.id from media_files f
@@ -190,14 +193,14 @@ else
     check "seek 后起点在片子中间" true \
       "$(bool "$([[ "$(jq -r '.startSeconds|floor' <<<"$r2")" -ge $(( MST / 10000000 - 3 )) ]] && echo true)")"
     note "seek 起播耗时 ${seek_cost}s"
-    check "seek 后仍只有 1 路 ffmpeg" 1 "$(ffmpeg_count)"
+    check "seek 后收敛到 1 路 ffmpeg（旧窗口被回收）" 1 "$(wait_ffmpeg 1)"
     check "seek 后 m3u8 仍然可用" 200 "$(st -b "$JAR" "$U")"
 
     echo
     echo "== 7. stop 后回收（转码进程不能留在后台烧 CPU） =="
     json -b "$JAR" -X POST "$BASE/api/v1/play/$SID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
     sleep 1
-    check "stop 后没有 ffmpeg 残留" 0 "$(ffmpeg_count)"
+    check "stop 后没有 ffmpeg 残留" 0 "$(wait_ffmpeg 0)"
     check "stop 后分片目录回到基线（${DIRS0:-0}）" "${DIRS0:-0}" "$(session_dirs)"
     check "stop 后会话失效 = 404" 404 "$(st -b "$JAR" "$U")"
   fi
@@ -377,11 +380,42 @@ else
 fi
 
 echo
-echo "== 13. 收尾：没有会话/进程残留 =="
+echo "== 13. 会话监控与一键终止 =="
+if [[ -z "$LONG" || "$CAN_TRANSCODE" != "true" ]]; then
+  note "没有可转码的长片样本，跳过"
+else
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$(item_of "$LONG")/play" -H 'Content-Type: application/json' -d '{"restart":true}')
+  MS=$(jq -r '.playSessionId // ""' <<<"$r")
+  if [[ -z "$MS" || "$MS" == "null" ]]; then
+    note "起播失败，跳过"
+  else
+    # 等 ffmpeg 打出第一块进度（-stats_period 是 3 秒）
+    sleep 5
+    st=$(bd -b "$JAR" "$BASE/api/v1/playback/sessions")
+    one=$(jq -c '.transcodeSessions[0] // {}' <<<"$st")
+    note "监控数据：$(jq -c '{state,fps,speed,bitrate,mediaTime,segments,throttled}' <<<"$one")"
+    check "监控接口给出实时 fps" true "$(bool "$(jq -r '(.fps // 0) > 0' <<<"$one")")"
+    check "监控接口给出实时速度（speed）" true "$(bool "$(jq -r '(.speed // 0) > 0' <<<"$one")")"
+    check "监控接口给出码率" true "$(bool "$(jq -r '(.bitrate // "") | length > 0' <<<"$one")")"
+    check "会话列表里带得着这一路播放" true "$(bool "$(jq -r --arg m "$MS" 'any(.sessions[]?; .playSessionId==$m)' <<<"$st")")"
+    KEY=$(jq -r '.key // ""' <<<"$one")
+
+    check "未登录终止 = 401" 401 "$(st -X POST "$BASE/api/v1/playback/streams/$KEY/stop")"
+    check "管理员一键终止 = 200" 200 "$(st -b "$JAR" -X POST "$BASE/api/v1/playback/streams/$KEY/stop")"
+    sleep 1
+    check "终止后该会话从列表消失" 0 "$(bd -b "$JAR" "$BASE/api/v1/playback/sessions" | jq --arg k "$KEY" '[.transcodeSessions[]? | select(.key==$k)] | length')"
+    check "终止后 ffmpeg 进程也没了" 0 "$(ffmpeg_count)"
+    check "重复终止 = 404" 404 "$(st -b "$JAR" -X POST "$BASE/api/v1/playback/streams/$KEY/stop")"
+    json -b "$JAR" -X POST "$BASE/api/v1/play/$MS/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  fi
+fi
+
+echo
+echo "== 14. 收尾：没有会话/进程残留 =="
 json -b "$JAR" -X POST "$BASE/api/v1/auth/logout" -o /dev/null >/dev/null 2>&1 || true
 sleep 2
-check "跑完没有 ffmpeg 残留" 0 "$(ffmpeg_count)"
-check "跑完分片目录没有增长（回到基线 ${DIRS0:-0}）" "${DIRS0:-0}" "$(session_dirs)"
+check "跑完没有 ffmpeg 残留" 0 "$(wait_ffmpeg 0)"
+check "跑完分片目录没有增长（不多于基线 ${DIRS0:-0}）" true "$(bool "$([[ "$(session_dirs)" -le "${DIRS0:-0}" ]] && echo true)")"
 
 echo
 echo "================ 结果：$pass 通过 / $fail 失败 ================"

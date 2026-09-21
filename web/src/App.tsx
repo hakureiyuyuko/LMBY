@@ -13,6 +13,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { SeriesView } from './pages/Series';
+import { Sessions } from './pages/Sessions';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -93,6 +94,7 @@ function AppRoutes() {
         {/* 播放器独立成页（全屏播放）*/}
         <Route path="/play/:id" element={<Player />} />
         <Route path="/match" element={<Match />} />
+        <Route path="/sessions" element={<Sessions />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<NotFound />} />
       </Route>

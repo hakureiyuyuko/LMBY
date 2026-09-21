@@ -34,6 +34,12 @@ export function Layout() {
           <NavLink to="/account" className={({ isActive }) => (isActive ? 'active' : '')}>
             个人中心
           </NavLink>
+          {/* 会话监控（M4）也只对管理员显示：普通用户看自己的播放会话没多大意义 */}
+          {user?.isAdmin && (
+            <NavLink to="/sessions" className={({ isActive }) => (isActive ? 'active' : '')}>
+              会话
+            </NavLink>
+          )}
           {/* 设置只对管理员有意义（接口也会拦），普通用户不显示入口，免得点进去只看到一句无权限 */}
           {user?.isAdmin && (
             <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>

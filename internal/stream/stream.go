@@ -384,7 +384,12 @@ type SessionStat struct {
 	ClientSec    float64 `json:"clientSeconds"`
 	AheadSec     float64 `json:"aheadSeconds"`
 	Throttled    bool    `json:"throttled"`
-	Error        string  `json:"error,omitempty"`
+	// 实时指标：从 ffmpeg 的进度行解析出来（监控页显示「转得动吗、多快」）。
+	FPS       float64 `json:"fps,omitempty"`
+	Speed     float64 `json:"speed,omitempty"`
+	Bitrate   string  `json:"bitrate,omitempty"`
+	MediaTime string  `json:"mediaTime,omitempty"`
+	Error     string  `json:"error,omitempty"`
 	Log          string  `json:"log,omitempty"`
 }
 
@@ -491,6 +496,9 @@ func (s *Session) logSuffix() string {
 
 func (s *Session) playlistPath() string { return filepath.Join(s.dir, "index.m3u8") }
 
+// progressPath 是 ffmpeg 的进度文件（`-progress` 写的，与日志分开）。
+func (s *Session) progressPath() string { return filepath.Join(s.dir, "progress.txt") }
+
 // segmentCount 统计播放列表里已有的分片数。
 func (s *Session) segmentCount() int {
 	b, err := os.ReadFile(s.playlistPath())
@@ -505,6 +513,24 @@ func (s *Session) segmentCount() int {
 		}
 	}
 	return n
+}
+
+// segmentsBytes 汇总分片文件的字节数（算平均码率用）。
+func (s *Session) segmentsBytes() int64 {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "seg_") {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
 }
 
 // hasSegments 报告播放列表里是否已经有分片。
@@ -748,9 +774,17 @@ func (s *Session) Stat() SessionStat {
 	default:
 		st.State = "starting"
 	}
-	if st.State == "error" {
-		st.Log = s.logs.Tail(8)
+	if sp, ok := ParseStats(readTail(s.progressPath(), 8192)); ok {
+		st.FPS, st.Speed, st.MediaTime = sp.FPS, sp.Speed, sp.Time
+		st.Bitrate = sp.BitrateText()
+		if st.Bitrate == "" {
+			// HLS 输出下 ffmpeg 不报总量（total_size / bitrate 都是 N/A），
+			// 用「分片总字节 ÷ 已编媒体时长」自己量一个平均码率。
+			st.Bitrate = HumanBitrate(s.segmentsBytes(), sp.MediaSeconds())
+		}
 	}
+	// 日志尾巴总是带上：播放器出错时它就是第一手线索，监控页也直接显示。
+	st.Log = s.logs.Tail(6)
 	return st
 }
 

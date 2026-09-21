@@ -64,7 +64,13 @@ func hlsArgs(opts Options, spec Spec, outDir string) []string {
 		"-hide_banner",
 		"-nostdin",
 		"-loglevel", "warning",
-		"-nostats",
+		// 进度：用 `-progress` 而不是默认的 stats 行 —— 后者是 av_log(INFO)
+		// 打出来的，会被我们压到 warning 的 loglevel 一起滤掉。
+		// 而且写到**独立文件**而不是 stderr：源文件时间戳不规范时 ffmpeg 会刷
+		// 大量警告（"pts has no value" 之类），混在一起会把进度行挤出环形日志
+		//（真跑踩到：fps/speed 全是空）。
+		"-stats_period", "3",
+		"-progress", filepath.Join(outDir, "progress.txt"),
 	}
 
 	// 视频段：直出/转封装时不带硬件参数；转码时由 encoder 包给出完整配方。

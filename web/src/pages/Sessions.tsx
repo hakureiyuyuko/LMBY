@@ -1,0 +1,167 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '../api';
+import type { PlaySessionInfo, TranscodeSessionStat } from '../api';
+import { useAuth } from '../auth';
+import { formatClock } from '../capabilities';
+
+/**
+ * 会话监控（M4）。
+ *
+ * 为什么需要这一页：转码是「边编边播」，出问题时（卡顿、CPU 打满、一直转圈）
+ * 从播放器界面上根本看不出原因 —— 得看这一路 ffmpeg 到底在干什么：
+ * 速度够不够实时、有没有被节流、客户端消费到哪、日志尾巴说了什么。
+ *
+ * 每 3 秒自动刷新；管理员还能一刀掐掉某一路（客户端已经不管、进程还在烧 CPU 时用）。
+ */
+export function Sessions() {
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState<PlaySessionInfo[]>([]);
+  const [streams, setStreams] = useState<TranscodeSessionStat[]>([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.playSessions();
+      setSessions(r.sessions ?? []);
+      setStreams(r.transcodeSessions ?? []);
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '读取会话失败');
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const kill = async (key: string) => {
+    setBusy(key);
+    try {
+      await api.stopTranscodeSession(key);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '终止失败');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <>
+      {error && <div className="alert alert-error">{error}</div>}
+
+      <div className="card">
+        <h2>播放会话</h2>
+        <p className="hint">
+          当前正在播放的会话。直出与转封装/转码都会出现在这里；转码那一路的实时状态见下表。
+        </p>
+        {sessions.length === 0 ? (
+          <p className="faint">{loaded ? '当前没有人在播放。' : '正在读取…'}</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>条目</th>
+                <th>方式</th>
+                <th>文件</th>
+                <th>起播</th>
+                <th>时长</th>
+                <th>空闲</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.playSessionId}>
+                  <td>
+                    <Link to={`/items/${s.itemId}`}>{s.title || `#${s.itemId}`}</Link>
+                  </td>
+                  <td>{s.mode}</td>
+                  <td className="faint">{s.file}</td>
+                  <td>{formatClock(s.startSeconds)}</td>
+                  <td>{formatClock(s.durationSeconds)}</td>
+                  <td className="faint">{s.idleSeconds}s</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>转码 / 转封装会话</h2>
+        <p className="hint">
+          每一路 ffmpeg 的实时状态。速度低于 1x 就跟不上播放（画面会卡）；显示「节流中」是
+          好事 —— 说明它已经跑在客户端前面，正歇着等，避免白烧 CPU。
+        </p>
+        {streams.length === 0 ? (
+          <p className="faint">{loaded ? '当前没有转码/转封装进程。' : '正在读取…'}</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>速度</th>
+                <th>fps</th>
+                <th>码率</th>
+                <th>分片</th>
+                <th>已生成</th>
+                <th>客户端</th>
+                <th>领先</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {streams.map((t) => (
+                <tr key={t.key}>
+                  <td>
+                    {t.state}
+                    {t.throttled ? '（节流中）' : ''}
+                  </td>
+                  <td>{t.speed ? `${t.speed.toFixed(2)}x` : '—'}</td>
+                  <td>{t.fps ? t.fps.toFixed(0) : '—'}</td>
+                  <td>{t.bitrate && t.bitrate !== 'N/A' ? t.bitrate : '—'}</td>
+                  <td>{t.segments}</td>
+                  <td>{formatClock(t.generatedSeconds)}</td>
+                  <td>{formatClock(t.clientSeconds)}</td>
+                  <td>{formatClock(Math.max(0, t.aheadSeconds))}</td>
+                  <td>
+                    {user?.isAdmin && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        disabled={busy === t.key}
+                        onClick={() => void kill(t.key)}
+                      >
+                        终止
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {streams.some((t) => t.log) && (
+          <details>
+            <summary className="hint">ffmpeg 日志尾巴（排查「为什么卡/为什么起不来」）</summary>
+            {streams.map((t) =>
+              t.log ? (
+                <div key={t.key}>
+                  <div className="faint">{t.key}</div>
+                  <pre className="player-log">{t.log}</pre>
+                </div>
+              ) : null,
+            )}
+          </details>
+        )}
+      </div>
+    </>
+  );
+}

@@ -199,6 +199,16 @@ export const api = {
       ...json(body),
     }),
   itemPlaylist: (itemId: number) => request<ItemPlaylist>(`/api/v1/items/${itemId}/playlist`),
+  /** 活跃播放会话 + 转码/转封装会话（监控页用；非管理员只看到自己的播放会话）。 */
+  playSessions: () =>
+    request<{ sessions: PlaySessionInfo[]; transcodeSessions: TranscodeSessionStat[] }>(
+      '/api/v1/playback/sessions',
+    ),
+  /** 强制终止某一路转码/转封装进程（管理员）。 */
+  stopTranscodeSession: (key: string) =>
+    request<{ ok: boolean }>(`/api/v1/playback/streams/${encodeURIComponent(key)}/stop`, {
+      method: 'POST',
+    }),
   itemProgress: (itemId: number) =>
     request<{ progress: PlaybackProgress | null }>(`/api/v1/items/${itemId}/progress`),
   continueWatching: (limit = 20) =>
@@ -634,6 +644,41 @@ export interface PlaybackPlan {
   subtitle: StreamPlan;
   playable: boolean;
   reasons: string[];
+}
+
+/** 转码/转封装会话的实时状态（监控页用）。 */
+export interface TranscodeSessionStat {
+  key: string;
+  state: 'starting' | 'ready' | 'finished' | 'error';
+  startSeconds: number;
+  uptimeSec: number;
+  idleSec: number;
+  segments: number;
+  generatedSeconds: number;
+  clientSeconds: number;
+  aheadSeconds: number;
+  throttled: boolean;
+  fps?: number;
+  speed?: number;
+  bitrate?: string;
+  mediaTime?: string;
+  error?: string;
+  log?: string;
+}
+
+/** 一条活跃播放会话（监控页用）。 */
+export interface PlaySessionInfo {
+  playSessionId: string;
+  itemId: number;
+  title?: string;
+  userId: number;
+  mode: 'direct' | 'remux' | 'transcode';
+  startSeconds: number;
+  durationSeconds: number;
+  ageSeconds: number;
+  idleSeconds: number;
+  file?: string;
+  stream?: TranscodeSessionStat;
 }
 
 /** 播放会话状态：模式决定用哪个 URL。 */

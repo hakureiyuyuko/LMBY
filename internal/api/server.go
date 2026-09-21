@@ -162,6 +162,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/items/played", s.requireAuth(s.handleSetPlayed))
 	mux.Handle("GET /api/v1/continue", s.requireAuth(s.handleContinueWatching))
 	mux.Handle("GET /api/v1/playback/sessions", s.requireAuth(s.handleListPlaySessions))
+	// 监控页的一键终止：掐掉某一路转封装/转码进程（管理员）。
+	mux.Handle("POST /api/v1/playback/streams/{key}/stop", s.requireAdmin(s.handleStopTranscodeSession))
 
 	// 编码能力（M4）：看这台机器到底能用哪个转码后端。
 	mux.Handle("GET /api/v1/transcode/capabilities", s.requireAuth(s.handleTranscodeCapabilities))

@@ -1053,6 +1053,24 @@ func (s *Server) handleListPlaySessions(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": out, "transcodeSessions": streams})
 }
 
+// handleStopTranscodeSession 强制终止某一路转封装/转码会话（管理员）。
+//
+// 播放会话那边已经有 stop（客户端主动告知「这段看完了」），但监控页还需要处理
+// 「客户端已经不管了、进程还在烧 CPU」的漏网情况 —— 那就得直接按会话键揠。
+func (s *Server) handleStopTranscodeSession(w http.ResponseWriter, r *http.Request) {
+	if s.streams == nil {
+		writeError(w, http.StatusServiceUnavailable, "转码服务未启用")
+		return
+	}
+	key := r.PathValue("key")
+	if !s.streams.Stop(key) {
+		writeError(w, http.StatusNotFound, "转码会话不存在（可能已经被回收）")
+		return
+	}
+	s.log.Info("终止转码会话", "key", key, "by", currentAuth(r).User.Username)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // handleContinueWatching 「继续观看」。
 func (s *Server) handleContinueWatching(w http.ResponseWriter, r *http.Request) {
 	authCtx := currentAuth(r)
