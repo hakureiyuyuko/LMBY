@@ -219,10 +219,12 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 1. **兑底字体必须由服务端提供**。libass(WASM) 只认它自己虚拟文件系统里的字体，看不到
    客户端的系统字体；而 octopus 默认要的 `default.woff2` 在 npm 包里**根本不存在** ——
    缺了它 worker 会 fetch 失败并**直接崩掉**（控制台只有一句 `Worker error: ErrorEvent`）。
-   部署时把任一中文字体放到 `<数据目录>/fonts/fallback.ttc`：
-   `apt install fonts-wqy-microhei` 后
-   `cp /usr/share/fonts/truetype/wqy/wqy-microhei.ttc /var/lib/lmby/fonts/fallback.ttc`，
-   前端通过 `/api/v1/fonts/fallback.ttc` 取（接口有登录校验，且 `filepath.Base` 挡路径穿越）。
+   部署时把一个中文字体放到 `<数据目录>/fonts/fallback.ttf`，前端通过
+   `/api/v1/fonts/fallback.ttf` 取（接口有登录校验，且 `filepath.Base` 挡路径穿越）。
+   **字体选择与许可**：默认用**阿里巴巴普惠体 Regular**（官方声明免费商用，
+   用于避免版权糾纷）；想要许可最硬的可以用**思源黑体 / Noto Sans SC**
+   （SIL OFL 1.1 —— 明确允许嵌入、再分发与商用，Linux/Android 都用它）。
+   字体文件**不入库**（几 MB 的二进制），部署时自己放。
 2. **资源必须用绝对 URL**。SPA 路由下（`/play/123`）相对路径会被解析成 `/play/xxx.js`，
    静态服务只会回 404 —— 渲染器连 worker 都起不来。
 3. **要等视频有真实尺寸**再建渲染器。octopus 按 `setVideo` **那一刻**的尺寸建画布，

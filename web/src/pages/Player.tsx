@@ -659,7 +659,7 @@ export function Player() {
           timeOffset: baseRef.current,
           // 兑底字体由服务端提供：libass/WASM 看不到客户端的系统字体，而 octopus
           // 默认要的 `default.woff2` 在 npm 包里根本不存在 —— 缺了它 worker 直接崩。
-          fallbackFont: absUrl('/api/v1/fonts/fallback.ttc'),
+          fallbackFont: absUrl('/api/v1/fonts/fallback.ttf'),
           onError: () => {
             if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
           },
