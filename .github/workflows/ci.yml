@@ -4,6 +4,8 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # 手动触发：想在某个 ref 上重跑一遍 CI 时用
+  workflow_dispatch:
 
 # 跑在自建 runner 上（PVE 宿主上的 LXC 108 = gh-runner-01，自定义 label `lmby`；
 # 真实内网坐标见 docs/local-notes.md）：
