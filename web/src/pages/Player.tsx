@@ -27,6 +27,40 @@ const ADVANCE_MARGIN_S = 20;
 /** 进度上报最小变化（秒）：暂停时重复上报没有意义。 */
 const MIN_REPORT_DELTA_S = 3;
 
+/**
+ * 画质档：
+ *   auto     = 自动（服务端按配置的转码上限走，默认压到 1080p）
+ *   original = 原生分辨率（不额外压；4K 转码可能起播慢，这是用户自己选的）
+ *   数字     = 输出高度上限（选了比源低的档就必须转码）
+ */
+type QualityChoice = 'auto' | 'original' | number;
+
+/** 菜单里给出的档位。只列比源低的：等于源高度的用「原生」表示，不重复列。 */
+const QUALITY_TIERS = [1080, 720, 480, 360, 240, 144];
+
+/** localStorage 键：记住上次选的档位（换片子也沿用）。 */
+const QUALITY_KEY = 'lmby:playQuality';
+
+/** 画质档 → 接口的 maxHeight（undefined = 省略字段 = 自动）。 */
+function maxHeightOf(q: QualityChoice): number | undefined {
+  if (q === 'auto') return undefined;
+  if (q === 'original') return 0;
+  return q;
+}
+
+/** 从 localStorage 读上次选的档（读不出来就当「自动」）。 */
+function readQuality(): QualityChoice {
+  try {
+    const raw = localStorage.getItem(QUALITY_KEY);
+    if (!raw || raw === 'auto') return 'auto';
+    if (raw === 'original') return 'original';
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
 export function Player() {
   const params = useParams();
   const [search] = useSearchParams();
@@ -69,6 +103,10 @@ export function Player() {
   const [showInfo, setShowInfo] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [seq, setSeq] = useState(0); // 换音轨/字幕/重播时 +1，触发重新开流
+  // 画质档记在 localStorage 里，下次进来沿用。用 ref 存一份是因为 start() 是
+  // useCallback：直接闭包读 state 会拿到旧值，结果「切了档位却按上一档重开」。
+  const [quality, setQuality] = useState<QualityChoice>(readQuality);
+  const qualityRef = useRef<QualityChoice>(quality);
 
   const duration = state?.durationSeconds || 0;
   const mode = state ? modeLabel(state.plan.mode) : null;
@@ -76,10 +114,21 @@ export function Player() {
   const audioOptions = useMemo(() => playlist?.files[0]?.audio ?? [], [playlist]);
   const subOptions = useMemo(() => playlist?.files[0]?.subtitles ?? [], [playlist]);
 
+  // 画质菜单只列比源低的档（比源高的档没有意义：那等于原生）。
+  const sourceHeight = state?.plan.video.sourceHeight ?? 0;
+  const qualityTiers = useMemo(
+    () => QUALITY_TIERS.filter((h) => !sourceHeight || h < sourceHeight),
+    [sourceHeight],
+  );
+
   /** 记住最新的会话状态，供事件回调（闭包里拿不到新 state）使用。 */
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    qualityRef.current = quality;
+  }, [quality]);
 
   useEffect(() => {
     loadingRef.current = loading;
@@ -101,7 +150,7 @@ export function Player() {
   }, [loadSidebar]);
 
   const start = useCallback(
-    async (opts: { restart?: boolean; position: number; audio: number; sub: number }) => {
+    async (opts: { restart?: boolean; position: number; audio: number; sub: number; maxHeight?: number }) => {
       setError('');
       setNotice('');
       setLoading(true);
@@ -122,6 +171,7 @@ export function Player() {
           subtitleStreamIndex: opts.sub,
           restart: opts.restart,
           startPositionTicks: opts.position > 0 ? secondsToTicks(opts.position) : undefined,
+          maxHeight: opts.maxHeight !== undefined ? opts.maxHeight : maxHeightOf(qualityRef.current),
         });
         setState(st);
         if (!st.playable || !st.playSessionId) {
@@ -144,16 +194,19 @@ export function Player() {
 
   useEffect(() => {
     if (!Number.isFinite(itemId) || itemId <= 0) return;
-    void start({ restart: restartOnceRef.current, position: 0, audio: audioSel, sub: subSel });
-    // 只生效一次：之后换音轨/重新载入都走续播逻辑
+    const restart = restartOnceRef.current;
     restartOnceRef.current = false;
+    // 换音轨/字幕/画质时从**当前位置**续播：服务端存的那条进度可能落后几秒，
+    // 用它续播会看到画面往回跳一下。
+    const here = restart ? 0 : baseRef.current + (videoRef.current?.currentTime ?? 0);
+    void start({ restart, position: here, audio: audioSel, sub: subSel });
     return () => {
       // 离开页面：停掉转封装会话（服务端会顺手回收 ffmpeg 与分片）
       stopWithBeacon();
     };
-    // seq 变化 = 重新载入；音轨/字幕改了 → 用新选择重开一路
+    // seq 变化 = 重新载入；音轨/字幕/画质改了 → 用新选择重开一路
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, seq, audioSel, subSel]);
+  }, [itemId, seq, audioSel, subSel, quality]);
 
   /** 把媒体挂到 <video> 上（HLS 优先用原生支持，其次 hls.js）。 */
   const attach = useCallback((st: PlaybackState) => {
@@ -714,6 +767,35 @@ export function Player() {
               <option key={s.index} value={s.index}>
                 #{s.index} {s.codec} {s.language || ''} {s.title || ''}
                 {s.isImage ? '（图形，本次不显示）' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {sourceHeight > 0 && (
+          <select
+            className="player-select"
+            value={String(quality)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const next: QualityChoice =
+                raw === 'auto' ? 'auto' : raw === 'original' ? 'original' : Number(raw);
+              qualityRef.current = next; // 先喂 ref：重开流是随后同步触发的
+              setQuality(next);
+              try {
+                localStorage.setItem(QUALITY_KEY, String(next));
+              } catch {
+                /* 隐私模式下写不进去，不影响播放 */
+              }
+            }}
+            aria-label="画质"
+            title="选低于源分辨率的档会让服务端转码输出"
+          >
+            <option value="auto">画质：自动</option>
+            <option value="original">画质：原生（{sourceHeight}p）</option>
+            {qualityTiers.map((h) => (
+              <option key={h} value={String(h)}>
+                画质：{h}p
               </option>
             ))}
           </select>

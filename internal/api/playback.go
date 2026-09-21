@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -234,6 +235,13 @@ type playRequest struct {
 	StartPositionTicks int64 `json:"startPositionTicks,omitempty"`
 	// Restart 为真时忽略续播位置（「从头播放」）。
 	Restart bool `json:"restart,omitempty"`
+
+	// MaxHeight 是用户在播放器里选的画质档（输出高度上限）：
+	// 省略 = 没选（按配置的 transcode_max_height 走）；0 = 原生分辨率；> 0 = 上限。
+	// 选了比源低的档就必须转码（否则等于没选）。
+	MaxHeight *int `json:"maxHeight,omitempty"`
+	// HighBitrate 为真 = 选了「Premium」档（同分辨率、更高码率）。
+	HighBitrate bool `json:"highBitrate,omitempty"`
 }
 
 // playStateResponse 是播放状态响应（开始播放与查询状态共用）。
@@ -361,6 +369,8 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		Files:              candidates,
 		Machine:            machine,
 		TranscodeMaxHeight: s.cfg.Playback.TranscodeMaxHeight,
+		MaxHeight:          req.MaxHeight,
+		HighBitrate:        req.HighBitrate,
 		VideoIndex:         intValue(req.VideoStreamIndex),
 		AudioIndex:         intValue(req.AudioStreamIndex),
 		SubtitleIndex:      intValueOr(req.SubtitleStreamIndex, 0),
@@ -477,7 +487,7 @@ func (s *Server) startHLS(ctx context.Context, ps *playSession, file store.Playa
 		return "", "error", err.Error(), ""
 	}
 	spec := stream.Spec{
-		Key:           streamKey(ps),
+		Key:           streamKey(ps, video, audio),
 		Path:          ps.FilePath,
 		VideoIndex:    ps.Plan.Video.Index,
 		VideoCodec:    ps.Plan.Video.Codec,
@@ -548,12 +558,25 @@ func (s *Server) encodeArgs(ctx context.Context, ps *playSession) (stream.VideoE
 	}, audio, nil
 }
 
-// streamKey 是转封装会话的键：条目 + 文件 + 起播点（取整到秒）。
+// streamKey 是转封装/转码会话的键：条目 + 文件 + 模式 + 起播点 + **编码参数指纹**。
+//
+// 编码参数必须进键：用户把画质从 1080p 切到 720p 时，条目、起播点、模式都没变，
+// 但 ffmpeg 命令行完全不同 —— 键相同就会复用上一档的会话（切了档位画面不变）。
+// 反过来，参数一样时键也一样，所以「同一部片子同一段共享一路 ffmpeg」仍然成立。
 //
 // 不带用户：两个人同时看同一部片子的同一段，共享一路 ffmpeg 就够了
 // （这正是「会话复用」，也是 M4 并发控制的基础）。
-func streamKey(ps *playSession) string {
-	return fmt.Sprintf("i%d-f%d-%s-%d", ps.ItemID, ps.FileID, ps.Plan.Mode, int(ps.StartSeconds))
+func streamKey(ps *playSession, video stream.VideoEncode, audio stream.AudioEncode) string {
+	parts := make([]string, 0, 16)
+	parts = append(parts, video.InputArgs...)
+	parts = append(parts, video.FilterArgs...)
+	parts = append(parts, video.CodecArgs...)
+	parts = append(parts, video.Tag...)
+	parts = append(parts, fmt.Sprintf("vcopy=%v", video.Copy))
+	parts = append(parts, audio.Args...)
+	parts = append(parts, fmt.Sprintf("acopy=%v", audio.Copy))
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+	return fmt.Sprintf("i%d-f%d-%s-%d-%x", ps.ItemID, ps.FileID, ps.Plan.Mode, int(ps.StartSeconds), sum[:6])
 }
 
 // handlePlayState 返回播放会话状态（播放器出错时用它拿到 ffmpeg 的 stderr 尾巴）。
@@ -687,7 +710,7 @@ func (s *Server) handlePlaySeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := stream.Spec{
-		Key:           streamKey(ps),
+		Key:           streamKey(ps, video, audio),
 		Path:          ps.FilePath,
 		VideoIndex:    ps.Plan.Video.Index,
 		VideoCodec:    ps.Plan.Video.Codec,

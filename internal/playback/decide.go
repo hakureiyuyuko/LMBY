@@ -81,6 +81,17 @@ type Request struct {
 	// 1080p 又快又清晰）。转码是「边编边播」，输出分辨率直接决定能不能实时，
 	// 所以额外压一档 —— 默认值由配置给（见 [playback] transcode_max_height）。
 	TranscodeMaxHeight int
+
+	// MaxHeight 是**用户在播放器里选的画质档**（输出高度上限）。
+	//
+	// 三态：nil = 没选（按上面的 TranscodeMaxHeight 走）；
+	// 0 = 明确要「原生分辨率」（不因转码上限而缩放）；> 0 = 上限。
+	// 它优先于配置里的转码上限（但仍不能超过客户端能放的上限）。
+	// 选了比源低的档就必须转码 —— 否则等于没选。
+	MaxHeight *int
+	// HighBitrate 为真 = 用户选了「Premium」档：同分辨率、更高码率。
+	// 只在真的要转码时有意义（直出不会重编码，码率跟着源走）。
+	HighBitrate bool
 }
 
 // StreamPlan 是一条流的处理决定。
@@ -338,6 +349,12 @@ func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix 
 			why = append(why, fmt.Sprintf("视频 %s 无法放进可用的分片格式", vs.Codec))
 		}
 	}
+	// 用户选的档位低于源：这是**用户要求**的转码，不是能力不够 —— 理由要说清楚，
+	// 否则用户会以为是服务端不给他看原画质。
+	userAskedLower := req.MaxHeight != nil && *req.MaxHeight > 0 && vs.Height > *req.MaxHeight
+	if userAskedLower {
+		why = append(why, fmt.Sprintf("你选了 %dp 输出（源是 %dp）", *req.MaxHeight, vs.Height))
+	}
 
 	if len(why) == 0 {
 		out.Reason = join(prefix, fmt.Sprintf("视频 %s 原样复制", res))
@@ -353,6 +370,12 @@ func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix 
 		target = "hevc"
 	}
 	if target == "" {
+		// 只是用户想降画质、而这台机器编不了：别把本来能看的片子变成「放不了」——
+		// 原样送出去，并在理由里说清。此时 out.Action 还是 Copy（上面没改过）。
+		if userAskedLower && len(why) == 1 {
+			out.Reason = join(prefix, fmt.Sprintf("视频 %s 原样复制（这台机器不能转码，没法按所选画质输出）", res))
+			return out
+		}
 		out.Action = ActionTranscode
 		out.Reason = join(prefix, fmt.Sprintf("视频 %s 需要转码（%s），但这台机器没有可用的编码器",
 			res, strings.Join(why, "；")))
@@ -363,12 +386,25 @@ func planVideo(p Profile, req Request, file *File, vs probe.VideoStream, prefix 
 	out.Action = ActionTranscode
 	out.TargetCodec = target
 	out.Quality = qualityFor(vs)
+	if req.HighBitrate {
+		// 「Premium」= 同分辨率、更高码率
+		out.Quality = "high"
+	}
 	out.Backend = m.Name
-	// 目标分辨率取「客户端上限」与「转码上限」里更严的那个，保持宽高比由滤镜负责。
-	// 转码上限默认压到 1080p：4K 转码（尤其 HDR 色调映射）在多数自托管机器上
-	// 跑不进起播超时，而屏幕上的差别远小于「等 40 秒才出画面」的代价。
+	// 目标分辨率取「客户端上限」「用户选的档位」「配置里的转码上限」里最严的那个，
+	// 保持宽高比由滤镜负责。
+	//
+	// 用户选「原生」时（MaxHeight = 0）不加转码上限：那是他明确要原分辨率，
+	// 代价（可能跑不到实时）由界面上的理由链告知。
 	maxW, maxH := p.MaxWidth, p.MaxHeight
-	if req.TranscodeMaxHeight > 0 && (maxH <= 0 || req.TranscodeMaxHeight < maxH) {
+	switch {
+	case req.MaxHeight != nil && *req.MaxHeight > 0:
+		if maxH <= 0 || *req.MaxHeight < maxH {
+			maxH = *req.MaxHeight
+		}
+	case req.MaxHeight != nil:
+		// 原生：不叠加转码上限
+	case req.TranscodeMaxHeight > 0 && (maxH <= 0 || req.TranscodeMaxHeight < maxH):
 		maxH = req.TranscodeMaxHeight
 	}
 	if (maxW > 0 && vs.Width > maxW) || (maxH > 0 && vs.Height > maxH) {

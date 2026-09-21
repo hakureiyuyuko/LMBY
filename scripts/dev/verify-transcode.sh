@@ -74,7 +74,9 @@ S10_4K=$(pick_file "$SDR10_COND and coalesce((f.video_streams->0)->>'width','0')
 HDRF=$(pick_file "$HDR_COND and coalesce(f.duration_ticks,0) > 60000000")
 # 同理：该条目只有一个文件，play 才会落到这只文件上
 HI10P=$(pick_file "(f.video_streams->0)->>'codec'='h264' and coalesce((f.video_streams->0)->>'bitDepth','8')='10' and (select count(*) from media_files f2 where f2.item_id = f.item_id and f2.deleted_at is null) = 1")
-for pair in "1080p 10bit HEVC SDR:$S10" "4K 10bit HEVC SDR:$S10_4K" "HDR:$HDRF" "Hi10P（10bit H.264）:$HI10P"; do
+# 能直出的 1080p+ 单文件条目：验「用户选了低档 → 本来能直出的也要转」
+DIRECT_ID=$(pick_file "(f.path ilike '%.mp4' or f.path ilike '%.m4v') and (f.video_streams->0)->>'codec'='h264' and coalesce((f.video_streams->0)->>'bitDepth','8')='8' and coalesce((f.video_streams->0)->>'height','0')::int >= 1080 and coalesce(f.duration_ticks,0) > 600000000 and (select count(*) from media_files f2 where f2.item_id = f.item_id and f2.deleted_at is null) = 1")
+for pair in "1080p 10bit HEVC SDR:$S10" "4K 10bit HEVC SDR:$S10_4K" "HDR:$HDRF" "Hi10P（10bit H.264）:$HI10P" "能直出的 1080p+:$DIRECT_ID"; do
   name=${pair%%:*}; id=${pair#*:}
   if [[ -z "$id" ]]; then
     note "$name：库里没有符合条件的样本（相关断言会跳过）"
@@ -276,7 +278,52 @@ else
 fi
 
 echo
-echo "== 11. 收尾：没有会话/进程残留 =="
+echo "== 11. 播放器画质档（maxHeight）：能直出的也要按要求转 =="
+if [[ -z "$DIRECT_ID" ]]; then
+  note "库里没有「能直出的 1080p+ 单文件条目」，跳过"
+elif [[ "$CAN_TRANSCODE" != "true" ]]; then
+  note "本机不能转码，跳过"
+else
+  DIT=$(item_of "$DIRECT_ID")
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$DIT/play" -H 'Content-Type: application/json' -d '{"restart":true}')
+  check "不选档位时照旧直出" direct "$(jq -r '.mode' <<<"$r")"
+  DA=$(jq -r '.playSessionId // ""' <<<"$r")
+  [[ -n "$DA" && "$DA" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$DA/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$DIT/play" -H 'Content-Type: application/json' -d '{"restart":true,"maxHeight":720}')
+  check "选了 720p 就变成转码（否则等于没选）" transcode "$(jq -r '.mode' <<<"$r")"
+  check "目标高度 = 720" 720 "$(jq -r '.plan.video.targetHeight' <<<"$r")"
+  check "理由链说清「是用户自己选的画质」" true "$(bool "$(jq -r '[.reasons[]|test("你选了")]|any' <<<"$r")")"
+  QS=$(jq -r '.playSessionId // ""' <<<"$r")
+  QU="$BASE$(jq -r '.hlsUrl // ""' <<<"$r")"
+  if [[ -n "$QU" && "$QU" != "$BASE" ]]; then
+    sleep 2
+    QCOOKIE=$(awk 'NF>=7 && $6=="lmby_session"{v=$7} END{print "lmby_session="v}' "$JAR")
+    qp=$(timeout 60 ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 -headers "Cookie: $QCOOKIE" -i "$QU" 2>&1 | head -1)
+    note "720p 档的 HLS 输出：${qp:-（读不到）}"
+    check "真出 720p（ffprobe 交叉验证）" "1280x720" "$(tr ',' 'x' <<<"$qp")"
+  fi
+  # 切档位必须换一路会话：会话键里带了编码参数指纹，否则会复用上一档的流
+  #（用户切了画质、画面却没变 —— 这是真跑拓出来的坑）
+  KEYS1=$(bd -b "$JAR" "$BASE/api/v1/playback/sessions" | jq -r '[.transcodeSessions[].key] | join(",")')
+  [[ -n "$QS" && "$QS" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$QS/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$DIT/play" -H 'Content-Type: application/json' -d '{"restart":true,"maxHeight":480}')
+  check "切到 480p 仍是转码" transcode "$(jq -r '.mode' <<<"$r")"
+  check "切档后目标高度 = 480" 480 "$(jq -r '.plan.video.targetHeight' <<<"$r")"
+  KEYS2=$(bd -b "$JAR" "$BASE/api/v1/playback/sessions" | jq -r '[.transcodeSessions[].key] | join(",")')
+  check "切档后是另一路会话（会话键含编码参数）" true "$(bool "$([[ "$KEYS1" != "$KEYS2" ]] && echo true)")"
+  QS2=$(jq -r '.playSessionId // ""' <<<"$r")
+  [[ -n "$QS2" && "$QS2" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$QS2/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+
+  # 选「原生」（maxHeight = 0）：不能被配置里的转码上限压掉
+  r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$DIT/play" -H 'Content-Type: application/json' -d '{"restart":true,"maxHeight":0}')
+  check "选「原生」时不该因转码上限而转码" direct "$(jq -r '.mode' <<<"$r")"
+  DS=$(jq -r '.playSessionId // ""' <<<"$r")
+  [[ -n "$DS" && "$DS" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$DS/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+fi
+
+echo
+echo "== 12. 收尾：没有会话/进程残留 =="
 json -b "$JAR" -X POST "$BASE/api/v1/auth/logout" -o /dev/null >/dev/null 2>&1 || true
 sleep 2
 check "跑完没有 ffmpeg 残留" 0 "$(ffmpeg_count)"

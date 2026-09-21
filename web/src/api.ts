@@ -602,6 +602,22 @@ export interface StreamPlan {
   downmix?: boolean;
   image?: boolean;
   forced?: boolean;
+  // 转码专用（M4）：转到什么、怎么转
+  targetCodec?: 'h264' | 'hevc';
+  targetWidth?: number;
+  targetHeight?: number;
+  tonemap?: boolean;
+  deinterlace?: boolean;
+  tenBitToEight?: boolean;
+  quality?: 'high' | 'medium' | 'low';
+  backend?: string;
+  // 源信息：画质档位菜单要用源分辨率算「哪些档比源低」
+  sourceCodec?: string;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  sourceBitDepth?: number;
+  sourceHdr?: boolean;
+  sourceInterlaced?: boolean;
 }
 
 /** 播放决策（`GET /items/{id}/play` 里的 plan）。 */
@@ -668,6 +684,12 @@ export interface StartPlaybackBody {
   subtitleStreamIndex?: number;
   startPositionTicks?: number;
   restart?: boolean;
+  /**
+   * 画质档（输出高度上限）：
+   * 省略 = 自动（服务端按配置的转码上限走）；0 = 原生分辨率（不额外压）；
+   * > 0 = 该高度。选了比源低的档会强制转码。
+   */
+  maxHeight?: number;
 }
 
 /** 条目下的文件与流（播放器的音轨/字幕选择器用）。 */

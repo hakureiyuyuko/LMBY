@@ -598,6 +598,57 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- 快捷键
+  // ---------------------------------------------------------------- 画质档位（M4）
+  log('\n== 7.5 画质档位菜单 ==');
+  if (!cand.direct) {
+    note('没有直出样本，跳过');
+  } else {
+    await send('Page.navigate', { url: `${BASE}/play/${cand.direct.id}` });
+    const ready = await waitFor(
+      '播放器',
+      async () => Boolean(await evaluate(`!!document.querySelector('.player-video')`)),
+      30000,
+    );
+    check('进入播放器', true, ready);
+    const q = await evaluate(`(() => {
+      const sel = document.querySelector('select[aria-label="画质"]');
+      if (!sel) return null;
+      return { options: [...sel.options].map((o) => o.textContent.trim()), value: sel.value };
+    })()`);
+    note(`画质菜单：${JSON.stringify(q)}`);
+    check('播放器里有画质档位菜单', true, Boolean(q));
+    if (q) {
+      check('菜单最高档是「原生」', true, (q.options || []).some((t) => t.includes('原生')));
+      check('默认是「自动」', 'auto', q.value);
+      // 选菜单里第一个「数字档」（比源低的那一档），服务端应当改成转码
+      const picked = await evaluate(`(() => {
+        const sel = document.querySelector('select[aria-label="画质"]');
+        const opt = [...sel.options].find((o) => /画质：\\d+p$/.test(o.textContent.trim()));
+        if (!opt) return null;
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return opt.textContent.trim();
+      })()`);
+      note(`选了：${picked}`);
+      check('菜单里列出了比源低的档位', true, Boolean(picked));
+      check(
+        '切到低档后变成「需要转码」',
+        true,
+        await waitFor('转码徽标', async () => await evaluate(`document.body.textContent.includes('需要转码')`), 60000),
+      );
+      const moving = await waitFor(
+        '换档后继续播',
+        async () => {
+          const st = await evaluate(videoState);
+          return st && st.currentTime > 0.5;
+        },
+        60000,
+      );
+      check('换档后画面继续播（从当前位置重开一路）', true, moving);
+      await shot('06-quality');
+    }
+  }
+
   log('\n== 8. 快捷键与字幕开关 ==');
   if (cand.direct) {
     await send('Page.navigate', { url: `${BASE}/play/${cand.direct.id}` });

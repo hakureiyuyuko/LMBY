@@ -213,6 +213,74 @@ func TestTranscodeKeepsAudioReasons(t *testing.T) {
 	}
 }
 
+// intPtr 是画质档的三态载体（nil = 没选）。
+func intPtr(v int) *int { return &v }
+
+func TestUserPickedQuality(t *testing.T) {
+	// 本来能直出的片子：用户选了低档就必须转码（否则等于没选）
+	mp41080 := movie("/m/a.mp4", "mov,mp4,m4a,3gp,3g2,mj2",
+		[]probe.VideoStream{h264(1920, 1080, 8, true)}, []probe.AudioStream{audio(1, "aac", 2, true)}, nil)
+	hdr4k := movie("/m/a.mkv", "matroska,webm",
+		[]probe.VideoStream{hdrHevc10(3840, 2160)}, []probe.AudioStream{audio(1, "truehd", 8, true)}, nil)
+
+	t.Run("选了 720p：能直出的也要转码并缩到 720p", func(t *testing.T) {
+		got := Decide(Request{Profile: BrowserProfile(), Machine: vaapiMachine(), MaxHeight: intPtr(720), Files: []File{mp41080}})
+		if got.Mode != ModeTranscode {
+			t.Fatalf("模式：得到 %q 想要 %q（理由 %v）", got.Mode, ModeTranscode, got.Reasons)
+		}
+		if !got.Playable {
+			t.Fatalf("应当可播：%v", got.Reasons)
+		}
+		if got.Video.TargetHeight != 720 {
+			t.Errorf("目标高度：得到 %d 想要 720", got.Video.TargetHeight)
+		}
+		if joined := strings.Join(got.Reasons, " | "); !strings.Contains(joined, "你选了 720p") {
+			t.Errorf("理由链要说清「是用户自己选的画质」，而不是让人以为服务端不给原画质：%s", joined)
+		}
+	})
+
+	t.Run("选「原生」时不受配置里的转码上限影响", func(t *testing.T) {
+		got := Decide(Request{
+			Profile: BrowserProfile(), Machine: vaapiMachine(),
+			TranscodeMaxHeight: 1080, MaxHeight: intPtr(0), Files: []File{hdr4k},
+		})
+		if got.Mode != ModeTranscode {
+			t.Fatalf("模式：得到 %q 想要 %q", got.Mode, ModeTranscode)
+		}
+		if got.Video.TargetWidth != 0 || got.Video.TargetHeight != 0 {
+			t.Errorf("选原生就不该缩放，得到 %dx%d（理由 %v）", got.Video.TargetWidth, got.Video.TargetHeight, got.Reasons)
+		}
+	})
+
+	t.Run("选了比源高的档 = 等于没选（不转码）", func(t *testing.T) {
+		got := Decide(Request{Profile: BrowserProfile(), Machine: vaapiMachine(), MaxHeight: intPtr(2160), Files: []File{mp41080}})
+		if got.Mode != ModeDirect {
+			t.Errorf("模式：得到 %q 想要 %q（理由 %v）", got.Mode, ModeDirect, got.Reasons)
+		}
+	})
+
+	t.Run("机器编不了但用户只是想降画质 → 原样送，不能变成放不了", func(t *testing.T) {
+		got := Decide(Request{Profile: BrowserProfile(), Machine: Machine{}, MaxHeight: intPtr(720), Files: []File{mp41080}})
+		if !got.Playable || got.Video.Action != ActionCopy {
+			t.Fatalf("应当回退到原样复制：playable=%v action=%q 理由 %v", got.Playable, got.Video.Action, got.Reasons)
+		}
+		if joined := strings.Join(got.Reasons, " | "); !strings.Contains(joined, "没法按所选画质输出") {
+			t.Errorf("理由链要说清没按所选画质输出：%s", joined)
+		}
+	})
+
+	t.Run("Premium = 同分辨率、更高码率", func(t *testing.T) {
+		plain := Decide(Request{Profile: BrowserProfile(), Machine: vaapiMachine(), Files: []File{hdr4k}})
+		premium := Decide(Request{Profile: BrowserProfile(), Machine: vaapiMachine(), HighBitrate: true, Files: []File{hdr4k}})
+		if premium.Video.Quality != "high" {
+			t.Errorf("Premium 应当用高档位，得到 %q", premium.Video.Quality)
+		}
+		if premium.Video.TargetHeight != plain.Video.TargetHeight {
+			t.Errorf("Premium 不该改分辨率：%d vs %d", premium.Video.TargetHeight, plain.Video.TargetHeight)
+		}
+	})
+}
+
 func TestFitWithin(t *testing.T) {
 	if w, h := fitWithin(3840, 2160, 1920, 1080); w != 1920 || h != 1080 {
 		t.Errorf("3840x2160 → 1920x1080，得到 %dx%d", w, h)
