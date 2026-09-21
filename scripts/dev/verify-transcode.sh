@@ -48,7 +48,9 @@ ffmpeg_count()  { pgrep -f 'ffmpeg .*hls_segment_filename' | wc -l; }
 # wait_ffmpeg 等到 ffmpeg 进程数变成 want（最多 5 秒）。
 # stop / seek 之后进程要收尾一下，立刻数会数到还没退出的那个。
 wait_ffmpeg() { local want=$1 n=0; for _ in $(seq 1 10); do n=$(ffmpeg_count); [[ "$n" == "$want" ]] && break; sleep 0.5; done; echo "$n"; }
-session_dirs()  { find "$STREAMS_DIR" -mindepth 1 -maxdepth 1 -type d -not -name subs 2>/dev/null | wc -l; }
+# 分片目录数：只数「每个会话一个」的目录。subs（字幕缓存）与 attfonts（内封字体缓存）
+# 都是缓存、不属于会话，得排除（否则一跑就「目录变多了」）。
+session_dirs()  { find "$STREAMS_DIR" -mindepth 1 -maxdepth 1 -type d -not \( -name subs -o -name attfonts \) 2>/dev/null | wc -l; }
 seg_count()     { grep -c 'seg_[0-9]*\.m4s' "$M3U8" 2>/dev/null || echo 0; }
 pick_file()     { PSQL "select f.id from media_files f
   where f.deleted_at is null and f.probe_state = 'ok' and $1
@@ -503,6 +505,47 @@ else
   check "样式表保住了（Style 行）" true "$(bool "$(grep -q '^Style:' /tmp/vt.ass && echo true)")"
   note "ASS 大小 $(wc -c < /tmp/vt.ass) 字节，Dialogue $(grep -c '^Dialogue' /tmp/vt.ass) 行"
   ASID=$(jq -r '.playSessionId // ""' <<<"$r")
+  # 内封字体（mkv 附件）：不给 libass 的话，字幕里 \fn 引用的特效字体只能退化成
+  # 兑底字体（用户报的「用保底字体又叠了一层」）。附件在库里没登记，只能 ffprobe 真查。
+  FONTF=
+  for cand in $(PSQL "select f.id from media_files f
+      where f.deleted_at is null and f.probe_state='ok' and coalesce(f.duration_ticks,0) > 600000000
+        and (select count(*) from jsonb_array_elements(coalesce(f.subtitle_streams,'[]'::jsonb)) s where s.value->>'codec' in ('ass','ssa')) > 0
+      order by f.size_bytes asc limit 5"); do
+    n=$(ffprobe -v error -show_entries stream=codec_type -of csv=p=0 "$(file_path "$cand")" 2>/dev/null | grep -c attachment)
+    if [[ "${n:-0}" -gt 0 ]]; then FONTF=$cand; FONTN=$n; break; fi
+  done
+  if [[ -z "$FONTF" ]]; then
+    note "没有「带 ASS 字幕且内封字体」的样本，跳过内封字体检查"
+  else
+    note "内封字体样本：file=$FONTF（ffprobe 数到 $FONTN 个附件）"
+    r=$(json -b "$JAR" -X POST "$BASE/api/v1/items/$(item_of "$FONTF")/play" -H 'Content-Type: application/json' -d '{"restart":true}')
+    FSID=$(jq -r '.playSessionId // ""' <<<"$r")
+    # 首次可能是 202：要把源文件读一遍才抽得出来（实测 223MB 的片要 19s）。
+    FJSON=/tmp/vt-fonts.json; rm -f "$FJSON"; CODE=000
+    for _ in $(seq 1 120); do
+      CODE=$(curl -s -o "$FJSON" -w '%{http_code}' -b "$JAR" "$BASE/api/v1/play/$FSID/fonts")
+      [[ "$CODE" == "200" ]] && break
+      if [[ "$CODE" != "202" ]]; then note "字体列表接口返回 $CODE"; break; fi
+      sleep 2
+    done
+    # jq 直接读文件（不绕 shell 变量，避免 JSON 被二次处理）
+    nfonts=$(jq -r '.fonts | length' "$FJSON" 2>/dev/null); [[ -z "$nfonts" ]] && nfonts=0
+    check "内封字体全部列出来了" "$FONTN" "$nfonts"
+    check "每项都带名字/大小/地址" true "$(bool "$(jq -r '.fonts[0] | ((.name|length) > 0 and .size > 0 and (.url|length) > 0)' "$FJSON" 2>/dev/null)")"
+    FURL="$BASE$(jq -r '.fonts[0].url // ""' "$FJSON" 2>/dev/null)"
+    CODE=$(curl -s -o /tmp/vt-f0.ttf -w '%{http_code}' -b "$JAR" "$FURL")
+    MAGIC=$(od -An -tx1 -N4 /tmp/vt-f0.ttf 2>/dev/null | tr -d ' \n')
+    note "第一个字体「$(jq -r '.fonts[0].name // "?"' "$FJSON" 2>/dev/null)」 $(stat -c%s /tmp/vt-f0.ttf 2>/dev/null) 字节，头部=$MAGIC"
+    check "字体字节取得到" 200 "$CODE"
+    # 字体文件头：00010000(TrueType) / 4f54544f(OTTO，CFF) / 74746366(ttcf，合集) / 74727565(true)
+    check "取到的确实是字体文件（头部 magic）" true "$(bool "$([[ "$MAGIC" == 00010000 || "$MAGIC" == 4f54544f || "$MAGIC" == 74746366 || "$MAGIC" == 74727565 ]] && echo true)")"
+    check "字体响应让浏览器长期缓存（同一文件不会变）" true "$(bool "$(curl -s -I -b "$JAR" "$FURL" | grep -qi 'cache-control: *private' && echo true)")"
+    # 序号越界/非法要被拦下来（路径安全：容器里的中文文件名不参与路径）
+    check "非法字体序号被拒" 400 "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$BASE/api/v1/play/$FSID/fonts/abc")"
+    check "越界序号被拒" 400 "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$BASE/api/v1/play/$FSID/fonts/99")"
+    [[ -n "$FSID" && "$FSID" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$FSID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
+  fi
   [[ -n "$ASID" && "$ASID" != "null" ]] && json -b "$JAR" -X POST "$BASE/api/v1/play/$ASID/stop" -H 'Content-Type: application/json' -d '{}' >/dev/null
 fi
 

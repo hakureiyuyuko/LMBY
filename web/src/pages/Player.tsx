@@ -233,6 +233,9 @@ export function Player() {
   const [audioSel, setAudioSel] = useState(0);
   const [subSel, setSubSel] = useState(0);
   const [subReady, setSubReady] = useState(false);
+  // 这个文件内封的字体（mkv 附件）的地址，交给 libass 渲染 \fn 引用的特效字体。
+  // 没有就空数组：字幕退化成兑底字体，不影响播放。
+  const [attFonts, setAttFonts] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
@@ -699,6 +702,24 @@ export function Player() {
     for (let i = 0; i < tracks.length; i++) tracks[i].mode = subSel === -1 ? 'disabled' : 'showing';
   }, [subReady, subSel]);
 
+  // 内封字体（mkv 附件）：只在字幕交给 libass 时才需要。
+  // 服务端要把源文件读一遍才抽得出来，所以这里耐心轮询；拿不到就空着（退化成兜底字体）。
+  useEffect(() => {
+    const sid = state?.playSessionId;
+    if (!sid || state?.subtitleFormat !== 'ass') {
+      setAttFonts([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const fonts = await api.attachmentFonts(sid);
+      if (!cancelled && fonts.length) setAttFonts(fonts.map((f) => absUrl(f.url)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [state?.playSessionId, state?.subtitleFormat]);
+
   // 特效字幕（ASS/SSA）：交给 libass 画在 canvas 上（WebVTT 装不下那些特效）。
   // 关字幕 / 换字幕轨 / 换片子时销毁重建 —— 比增量控制简单且不会漏。
   useEffect(() => {
@@ -745,6 +766,11 @@ export function Player() {
           // 兑底字体由服务端提供：libass/WASM 看不到客户端的系统字体，而 octopus
           // 默认要的 `default.woff2` 在 npm 包里根本不存在 —— 缺了它 worker 直接崩。
           fallbackFont: font,
+          // 内封字体（mkv 附件）：字幕里 \fn / Style 引用的特效字体就在这里面。
+          // 不给的话 libass 只能拿兑底字体画 —— 表现是特效标题/美术字糊成一团
+          //（用户报的「用保底字体又叠了一层」）。libass 会按字体内部的家族名自己匹配。
+          // 首次要等服务端把附件抽出来（要读一遍整部片子），先拿到多少就先给多少。
+          fonts: attFonts,
           onError: () => {
             if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
           },
@@ -778,7 +804,7 @@ export function Player() {
       disposeOctopus(inst ?? octopusRef.current);
       octopusRef.current = null;
     };
-  }, [state?.subtitleUrl, state?.subtitleFormat, subReady, subSel]);
+  }, [state?.subtitleUrl, state?.subtitleFormat, subReady, subSel, attFonts]);
 
   if (!Number.isFinite(itemId) || itemId <= 0) {
     return (

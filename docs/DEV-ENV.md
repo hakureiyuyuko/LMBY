@@ -164,9 +164,9 @@ bash scripts/dev/seed-review-item.sh --restore                        # 用完�
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh
 TEST_IDLE=1 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-play.sh   # 额外验「无人观看 45s 自动回收」
 
-# 播放器界面验收（47 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单、
-# 特效字幕（选 ASS 轨 → libass 画布挂上）、图形字幕烧录（菜单标「需烧录」、
-# 前端真把 burnSubtitle 传下去、烧录时不挂独立字幕轨道），截图到 shots-play/）
+# 播放器界面验收（50 项，真 Chrome 真的把片子放起来，含转码条目真起播、画质档位菜单、
+# 特效字幕（选 ASS 轨 → libass 画布挂上 → 切画质后画布仍然只有一张，不重影 → 内封字体被拉取）、
+# 图形字幕烧录（菜单标「需烧录」、前端真把 burnSubtitle 传下去、烧录时不挂独立字幕轨道），截图到 shots-play/）
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/play-ui-test.mjs
 
 # 特效字幕诊断（开/关对照：画布像素 + 截图 + console/网络）：
@@ -174,13 +174,14 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 # 序号可从 verify-transcode.sh 的「特效字幕」节看到
 BASE=http://<LMBY_DEV_IP>:8099 node scripts/dev/diagnose-subs.mjs [itemId] [subtitleIndex]
 
-# M4 转码 + 字幕：真库 HTTP 端到端（92 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
+# M4 转码 + 字幕：真库 HTTP 端到端（100 项）——能力表、转码决策与理由链、真出分片并用 ffprobe
 # 交叉验证输出确实是 h264、转码路径上的 seek、stop 回收、幅面上限、HDR 色调映射、Hi10P（含硬解
 # 起不来时自动降级软解）、播放器画质档（maxHeight：选了低档就从直出变转码、切档后确实是另一路会话）、
 # 节流（转码跑到客户端前面就暂停 ffmpeg；看 /proc 的 State 确认真的停住了 T；中途续播不该被卡死）、
 # 会话监控（fps/speed/码率）与管理员一键终止（401 / 200 / 会话消失 / 404）、
 # 特效字幕（ASS 原样抽出 → 前端 libass 渲染：交付形态、.ass 地址、[Script Info]/Dialogue/Style 都在）、
-# 图形字幕烧录（真叠进画面：子步与不烧录逐帧对照，blend=difference 的 YMAX 有字幕 208 / 无字幕 0）。
+# 内封字体（mkv 附件：真查附件数、清单条数对得上、字体字节的 magic 对、序号非法/越界被拒）、
+# 图形字幕烧录（真叠进画面：与不烧录逐帧对照，blend=difference 的 YMAX 有字幕 208 / 无字幕 0）。
 # 它**不假设本机一定能转**：先读能力表，只有探测到可用的 h264 编码器才断言「能播」，
 # 否则断言「如实说放不了」——所以它在弱机器上同样有意义。样本按编码条件现挑，优先 1080p。
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh

@@ -89,6 +89,8 @@ const pending = new Map();
 const pageErrors = [];
 // 网络记录：验证「seek 之后分片是重新拉的，没命中浏览器缓存」（这是“拖到后面却从头放”的根因）
 const netLog = [];
+// worker 拉内封字体的响应（/fonts/<n>）—— 证明字体真的交给 libass 了。
+const fontNet = [];
 function connect(url) {
   return new Promise((resolve, reject) => {
     ws = new WebSocket(url);
@@ -112,6 +114,11 @@ function connect(url) {
             disk: Boolean(r.fromDiskCache),
             mem: Boolean(r.fromMemoryCache),
           });
+        }
+        // 内封字体是 **worker** 自己去拉的（不走页面里的 fetch），所以这里用
+        // CDP 的网络事件取证：能在这里看到 /fonts/<n> 的 200，就说明字体真到了 libass。
+        if (r && /\/fonts\/\d+$/.test(r.url)) {
+          fontNet.push({ url: r.url, status: r.status });
         }
       }
       if (msg.method === 'Runtime.exceptionThrown') {
@@ -682,6 +689,30 @@ async function main() {
     })()`);
     note(`选了：${pickedSub}`);
     check('能选到 ASS 字幕轨', true, Boolean(pickedSub));
+    // 记下页面要内封字体的那次请求（列表本身是页面发的；字体字节是 worker 拉的，
+    // 那些在 fontNet 里看）。
+    await evaluate(`(() => {
+      window.__fontList = null;
+      const of = window.fetch;
+      if (!of || of.__lmbyFontWrap) return true;
+      const wrapped = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const p = of.apply(this, arguments);
+        // 只要**清单**那一发（URL 以 /fonts 结尾），不要单个字体文件（/fonts/0）——
+        // 后者是二进制，拿去 json() 会被当成「解析失败」。这里不用正则：
+        // 注入的代码经过模板字符串两层转义，正则里的反斜杠会被吃掉。
+        if (url.endsWith('/fonts')) {
+          p.then((r) => r.clone().json().then((j) => {
+            window.__fontList = { status: r.status, count: (j && j.fonts) ? j.fonts.length : 0 };
+          }).catch(() => { window.__fontList = { status: r.status, count: -1 }; }))
+           .catch(() => {});
+        }
+        return p;
+      };
+      wrapped.__lmbyFontWrap = true;
+      window.fetch = wrapped;
+      return true;
+    })()`);
     // libass 要下载 ~1.5MB 的 wasm，而且内嵌 ASS 首次要先抽出来（网络盘上可能要
     // 读很久）—— 给足时间。并发转码时机器很忙，60s 会抖（真跑见过），所以放到 2 分钟。
     const canvasReady = await waitFor(
@@ -705,6 +736,34 @@ async function main() {
     })()`);
     note(`画布上的字幕像素数：${ink}（“-1” = 取不到画布像素，不硬判）`);
     await shot('07-libass');
+
+    // 内封字体（mkv 附件）：不给 libass 的话，字幕里 \fn 引用的特效字体只能用
+    // 兑底字体画 —— 用户看到的是「特效字幕糊成一团 / 又叠了一层」。
+    // 这里先看页面有没有问服务端要字体（列表可能 202，要读一遍源文件），
+    // 再等 worker 真把字体字节拉回来（只有 CDP 的网络事件看得到 worker 的请求）。
+    const listInfo = await waitFor(
+      '内封字体清单（等 200：首次要读一遍源文件才抽得出来）',
+      async () => {
+        const v = await evaluate(`window.__fontList`);
+        return Boolean(v && v.status === 200);
+      },
+      240000,
+    );
+    if (!listInfo) {
+      const v = (await evaluate(`window.__fontList`)) || {};
+      note(`内封字体清单还没就绪（status=${v.status ?? '无'}）—— 可能是大文件还在抽，跳过`);
+    } else {
+      const v = (await evaluate(`window.__fontList`)) || {};
+      note(`内封字体清单：status=${v.status} count=${v.count}`);
+      check('页面向服务端要了内封字体清单', true, v.status === 200);
+      if (v.count > 0) {
+        const pulled = await waitFor('worker 拉取字体字节', async () => fontNet.some((f) => f.status === 200), 120000);
+        note(`worker 拉到的字体响应：${fontNet.length} 个（${fontNet.map((f) => f.status).join(',')}）`);
+        check('内封字体真的被 libass 取走（worker 拉了字体字节）', true, pulled);
+      } else {
+        note('该样本没有内封字体，不要求 worker 拉字体');
+      }
+    }
 
     // 重影回归：切画质/换会话会让特效字幕的 effect 重跑，每跑一次就新建一张画布。
     // octopus 的销毁方法叫 dispose（**不是** destroy），调错就会把旧画布留在 DOM 里、

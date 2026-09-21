@@ -182,6 +182,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/play/{sid}/index.m3u8", s.requireAuth(s.handlePlayPlaylist))
 	mux.Handle("GET /api/v1/play/{sid}/{name}", s.requireAuth(s.handlePlaySegment))
 	mux.Handle("GET /api/v1/play/{sid}/subtitles/{name}", s.requireAuth(s.handlePlaySubtitle))
+	// 内封字体（mkv 附件）：列表 + 按序号取字节。给前端 libass 用 ——
+	// 不给的话，字幕里 fn 引用的特效字体会退化成兜底字体。
+	mux.Handle("GET /api/v1/play/{sid}/fonts", s.requireAuth(s.handlePlayFonts))
+	mux.Handle("GET /api/v1/play/{sid}/fonts/{n}", s.requireAuth(s.handlePlayFont))
 	mux.Handle("GET /api/v1/play/{sid}", s.requireAuth(s.handlePlayState))
 	mux.Handle("POST /api/v1/play/{sid}/seek", s.requireAuth(s.handlePlaySeek))
 	mux.Handle("POST /api/v1/play/{sid}/progress", s.requireAuth(s.handlePlayProgress))

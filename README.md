@@ -112,8 +112,8 @@ M4（转码）除 Trickplay、带宽自适应等少数项外也已完成。** v0
 | `scripts/dev/m2-ui-test.mjs` | **34/34** | 海报墙、剧集视图、批量选择、设置页（测试连接/保存/恢复）|
 | `scripts/dev/search-ui-test.mjs` | **22/22** | 搜索界面：导航、查询、错字命中、进条目页、URL 参数、筛选、主题 |
 | `scripts/dev/verify-play.sh` | **108/108** | 播放后端：HTTP Range/ETag/条件请求/**字节与原文件逐字节一致**、mkv→HLS fMP4（**用 ffprobe 直接读服务发出的 m3u8 交叉验证编码**）、seek 换窗口、stop 后进程与分片回收、多版本选片、10bit HEVC 明确判「M4 才能放」、上报 Safari 能力后转为可转封装、字幕抽 WebVTT、进度与续播、继续观看 |
-| `scripts/dev/verify-transcode.sh` | **92/92** | 转码链路：能力表（能不能转由**运行时真跑探测**说话）、决策/目标编码/缩放/位深、**真转真播**（含倍速与超时）、用户画质档（本来能直出的也要转、切档换会话）、节流（`/proc` 里 `State=T` 取证 + 中途续播不该被卡死）、Hardware 解码降级（Hi10P）、监控与一键终止、ASS 交付、**图形字幕烧录的帧级开/关对照**（有字幕 YMAX 208 / 无字幕 0） |
-| `scripts/dev/play-ui-test.mjs` | **47/47** | 真浏览器播起来：直出起播+拖动、HLS 分片起播（hls.js）、**拖到窗口末端自动续段**、进度落库、离开页面回收会话、放不了的条目给出理由、快捷键、画质档菜单、**ASS 走 libass 渲染**、**图形字幕标「需烧录」+ 前端真带上 `burnSubtitle`** |
+| `scripts/dev/verify-transcode.sh` | **100/100** | 转码链路：能力表（能不能转由**运行时真跑探测**说话）、决策/目标编码/缩放/位深、**真转真播**（含倍速与超时）、用户画质档（本来能直出的也要转、切档换会话）、节流（`/proc` 里 `State=T` 取证 + 中途续播不该被卡死）、Hardware 解码降级（Hi10P）、监控与一键终止、ASS 交付、**图形字幕烧录的帧级开/关对照**（有字幕 YMAX 208 / 无字幕 0） |
+| `scripts/dev/play-ui-test.mjs` | **50/50** | 真浏览器播起来：直出起播+拖动、HLS 分片起播（hls.js）、**拖到窗口末端自动续段**、进度落库、离开页面回收会话、放不了的条目给出理由、快捷键、画质档菜单、**ASS 走 libass 渲染**、**图形字幕标「需烧录」+ 前端真带上 `burnSubtitle`** |
 
 这些脚本都不依赖测试框架（curl + jq / Node 内置 `WebSocket` 直连 Chrome DevTools Protocol）。
 用法与数据库字符集坑见 [`docs/DEV-ENV.md`](docs/DEV-ENV.md)。

@@ -199,6 +199,31 @@ export const api = {
       ...json(body),
     }),
   itemPlaylist: (itemId: number) => request<ItemPlaylist>(`/api/v1/items/${itemId}/playlist`),
+  /**
+   * 取这个文件**内封的字体**（mkv 附件），交给前端 libass 渲染 `\fn` 引用的特效字体。
+   *
+   * 服务端要把整部片子的附件抽出来（附件常在文件末尾，得把源文件读一遍；网络盘上
+   * 大文件好几分钟），所以这里会轮询 202。超时或报错都返回空数组 —— 字幕退化成
+   * 兜底字体，不影响播放。
+   */
+  attachmentFonts: async (sessionId: string, tries = 60, delayMs = 3000): Promise<AttachmentFont[]> => {
+    const path = `/api/v1/play/${encodeURIComponent(sessionId)}/fonts`;
+    for (let i = 0; i < tries; i++) {
+      let res: Response;
+      try {
+        res = await fetch(path, { credentials: 'same-origin' });
+      } catch {
+        return [];
+      }
+      if (res.status === 200) {
+        const body = (await res.json().catch(() => null)) as { fonts?: AttachmentFont[] } | null;
+        return body?.fonts ?? [];
+      }
+      if (res.status !== 202) return []; // 404 / 502 等：这次没有字体可用
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    return [];
+  },
   /** 活跃播放会话 + 转码/转封装会话（监控页用；非管理员只看到自己的播放会话）。 */
   playSessions: () =>
     request<{ sessions: PlaySessionInfo[]; transcodeSessions: TranscodeSessionStat[] }>(
@@ -307,6 +332,14 @@ export const api = {
 };
 
 // ---------------------------------------------------------------- 媒体库类型
+
+/** 内封字体（mkv 附件）的一条：前端把 url 交给 libass 去取。 */
+export interface AttachmentFont {
+  index: number;
+  name: string;
+  size: number;
+  url: string;
+}
 
 export interface LibraryPath {
   id: number;
