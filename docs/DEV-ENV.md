@@ -41,6 +41,46 @@ apt-get install -y ffmpeg vainfo intel-media-va-driver-non-free libvpl2 \
 > 需要注意：Debian 13 的软件源默认只有 `main contrib`，装 Intel 的完整 iHD 驱动
 > 必须先补上 `non-free non-free-firmware`。
 
+## 自建 CI runner（GitHub Actions self-hosted）
+
+CI 与发版都跑在自建 runner 上。公开仓库用 GitHub 托管 runner 本来是免费额度，自托管主要是
+省排队、复用本地工具链与模块缓存；代价是**单个 runner 一次只跑一个 job**，所以发版的四平台
+matrix 是串行的（每平台 1~2 分钟）。
+
+| 项 | 值 |
+|---|---|
+| 客户机 | LXC **VMID 108**，hostname `gh-runner-01`（与开发容器同一个 PVE 宿主、同网段） |
+| 地址 | `<CI_RUNNER_IP>`（静态 /22），网关 `<LAN_GATEWAY>` |
+| 系统 | Debian 13 (trixie)，6 核 / 8G 内存 / 32G 磁盘（local-lvm），unprivileged、onboot=1 |
+| runner 标签 | `self-hosted, linux, x64, lmby`（工作流用 `[self-hosted, lmby]`） |
+| 目录 | runner 本体 `/opt/actions-runner`，工作区 `/opt/actions-runner/_work` |
+| 服务 | systemd `actions.runner.hakureiyuyuko-LMBY.gh-runner-01.service` |
+| 工具链 | Go 1.27.1 `/usr/local/go`、Node 24 `/usr/local/node`（都软链到 `/usr/local/bin`） |
+| 其它依赖 | `git curl jq gcc make libc6-dev gh`（`gh` 是 release job 用的） |
+
+```bash
+# 注册/重装 runner（token 是 repo 级 registration token，
+# 由 GitHub API POST /repos/<owner>/<repo>/actions/runners/registration-token 取，1 小时有效）
+cd /opt/actions-runner
+su - runner -c './config.sh --unattended --url https://github.com/<owner>/<repo> \
+    --token <TOKEN> --name gh-runner-01 --labels lmby --work _work --replace'
+./svc.sh install runner && ./svc.sh start
+```
+
+踩过的坑（都是真跑出来的）：
+
+- **cgo 必需**：`go test -race` 走 cgo，所以必须装 `libc6-dev`；Debian 的 `gcc` 包只 *Recommends*
+  它，用 `--no-install-recommends` 装法会漏掉，症状是 `fatal error: stdint.h/pthread.h: No such file`。
+- **跳过 `setup-go`/`setup-node`**：这台 runner 上它们会去 GitHub 的 artifact/results 服务
+  （`20.209.226.x:443`）拉版本清单，TCP 连上后没有任何数据回来，job 就卡在“正在设置 Go”；
+  取证是 `/proc/<pid>/io` 计数冻结、`ss -tnp` 两个 ESTAB 干等、CPU 累计只有 1 秒。
+  所以工作流里用 `if: runner.environment != 'self-hosted'` 守卫 —— 云端 runner 上照旧启用（含缓存），
+  自托管直接用镜像里的 Go/Node。**不要去关 `cache: false` 来绕过**：缓存关掉也照样发那次请求。
+- **卡住的 job 不要 `kill -9` 它的 worker**：listener 会陷进取消请求的死循环、不再领取新 job
+  （表现为 runner 显示 online 但所有 job 一直 queued），要 `systemctl restart` 那个 runner 服务。
+  正常做法是走 API `POST /actions/runs/<id>/cancel`。
+- 排查入口：runner 自己的日志在 `/opt/actions-runner/_diag/{Runner,Worker}_*.log`。
+
 ## 部署流程
 
 ```bash
