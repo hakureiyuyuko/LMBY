@@ -17,7 +17,8 @@ permissions:
 
 jobs:
   build:
-    # 自建 runner（LXC 108 gh-runner-01）一次只跑一个 job，matrix 的 4 个平台是串行的。
+    # 自建 runner（LXC 108 gh-runner-01）一次只跑一个 job，matrix 的 4 个平台是串行的；
+    # 自托管上 setup-* 被 runner.environment 守卫跳过（Go/Node 已预装，见 ci.yml 说明）。
     runs-on: [self-hosted, lmby]
     timeout-minutes: 60
     strategy:
@@ -33,6 +34,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
+        if: runner.environment != 'self-hosted'
         with:
           node-version: "24"
           cache: npm
@@ -45,6 +47,7 @@ jobs:
           npm run build
 
       - uses: actions/setup-go@v7
+        if: runner.environment != 'self-hosted'
         with:
           go-version: "1.27"
           cache: true

@@ -5,10 +5,13 @@ on:
     branches: ["**"]
   pull_request:
 
-# 跑在自建 runner 上（PVE 宿主 kyaru 的 LXC 108 = gh-runner-01，自定义 label `lmby`）：
-#   * 公开仓库用 GitHub 托管 runner 本身是免费额度，自托管主要是省排队 + 用本地 12 核 i5 跑得更快；
-#   * 想临时回退到云端 runner：把下面的 runs-on 换回 ubuntu-latest 即可；
-#   * 依赖要求（镜像里已装好）：git/curl/jq/gcc（go test -race 需要 cgo）/gh CLI。
+# 跑在自建 runner 上（PVE 宿主上的 LXC 108 = gh-runner-01，自定义 label `lmby`；
+# 真实内网坐标见 docs/local-notes.md）：
+#   * 公开仓库用 GitHub 托管 runner 本身是免费额度，自托管主要是省排队 + 本地 12 核 i5 跑得快；
+#   * 自托管 runner 上 Go/Node 是镜像里预装的（/usr/local），所以 setup-* 步骤被
+#     `runner.environment` 守卫跳过 —— 见下面 setup-go 处的说明；
+#   * 想临时回退到云端 runner：把 runs-on 换回 ubuntu-latest，setup-* 会自动重新启用；
+#   * 镜像依赖：git/curl/jq/gcc+libc6-dev（go test -race 要走 cgo）/gh CLI/Go/Node。
 jobs:
   backend:
     runs-on: [self-hosted, lmby]
@@ -16,12 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # 自建 runner 上不启用云端缓存：GOMODCACHE（~/go/pkg/mod）本来就在本地持久化，
-      # 走 actions/cache 反而多一次 cache service 往返，而且这台 runner 上经常连不通。
+      # 自托管 runner 上跳过 setup-go：Go 1.27.1 已在镜像里（/usr/local/go → /usr/local/bin/go）。
+      # 实测这台 runner 上 setup-go 会去 GitHub 的 artifact/results 服务（20.209.226.x:443）
+      # 拉版本清单/建连接，而那条请求拿到 ESTAB 后不再有任何数据回来 —— 进程 CPU 只用了 1 秒、
+      # io 计数冻结、两个 socket 干等，整个 job 卡死在“正在设置 Go”。所以只在云端 runner 上用。
       - uses: actions/setup-go@v7
+        if: runner.environment != 'self-hosted'
         with:
           go-version: "1.27"
-          cache: false
+          cache: true
+
+      - name: Go 版本自检
+        run: go version
 
       - name: go vet
         run: go vet ./...
@@ -44,13 +53,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # 与 setup-go 同理：本地 ~/.npm 已经持久化，不走云端 cache service
-      # （注意 setup-node 的 cache 输入只接受 npm/yarn/pnpm，写 false 会报
-      #  “Caching for 'false' is not supported”，要关就关 package-manager-cache）
+      # 同理跳过 setup-node：Node 24.21.0 已在镜像里（/usr/local/node → /usr/local/bin）
       - uses: actions/setup-node@v7
+        if: runner.environment != 'self-hosted'
         with:
           node-version: "24"
-          package-manager-cache: false
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Node 版本自检
+        run: node -v && npm -v
 
       - run: npm ci --no-audit --no-fund
       - name: 类型检查
@@ -64,9 +76,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
+        if: runner.environment != 'self-hosted'
         with:
           go-version: "1.27"
-          cache: false
+          cache: true
       - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
