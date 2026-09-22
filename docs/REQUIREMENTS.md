@@ -157,6 +157,10 @@ TV/Show (2020)/Season 01/season.nfo + season01-poster.jpg + S01E02 - X.mkv + S01
 
 ## 6. 直播电视（一期）
 
+> **实现状态（2026-09-22）**：源/频道/播放/外链出口已落地并真机验收（见 `docs/ROADMAP.md` 的 M5
+> 与 `docs/notes/livetv.md`）；频道管理 GUI、直播播放器随 M6；订阅源定时刷新与失效频道标记待做。
+> 下面几条里「保留启用状态与收藏」的实现是：**导入只写元数据，用户态（停用/收藏/探测）一律不覆盖**。
+
 参考 tvhub（`C:\Users\admin\Desktop\dev\TV`）已验证的做法：
 - 源管理：M3U 粘贴/上传/订阅 URL 导入，按地址增量更新，保留启用状态与收藏
 - 频道共享一路 ffmpeg HLS 会话；空闲 45s 自动回收 + 清理分片
@@ -189,9 +193,14 @@ tasks(id,kind,payload jsonb,state,priority,attempts,last_error,run_at,started_at
 scan_runs, scan_issues
 play_sessions(id,token,user_id,item_id,media_file_id,mode,profile jsonb,ffmpeg_pid,args,
   segment_dir,last_activity,client_info jsonb,state)
--- 直播
-tv_sources(id,name,type[m3u|url],url,content text,enabled,last_sync_at)
-tv_channels(id,source_id,tvg_id,name,logo_url,group_name,stream_url,enabled,favorite,order)
+-- 直播（M5 落地，2026-09-22）
+-- url 是频道的自然键（按地址增量更新）；收藏是**每用户**的，所以单独一张表
+-- （原计划把 favorite 放在 tv_channels 上，那样多用户（M7）就没法各自收藏）
+tv_sources(id,name,kind[paste|file|url],url,enabled,refresh_interval_minutes,
+  last_refresh_at,last_status,last_error,last_channel_count,created_at,updated_at)
+tv_channels(id,source_id FK NULL,name,url UNIQUE,group_name,logo,tvg_id,headers,
+  sort_order,disabled,probe,probe_ok,probe_at,created_at,updated_at)
+tv_favorites(user_id,channel_id,created_at, PRIMARY KEY(user_id,channel_id))
 collections, collection_items, playlists, playlist_items
 settings(key,value jsonb)   -- 含加密存储的 TMDB Key
 ```
