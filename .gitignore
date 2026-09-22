@@ -20,7 +20,8 @@
 /web/dist/*.map
 
 # 真实的内网坐标（地址 / 共享 / 账号）—— 公开仓库里不写，只在本地保留
-/docs/local-notes.md
+# 覆盖 local-notes.md（内网坐标明细）、local-handoff.md（换机交接文档）、local-tools/（内网小工具）
+/docs/local-*
 
 # 验收脚本跑出来的产物（截图与报告本机看，不入库）
 /shots*/
