@@ -1079,6 +1079,11 @@ th {
 }
 
 .continue-card {
+  /* min-width: 0 是必需的：flex 子项默认 min-width:auto，而下面的标题是 nowrap，
+     长标题（比如「AVC 1080P YUV420P10 24fps《Blood-C - H264 10bit测试片》」）
+     会把卡片顶得比 flex-basis 宽 —— 一行卡片就高矮胖瘦不一了。
+     真机实测：不加这行时同一行出现 358 / 168 / 270 三种宽度，海报跟着变成 537/252/405 高。 */
+  min-width: 0;
   flex: 0 0 168px;
   display: flex;
   flex-direction: column;
