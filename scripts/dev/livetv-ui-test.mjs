@@ -300,11 +300,11 @@ async function main() {
   check('「全部展开」后又回到原来的条数', chOpen, await evaluate(`document.querySelectorAll('.tv-ch').length`));
 
   log('\n== 4. 换台：点频道 → 底部显示当前频道 + 上一个/下一个/断开 ==');
-  // 优先挑一个「探测没失败」的频道换台（失效那些不一定起得来）
+  // 前台只列「能用能看的」：停用的、失效的、停用源的都不在（所以这里直接取第一行）
   const target = await evaluate(
-    `(() => { const row = [...document.querySelectorAll('.tv-ch')].find((r) => !r.querySelector('.tv-dot-bad')); return row?.querySelector('.tv-ch-name')?.textContent?.trim() || ''; })()`,
+    `document.querySelector('.tv-ch .tv-ch-name')?.textContent?.trim() || ''`,
   );
-  check('找到一个探测正常的频道', true, target.length > 0);
+  check('找到一个频道', true, target.length > 0);
   await evaluate(
     `(() => { const row = [...document.querySelectorAll('.tv-ch')].find((r) => r.querySelector('.tv-ch-name')?.textContent?.trim() === ${JSON.stringify(target)}); if (!row) return false; row.querySelector('.tv-ch-main').click(); return true; })()`,
   );
@@ -331,7 +331,7 @@ async function main() {
   // 单个频道不一定起得来（RTSP 源、源站抽风、probeOk 未知都可能），
   // 所以试几个「探测没失败」的频道，**只要有一个真出了画面**就算这一页能看。
   const candidates = await evaluate(
-    `[...document.querySelectorAll('.tv-ch')].filter((r) => !r.querySelector('.tv-dot-bad')).slice(0, 6).map((r) => r.querySelector('.tv-ch-name').textContent.trim())`,
+    `[...document.querySelectorAll('.tv-ch')].slice(0, 6).map((r) => r.querySelector('.tv-ch-name').textContent.trim())`,
   );
   let started = false;
   let playedName = '';
@@ -410,11 +410,28 @@ async function main() {
   check('直播页没有「共 N 台 · 启用中」那行统计（计数收进侧栏头部）', false,
     await evaluate(`document.body.textContent.includes('启用中')`));
 
-  log('\n== 9. 外部播放器（VLC / Kodi / 电视盒子）==');
-  check('侧栏底部有「外部播放器」明细', true,
-    await evaluate(`(document.querySelector('.tv-ext summary')?.textContent || '').includes('外部播放器')`));
-  check('展开后有 m3u 导出链接', true,
-    await evaluate(`(() => { const d = document.querySelector('.tv-ext'); d.open = true; return !!d.querySelector('a[download]'); })()`));
+  log('\n== 8b. 前台不列「无效的」频道（探测过且不通的）==');
+  const all = await evaluate(apiCall('/api/v1/livetv/channels?enabled=1'));
+  const watchable = await evaluate(apiCall('/api/v1/livetv/channels?enabled=1&hide_failed=1'));
+  const failedAll = all.body.channels.filter((c) => c.probeOk === false).length;
+  const failedShown = watchable.body.channels.filter((c) => c.probeOk === false).length;
+  note(`库里「启用但失效」的频道 ${failedAll} 台；hide_failed 后剩 ${failedShown} 台`);
+  check('hide_failed=1 时列表里没有任何失效频道', 0, failedShown);
+  check('失效频道确实被筛掉了（两边条数不同）', true, failedShown < failedAll || failedAll === 0);
+  check('头部统计与列出的条数一致', true,
+    Number(watchable.body.total) >= watchable.body.channels.length);
+  const domFailed = await evaluate(
+    `[...document.querySelectorAll('.tv-ch')].map((r) => r.querySelector('.tv-ch-name').textContent.trim()).filter((n) => ${JSON.stringify(
+      watchable.body.channels.map((c) => c.name),
+    )}.indexOf(n) < 0).length`,
+  );
+  check('侧栏里没有多余的行（不列失效频道）', 0, domFailed);
+
+  log('\n== 9. 前台没有「外部播放器」那一块（用户要求去掉）==');
+  check('没有 .tv-ext 明细块', false, await evaluate(`!!document.querySelector('.tv-ext')`));
+  check('前台没有外部播放器字样', false,
+    await evaluate(`document.body.textContent.includes('外部播放器')`));
+  check('前台没有导出 m3u 链接', false, await evaluate(`!!document.querySelector('.nav a[download], .tv-side a[download]')`));
 
   log('\n== 10. 频道列表接口（工具链仍然对）==');
   const listAll = await evaluate(apiCall('/api/v1/livetv/channels?enabled=false'));
@@ -431,9 +448,9 @@ async function main() {
     await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '重探全部')`),
   );
   check(
-    '导出 m3u 链接指向导出接口（这个留在直播页：它是频道列表的事）',
-    true,
-    await evaluate(`(document.querySelector('a[download]')?.getAttribute('href') || '').includes('/api/v1/livetv/export.m3u')`),
+    '直播页没有导出 m3u 链接（搬去了设置 → 频道管理）',
+    false,
+    await evaluate(`!!document.querySelector('a[download]')`),
   );
   const exp = await evaluate(apiCall('/api/v1/livetv/export.m3u'));
   check('导出的 m3u 以 #EXTM3U 开头', true, String(exp.body).startsWith('#EXTM3U'));
@@ -446,7 +463,17 @@ async function main() {
   check('进「直播源」页签', true, await waitFor('直播源页签', async () =>
     (await evaluate('location.pathname')) === '/settings/livetv'));
   check('有「直播源」卡片', true, await waitFor('源面板', async () => (await evaluate(`document.body.textContent.includes('直播源')`))));
-  check('有「频道探测」卡片', true, await evaluate(`document.body.textContent.includes('频道探测')`));
+  check('有「频道管理」卡片', true, await evaluate(`document.body.textContent.includes('频道管理')`));
+  check('设置里有导出 m3u 链接（能力没丢）', true,
+    await evaluate(`!!document.querySelector('a[download]')`));
+
+  log('\n== 14c. 频道管理里能看到「失效 / 已停用」并改回来 ==');
+  check('频道管理里有停用/启用按钮', true,
+    await evaluate(`[...document.querySelectorAll('button')].some((b) => ['停用','启用'].includes(b.textContent.trim()))`));
+  check('有搜索框（前台没有，管理里得有）', true,
+    await evaluate(`!!document.querySelector('.card input')`));
+  check('有「频道探测」卡片（同页）', true,
+    await evaluate(`document.body.textContent.includes('频道探测')`));
   check(
     '有「重探全部」按钮',
     true,

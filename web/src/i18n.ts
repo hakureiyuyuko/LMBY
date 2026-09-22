@@ -827,9 +827,7 @@ const en: Record<string, string> = {
   '还没有能看的频道：去设置 → 直播源导入一份播放列表。':
     'No watchable channels yet: import a playlist in Settings → Live sources.',
   '还没有能看的频道。': 'No watchable channels yet.',
-  '外部播放器（VLC / Kodi / 电视盒子）': 'External players (VLC / Kodi / TV box)',
   '导出 m3u（全部频道）': 'Export m3u (all channels)',
-  '当前频道地址：': 'Current channel URL: ',
   '从左边选一个频道开始看': 'Pick a channel on the left to start watching',
   '未在播放': 'Not playing',
   '上一个': 'Previous',

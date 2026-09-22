@@ -115,6 +115,8 @@ func (s *Server) handleListTVChannels(w http.ResponseWriter, r *http.Request) {
 		OnlyFavorites: q.Get("favorites") == "1" || q.Get("favorites") == "true",
 		// probe=pending|ok|failed：按探测结果筛（失效源标记的入口）
 		Probe: strings.TrimSpace(q.Get("probe")),
+		// hide_failed=1：前台只留「能用能看的」—— 探测过且不通的不出现
+		HideFailed: q.Get("hide_failed") == "1" || q.Get("hide_failed") == "true",
 	}
 	channels, err := s.store.ListTVChannels(ctx, query)
 	if err != nil {
@@ -126,7 +128,8 @@ func (s *Server) handleListTVChannels(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取直播分组失败", err)
 		return
 	}
-	total, enabled, err := s.store.CountTVChannels(ctx)
+	// 统计与列表用同一套过滤（否则「共 N 台」和列出来的条数会对不上）
+	total, enabled, err := s.store.CountTVChannels(ctx, query)
 	if err != nil {
 		s.serverError(w, "统计频道数失败", err)
 		return
@@ -265,7 +268,7 @@ func (s *Server) handleListTVSources(w http.ResponseWriter, r *http.Request) {
 	for _, src := range sources {
 		out = append(out, viewTVSource(src, counts[src.ID]))
 	}
-	total, enabled, err := s.store.CountTVChannels(ctx)
+	total, enabled, err := s.store.CountTVChannels(ctx, store.TVChannelQuery{})
 	if err != nil {
 		s.serverError(w, "统计频道数失败", err)
 		return
@@ -350,7 +353,7 @@ func (s *Server) handleCreateTVSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	total, enabled, _ := s.store.CountTVChannels(ctx)
+	total, enabled, _ := s.store.CountTVChannels(ctx, store.TVChannelQuery{})
 	s.log.Info("导入直播源", "source", src.ID, "name", src.Name, "kind", src.Kind,
 		"added", res.Added, "updated", res.Updated, "removed", res.Removed,
 		"total", res.Total, "username", usernameOf(r))
@@ -396,7 +399,7 @@ func (s *Server) handleRefreshTVSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	counts, _ := s.store.CountTVChannelsBySource(ctx)
-	total, enabled, _ := s.store.CountTVChannels(ctx)
+	total, enabled, _ := s.store.CountTVChannels(ctx, store.TVChannelQuery{})
 	s.log.Info("刷新直播源", "source", id, "added", res.Added, "updated", res.Updated,
 		"removed", res.Removed, "total", res.Total, "username", usernameOf(r))
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -230,6 +230,9 @@ type TVChannelQuery struct {
 	OnlyFavorites bool   // 只返回该用户收藏的频道
 	// Probe 按探测结果过滤：pending（还没探过）/ ok / failed（空 = 不过滤）。
 	Probe string
+	// HideFailed：前台不显示「无效的」频道（探测过但不通）。
+	// 没探过的照旧显示（刚导入还没探测时，前台不该是空的）。
+	HideFailed bool
 }
 
 // ListTVChannels 按条件列出频道。
@@ -267,6 +270,12 @@ func (s *Store) ListTVChannels(ctx context.Context, q TVChannelQuery) ([]TVChann
 		where = append(where, "c.probe_ok is true")
 	case "failed":
 		where = append(where, "c.probe_ok is false")
+	}
+	// HideFailed：「无效的」频道（探测过、且不通）不进前台。
+	// **只排已探过且失败的**：没探过的（probe_ok is null）留着 —— 刚导入一份播放列表
+	// 还没探测时，前台不该变成空白（那是探测的活，不是频道不存在）。
+	if q.HideFailed {
+		where = append(where, "c.probe_ok is not false")
 	}
 
 	rows, err := s.pool.Query(ctx,
@@ -481,12 +490,22 @@ func (s *Store) ListTVGroups(ctx context.Context) ([]TVGroup, error) {
 	return out, rows.Err()
 }
 
-// CountTVChannels 返回前台可见的频道总数与启用数（与列表同一套可见性：停用源的频道不算）。
-func (s *Store) CountTVChannels(ctx context.Context) (total, enabled int, err error) {
+// CountTVChannels 返回前台可见的频道数与启用数。
+//
+// ⚠️ 与 ListTVChannels 用**同一套可见性判据**（源启用 + 可选：只算能用的）——
+// 否则界面会出现「共 150 台」却只列 67 台这种自相矛盾的数字。
+func (s *Store) CountTVChannels(ctx context.Context, q TVChannelQuery) (total, enabled int, err error) {
+	conds := []string{tvVisibleSourceCond}
+	if q.OnlyEnabled {
+		conds = append(conds, "not c.disabled")
+	}
+	if q.HideFailed {
+		conds = append(conds, "c.probe_ok is not false")
+	}
 	err = s.pool.QueryRow(ctx,
 		`select count(*)::int, coalesce(sum(case when not c.disabled then 1 else 0 end), 0)::int
 		 from tv_channels c
-		 where `+tvVisibleSourceCond).Scan(&total, &enabled)
+		 where `+strings.Join(conds, " and ")).Scan(&total, &enabled)
 	if err != nil {
 		return 0, 0, fmt.Errorf("统计频道数失败: %w", err)
 	}

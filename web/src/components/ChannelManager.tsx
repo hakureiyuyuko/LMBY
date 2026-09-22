@@ -86,6 +86,10 @@ export function ChannelManager({ onChanged }: { onChanged?: () => void }) {
         />
         <div className="spacer" />
         <span className="faint small">{t('共 {n} 台', { n: channels?.length ?? 0 })}</span>
+        {/* 原来的「外部播放器」入口已从前台拿掉；导出 m3u 这件事本身还在，放这儿 */}
+        <a className="btn btn-sm" href={api.liveExportURL()} download>
+          {t('导出 m3u（全部频道）')}
+        </a>
       </div>
 
       {!channels && <p className="muted">{t('正在读取…')}</p>}

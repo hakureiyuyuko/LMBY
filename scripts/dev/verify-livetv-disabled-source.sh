@@ -118,5 +118,27 @@ check "看板上这个源没了" 0 \
   "$(json -b "$JAR" "$BASE/api/v1/livetv/sources" | jq -r --arg n "$TAG" '[.sources[] | select(.name == $n)] | length')"
 
 echo
+echo "== 5. hide_failed：前台不列「无效的」频道（探测过且不通）=="
+all=$(channels | jq -r '.channels | length')
+failed=$(channels | jq -r '[.channels[] | select(.probeOk == false)] | length')
+pending=$(channels | jq -r '[.channels[] | select(.probeOk == null)] | length')
+wf=$(json -b "$JAR" "$BASE/api/v1/livetv/channels?enabled=false&hide_failed=1")
+wf_n=$(jq -r '.channels | length' <<<"$wf")
+wf_failed=$(jq -r '[.channels[] | select(.probeOk == false)] | length' <<<"$wf")
+wf_pending=$(jq -r '[.channels[] | select(.probeOk == null)] | length' <<<"$wf")
+note "全量 $all 台（其中失效 $failed、没探过 $pending）；hide_failed 后 $wf_n 台"
+check "hide_failed 后列表里没有失效频道" 0 "$wf_failed"
+check "条数正好少了失效那些" "$((all - failed))" "$wf_n"
+check "头部统计与列出一致（hide_failed）" "$(jq -r '.total' <<<"$wf")" "$wf_n"
+check "没探过的没被一起筛掉" "$pending" "$wf_pending"
+
+if [[ -r "$PGPASS_FILE" ]]; then
+  ap=$(cat "$PGPASS_FILE")
+  real_failed=$(PGPASSWORD=$ap psql -h 127.0.0.1 -U lmby -d lmby -tAc \
+    "select count(*) from tv_channels c where c.probe_ok is false")
+  check "库里的失效频道与接口算出的一致" "$real_failed" "$failed"
+fi
+
+echo
 echo "================ 结果：$pass 通过 / $fail 失败 ================"
 [[ "$fail" -eq 0 ]]

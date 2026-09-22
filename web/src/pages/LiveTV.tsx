@@ -47,8 +47,12 @@ export function LiveTV() {
 
   const load = useCallback(async () => {
     try {
-      // 只取「能看的」：停用的频道、以及**停用源带来的频道**都不出现在前台
-      const data = await api.liveChannels({ enabled: true });
+      // 前台只列「能用能看的」：
+      //   enabled=1   → 停用的频道不进前台；
+      //   hide_failed → 探测过且不通的（无效的）也不进前台。
+      // （停用源带来的频道由后端一并排除；没探过的照旧显示，
+      //   刚导入一份播放列表还没探测时前台不该是空白）
+      const data = await api.liveChannels({ enabled: true, hideFailed: true });
       setChannels(data.channels);
       setTotal(data.total);
       setError('');
@@ -191,25 +195,6 @@ export function LiveTV() {
     }
   }
 
-  async function copyURL(ch: TVChannel) {
-    try {
-      await navigator.clipboard.writeText(ch.url);
-      setNotice(t('已复制「{name}」的地址', { name: ch.name }));
-    } catch {
-      setNotice(t('「{name}」的地址：{url}', { name: ch.name, url: ch.url }));
-    }
-  }
-
-  async function share(ch: TVChannel) {
-    setError('');
-    try {
-      const r = await api.shareLiveChannel(ch.id);
-      setNotice(t('外链（24 小时有效，无需登录）：{url}', { url: r.url }));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : t('生成外链失败'));
-    }
-  }
-
   const shown = channels?.length ?? 0;
 
   return (
@@ -293,13 +278,6 @@ export function LiveTV() {
                             />
                           ) : null}
                           <span className="tv-ch-name">{ch.name}</span>
-                          {ch.probeOk === false && (
-                            <span
-                              className="tv-dot-bad"
-                              title={ch.probe || t('上次探测不通')}
-                              aria-label={t('失效')}
-                            />
-                          )}
                           <span className="tv-ch-kind">{ch.kind.toUpperCase()}</span>
                         </button>
                         <button
@@ -318,36 +296,6 @@ export function LiveTV() {
             })}
           </div>
 
-          {/* 外部播放器：给电视盒子 / VLC 用的那几个地址，收在底部免得占地方 */}
-          <details className="tv-ext">
-            <summary>{t('外部播放器（VLC / Kodi / 电视盒子）')}</summary>
-            <p className="small">
-              <a href={api.liveExportURL()} download>
-                {t('导出 m3u（全部频道）')}
-              </a>
-            </p>
-            {playing && (
-              <p className="small" style={{ wordBreak: 'break-all' }}>
-                <span className="faint">{t('当前频道地址：')}</span>
-                <br />
-                {playing.url}
-                <br />
-                <button type="button" className="btn btn-sm" onClick={() => void copyURL(playing)}>
-                  {t('复制地址')}
-                </button>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => void share(playing)}
-                    title={t('生成 24 小时有效的免登录链接')}
-                  >
-                    {t('外链')}
-                  </button>
-                )}
-              </p>
-            )}
-          </details>
         </aside>
 
         {/* 右：播放器 + 一行控制（换台 / 断开） */}

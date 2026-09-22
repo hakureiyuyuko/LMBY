@@ -445,6 +445,8 @@ export const api = {
     enabled?: boolean;
     favorites?: boolean;
     probe?: string;
+    /** 前台用：只留「能用能看的」—— 探测过且不通的频道不出现。 */
+    hideFailed?: boolean;
   } = {}) => {
     const sp = new URLSearchParams();
     if (params.q) sp.set('q', params.q);
@@ -452,6 +454,7 @@ export const api = {
     if (params.enabled) sp.set('enabled', '1');
     if (params.favorites) sp.set('favorites', '1');
     if (params.probe) sp.set('probe', params.probe);
+    if (params.hideFailed) sp.set('hide_failed', '1');
     const qs = sp.toString();
     return request<TVChannelPage>(`/api/v1/livetv/channels${qs ? `?${qs}` : ''}`);
   },
