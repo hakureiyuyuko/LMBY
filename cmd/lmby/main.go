@@ -70,6 +70,8 @@ func run(args []string) error {
 		return cmdMatch(args)
 	case "scrape":
 		return cmdScrape(args)
+	case "livetv":
+		return cmdLiveTV(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -96,6 +98,8 @@ func usage() {
                也拉进来参与打分）
   lmby scrape  enqueue|run|status|reset                             元数据刮削
                （run = 入队并就地跑完，便于验收；详见 lmby scrape）
+  lmby livetv status|refresh|probe                                 直播电视（M5）
+               （refresh 刷新订阅源、probe 探测频道通不通；详见 lmby livetv）
   lmby version                                     打印版本
   lmby help                                        打印本帮助
 
@@ -534,6 +538,10 @@ func cmdServe(args []string) error {
 		log.Info("已清理中断的扫描记录", "count", n)
 	}
 
+	// 后台任务不能挂在某次请求上（请求一返回 ctx 就取消了）——
+	// 把服务的生命周期 ctx 交给 Server，直播频道探测用它。
+	srv.SetBaseContext(ctx)
+
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),
@@ -543,6 +551,14 @@ func cmdServe(args []string) error {
 	}
 
 	go janitor(ctx, st, srv, log)
+
+	// 直播订阅源的定时刷新：只做「到点了没」的判断，间隔由每个源自己的
+	// refresh_interval_minutes 决定，所以改间隔不必重启。
+	if cfg.LiveTV.AutoRefresh {
+		go liveTVScheduler(ctx, srv, time.Duration(cfg.LiveTV.RefreshTickSeconds)*time.Second, log)
+	} else {
+		log.Info("直播源自动刷新已关闭（[livetv] auto_refresh=false），仍可在直播页手动刷新")
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -799,6 +815,37 @@ func bootstrapAdmin(ctx context.Context, st *store.Store, log *slog.Logger) erro
 	}
 	log.Info("已根据 LMBY_ADMIN_PASSWORD 创建初始管理员", "username", u.Username)
 	return nil
+}
+
+// liveTVScheduler 按各直播源自己的间隔定时刷新订阅源。
+//
+// 它只负责「该不该刷」：哪些源到点了由库里的查询算（store.ListTVSourcesDue），
+// 所以把某个源的间隔改小/改 0，下一跳就生效，不必重启。
+// 整个循环串行刷新，不并发：订阅源是外部服务，同时打几个过去不礼貌，
+// 而且单个源失败不影响其它源（失败原因逐个记在源的 last_status 里）。
+func liveTVScheduler(ctx context.Context, srv *api.Server, every time.Duration, log *slog.Logger) {
+	if every < 5*time.Second {
+		every = 5 * time.Second
+	}
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	log.Info("直播源定时刷新已启用", "checkInterval", every.String())
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			res, err := srv.RefreshLiveSources(ctx, true)
+			if err != nil {
+				log.Warn("刷新订阅源失败", "err", err)
+				continue
+			}
+			if res.Refreshed > 0 || res.Failed > 0 {
+				log.Info("已按计划刷新订阅源", "refreshed", res.Refreshed, "failed", res.Failed)
+			}
+		}
+	}
 }
 
 // janitor 周期性做后台清理：过期会话、限流计数。

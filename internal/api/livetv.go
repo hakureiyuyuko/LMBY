@@ -1,13 +1,13 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/livetv"
+	"github.com/hakureiyuyuko/lmby/internal/livetvsync"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
@@ -113,6 +113,8 @@ func (s *Server) handleListTVChannels(w http.ResponseWriter, r *http.Request) {
 		Group:         strings.TrimSpace(q.Get("group")),
 		OnlyEnabled:   q.Get("enabled") == "1" || q.Get("enabled") == "true",
 		OnlyFavorites: q.Get("favorites") == "1" || q.Get("favorites") == "true",
+		// probe=pending|ok|failed：按探测结果筛（失效源标记的入口）
+		Probe: strings.TrimSpace(q.Get("probe")),
 	}
 	channels, err := s.store.ListTVChannels(ctx, query)
 	if err != nil {
@@ -140,6 +142,32 @@ func (s *Server) handleListTVChannels(w http.ResponseWriter, r *http.Request) {
 		"total":    total,
 		"enabled":  enabled,
 	})
+}
+
+// handleGetTVChannel 取单个频道。
+//
+// 界面（改一条、看一条的探测结果）与验收脚本都要用；顺带修掉一个旧问题：
+// 验收脚本还原收藏状态时 GET 这个地址拿到的一直是 404，于是它每次都
+// 多切一次收藏 —— 一个「验收脚本把用户现场搞脏」的缺口。
+func (s *Server) handleGetTVChannel(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	a := currentAuth(r)
+	ctx, cancel := contextWithTimeout(r, 10*time.Second)
+	defer cancel()
+
+	c, err := s.store.GetTVChannel(ctx, a.User.ID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "频道不存在")
+		return
+	}
+	if err != nil {
+		s.serverError(w, "读取频道失败", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, viewTVChannel(*c))
 }
 
 // tvChannelPatchRequest 是频道手动编辑的请求体（nil = 不改）。
@@ -216,7 +244,7 @@ func (s *Server) handleToggleTVFavorite(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "favorite": fav})
 }
 
-// ---------------------------------------------------------------- 源管理
+// ---------------------------------------------------------------- 源：新建/刷新/删除
 
 // handleListTVSources 列出直播源（附带每个源当前挂着的频道数）。
 func (s *Server) handleListTVSources(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +326,7 @@ func (s *Server) handleCreateTVSource(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 先拉取/解析，成功后才建源：内容坏了就不该在源列表里留一个没频道的空壳
-	entries, err := s.resolveTVEntries(ctx, req.URL, req.Content)
+	entries, err := s.live.Resolve(ctx, req.URL, req.Content)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -316,7 +344,7 @@ func (s *Server) handleCreateTVSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.importTVEntries(ctx, src, entries)
+	res, err := s.live.Import(ctx, src, entries)
 	if err != nil {
 		// 源已经建好了（用户能看到失败原因），这里把导入失败如实回给他
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -353,11 +381,11 @@ func (s *Server) handleRefreshTVSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if src.Kind != "url" || strings.TrimSpace(src.URL) == "" {
-		writeError(w, http.StatusBadRequest, "粘贴/上传的直播源没有可重拉的地址，请重新导入")
+		writeError(w, http.StatusBadRequest, livetvsync.ErrNoSourceURL.Error())
 		return
 	}
 
-	res, err := s.importTVSource(ctx, src, "")
+	res, err := s.live.Refresh(ctx, src, "")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -452,39 +480,4 @@ func (s *Server) handleExportTVM3U(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "audio/x-mpegurl; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="lmby-livetv.m3u"`)
 	_, _ = w.Write([]byte(livetv.Render(entries)))
-}
-
-// resolveTVEntries 把请求里的内容（订阅地址或粘贴的文本）变成条目。
-//
-// 单独抽出来是为了「失败不留痕」：内容拿不到/解析不出频道时，调用方不应该
-// 已经在库里建好了一条没有频道的空源。
-func (s *Server) resolveTVEntries(ctx context.Context, url, content string) ([]livetv.Entry, error) {
-	if strings.TrimSpace(content) == "" {
-		return s.liveFetch.Fetch(ctx, url)
-	}
-	return livetv.ParseContent(content)
-}
-
-// importTVSource 拉取（或解析传入的）播放列表并导入。
-//
-// content 为空且源是 url 类型时去拉订阅地址；否则用传入的文本。
-// 无论成败都会把结果写进源的 last_status，界面上能看到「上次刷新为什么失败」。
-func (s *Server) importTVSource(ctx context.Context, src *store.TVSource, content string) (store.TVImportResult, error) {
-	entries, err := s.resolveTVEntries(ctx, src.URL, content)
-	if err != nil {
-		_ = s.store.MarkTVSourceRefreshed(ctx, src.ID, "失败："+err.Error(), 0)
-		return store.TVImportResult{}, err
-	}
-	return s.importTVEntries(ctx, src, entries)
-}
-
-// importTVEntries 把已经解析好的条目写进库里，并记录刷新状态。
-func (s *Server) importTVEntries(ctx context.Context, src *store.TVSource, entries []livetv.Entry) (store.TVImportResult, error) {
-	res, err := s.store.ImportTVChannels(ctx, src.ID, entries)
-	if err != nil {
-		_ = s.store.MarkTVSourceRefreshed(ctx, src.ID, "失败："+err.Error(), 0)
-		return res, err
-	}
-	_ = s.store.MarkTVSourceRefreshed(ctx, src.ID, "ok", res.Total)
-	return res, nil
 }

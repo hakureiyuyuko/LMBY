@@ -228,6 +228,8 @@ type TVChannelQuery struct {
 	Group         string // 分组（空 = 不过滤）
 	OnlyEnabled   bool   // 只返回启用中的频道
 	OnlyFavorites bool   // 只返回该用户收藏的频道
+	// Probe 按探测结果过滤：pending（还没探过）/ ok / failed（空 = 不过滤）。
+	Probe string
 }
 
 // ListTVChannels 按条件列出频道。
@@ -249,6 +251,14 @@ func (s *Store) ListTVChannels(ctx context.Context, q TVChannelQuery) ([]TVChann
 	}
 	if q.OnlyFavorites {
 		where = append(where, "f.user_id is not null")
+	}
+	switch strings.ToLower(strings.TrimSpace(q.Probe)) {
+	case "pending":
+		where = append(where, "c.probe_at is null")
+	case "ok":
+		where = append(where, "c.probe_ok is true")
+	case "failed":
+		where = append(where, "c.probe_ok is false")
 	}
 
 	rows, err := s.pool.Query(ctx,
@@ -361,6 +371,80 @@ func (s *Store) SetTVChannelProbe(ctx context.Context, id int64, probe string, o
 		return fmt.Errorf("保存频道探测结果失败: %w", err)
 	}
 	return nil
+}
+
+// TVChannelProbeStats 是频道的探测进度。
+//
+// **从库里现算**（而不是内存里记）：探测是长任务，界面刷新、进程重启都不该
+// 让进度归零；而「哪些频道还没探过」本来就是表里的一个条件。
+type TVChannelProbeStats struct {
+	Total   int `json:"total"`   // 启用中且有地址的频道
+	Pending int `json:"pending"` // 还没探过
+	OK      int `json:"ok"`
+	Failed  int `json:"failed"`
+}
+
+// TVChannelProbeStats 统计探测进度。
+func (s *Store) TVChannelProbeStats(ctx context.Context) (TVChannelProbeStats, error) {
+	var st TVChannelProbeStats
+	err := s.pool.QueryRow(ctx,
+		`select count(*)::int,
+		        coalesce(sum(case when probe_at is null then 1 else 0 end), 0)::int,
+		        coalesce(sum(case when probe_ok is true then 1 else 0 end), 0)::int,
+		        coalesce(sum(case when probe_ok is false then 1 else 0 end), 0)::int
+		 from tv_channels
+		 where not disabled and url <> ''`).
+		Scan(&st.Total, &st.Pending, &st.OK, &st.Failed)
+	if err != nil {
+		return st, fmt.Errorf("统计频道探测进度失败: %w", err)
+	}
+	return st, nil
+}
+
+// TVProbeFilter 选要探测哪些频道（三个条件是「与」）。
+//
+// 为什么要有选择器：一次全量探测要真连几百个源站、耗时以分钟计；
+// 而「刚导入的一组想先看看通不通」是更常见的用法（界面上的按钮就用 group）。
+type TVProbeFilter struct {
+	OnlyUnknown bool    // 只探从没探过的（probe_at 为空）
+	Group       string  // 只探这个分组
+	IDs         []int64 // 只探这几条
+}
+
+// ListTVChannelsForProbe 列出要探测的频道（启用中且有地址的）。
+func (s *Store) ListTVChannelsForProbe(ctx context.Context, f TVProbeFilter) ([]TVChannel, error) {
+	// 选列要带上 favorite（固定 false）：scanTVChannel 按 16 列扫
+	q := `select ` + tvChannelColumns + `, false as favorite
+		from tv_channels c
+		where not c.disabled and c.url <> ''`
+	args := []any{}
+	if f.OnlyUnknown {
+		q += ` and c.probe_at is null`
+	}
+	if g := strings.TrimSpace(f.Group); g != "" {
+		args = append(args, g)
+		q += fmt.Sprintf(` and c.group_name = $%d`, len(args))
+	}
+	if len(f.IDs) > 0 {
+		args = append(args, f.IDs)
+		q += fmt.Sprintf(` and c.id = any($%d::bigint[])`, len(args))
+	}
+	q += ` order by c.group_name, c.sort_order, c.id`
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("查询待探测频道失败: %w", err)
+	}
+	defer rows.Close()
+	var out []TVChannel
+	for rows.Next() {
+		c, err := scanTVChannel(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, rows.Err()
 }
 
 // TVGroup 是分组及其频道数。

@@ -41,6 +41,7 @@ type Config struct {
 	TMDB     TMDBConfig     `toml:"tmdb"`
 	Images   ImagesConfig   `toml:"images"`
 	Playback PlaybackConfig `toml:"playback"`
+	LiveTV   LiveTVConfig   `toml:"livetv"`
 }
 
 // PlaybackConfig 是播放（转封装 / 会话）相关配置。
@@ -106,6 +107,34 @@ func (c *Config) StreamsDirPath() string {
 		return c.Playback.StreamsDir
 	}
 	return filepath.Join(c.DataDir, "streams")
+}
+
+// LiveTVConfig 是直播电视（M5）的运行参数。
+type LiveTVConfig struct {
+	// AutoRefresh 是否按各直播源自己的间隔（refresh_interval_minutes）定时刷新，默认 true。
+	//
+	// 关掉只影响「自动」那一路：界面上手动刷新、CLI 的 refresh 都不受影响。
+	// 单个源不想被自动刷新，把它的间隔填 0 即可。
+	AutoRefresh bool `toml:"auto_refresh"`
+
+	// RefreshTickSeconds 是调度器多久检查一次「有没有源到点了」，默认 60。
+	//
+	// 它只是检查频率，不是刷新间隔 —— 间隔由每个源自己的 refresh_interval_minutes 决定。
+	// 所以填得比最短的刷新间隔小就行（默认 1 分钟足够）。
+	RefreshTickSeconds int `toml:"refresh_tick_seconds"`
+
+	// ProbeTimeoutSeconds 是单个频道的探测超时（秒），默认 8。
+	//
+	// 这个是**实例相关的**：一次全量探测耗时基本等于
+	// 「死源数量 × 这个值 ÷ probe_concurrency」。实测可用的直播源 1~2 秒就返回流信息，
+	// 所以这个值只影响不可达的那些要等多久。
+	ProbeTimeoutSeconds int `toml:"probe_timeout_seconds"`
+
+	// ProbeConcurrency 是并发探测数，默认 4。
+	//
+	// 别开太大：探测是真连源站，并发高了可能被源站限流，而排队的那些频道
+	// 反而会因为「等太久」被算成失败。
+	ProbeConcurrency int `toml:"probe_concurrency"`
 }
 
 // ImagesConfig 是图片管线配置。
@@ -197,6 +226,12 @@ func Default() *Config {
 			TranscodeMaxHeight: 1080,
 			ThrottleSeconds:    60,
 		},
+		LiveTV: LiveTVConfig{
+			AutoRefresh:         true,
+			RefreshTickSeconds:  60,
+			ProbeTimeoutSeconds: 8,
+			ProbeConcurrency:    4,
+		},
 	}
 }
 
@@ -261,6 +296,17 @@ func applyEnv(cfg *Config) error {
 	setInt(&cfg.Playback.HLSWindowSeconds, "LMBY_PLAYBACK_HLS_WINDOW_SECONDS")
 	setInt(&cfg.Playback.MaxSessions, "LMBY_PLAYBACK_MAX_SESSIONS")
 	setInt(&cfg.Playback.IdleSeconds, "LMBY_PLAYBACK_IDLE_SECONDS")
+	setInt(&cfg.LiveTV.RefreshTickSeconds, "LMBY_LIVETV_REFRESH_TICK_SECONDS")
+	setInt(&cfg.LiveTV.ProbeTimeoutSeconds, "LMBY_LIVETV_PROBE_TIMEOUT_SECONDS")
+	setInt(&cfg.LiveTV.ProbeConcurrency, "LMBY_LIVETV_PROBE_CONCURRENCY")
+
+	if v, ok := os.LookupEnv("LMBY_LIVETV_AUTO_REFRESH"); ok && v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("LMBY_LIVETV_AUTO_REFRESH: %w", err)
+		}
+		cfg.LiveTV.AutoRefresh = b
+	}
 
 	if v, ok := os.LookupEnv("LMBY_SECURE_COOKIES"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -347,6 +393,16 @@ func (c *Config) Validate() error {
 	// 0 = 关闭节流（合法），负数与超过 1 小时的值当写错处理。
 	if c.Playback.ThrottleSeconds < 0 || c.Playback.ThrottleSeconds > 3600 {
 		c.Playback.ThrottleSeconds = 60
+	}
+	// 直播的调度/探测参数同样只「修正」不「报错」。
+	if c.LiveTV.RefreshTickSeconds < 5 || c.LiveTV.RefreshTickSeconds > 3600 {
+		c.LiveTV.RefreshTickSeconds = 60
+	}
+	if c.LiveTV.ProbeTimeoutSeconds < 2 || c.LiveTV.ProbeTimeoutSeconds > 120 {
+		c.LiveTV.ProbeTimeoutSeconds = 8
+	}
+	if c.LiveTV.ProbeConcurrency < 1 || c.LiveTV.ProbeConcurrency > 32 {
+		c.LiveTV.ProbeConcurrency = 4
 	}
 	return nil
 }

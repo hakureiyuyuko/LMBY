@@ -153,20 +153,10 @@ func liveStreamKey(channelID int64) string { return fmt.Sprintf("live:ch%d", cha
 
 // liveInputArgs 按源地址的协议给出输入参数。
 //
-// rtsp 的 `-rtsp_transport tcp` 与 `-timeout`（微秒）不是拍脑袋：单播源实测
-// UDP 会偶发丢包导致花屏，TCP 稳得多；不给 timeout 时源站抽风会让 ffmpeg 挂死。
+// 实现放在 internal/livetv，与频道探测（internal/livetvsync）共用同一份 ——
+// 两边各写一套参数，「探得通却播不了」（或反过来）就成了常态。
 func liveInputArgs(ch store.TVChannel) []string {
-	var args []string
-	switch livetv.Kind(ch.URL) {
-	case "rtsp":
-		args = append(args, "-rtsp_transport", "tcp", "-timeout", "15000000")
-	case "rtmp":
-		args = append(args, "-rtmp_live", "live")
-	}
-	if h := strings.TrimSpace(ch.Headers); h != "" {
-		args = append(args, "-headers", h)
-	}
-	return args
+	return livetv.InputArgs(ch.URL, ch.Headers)
 }
 
 // liveSpec 组装直播会话的规格：视频原样复制、音频转 AAC（IPTV 源多为 MP2，

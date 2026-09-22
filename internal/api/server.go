@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/livetv"
+	"github.com/hakureiyuyuko/lmby/internal/livetvsync"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
@@ -43,13 +45,23 @@ type Server struct {
 	subs *subtitleJobs
 	// encoders 是本机编码能力表（真跑探测过，带磁盘缓存）。
 	encoders *encoder.Store
-	// liveFetch 拉取直播订阅源（M5）。
-	liveFetch *livetv.Fetcher
+	// live 是直播电视的运行层（订阅源刷新、频道探测）；解析与落库分别在
+	// internal/livetv 与 internal/store。
+	live *livetvsync.Service
 	// liveSigner 给直播外链 token 签名（M5；实现是 secrets.Cipher）。
 	// 为空表示没装密钥（单测/无数据目录），此时外链接口回 503。
 	liveSigner livetv.Signer
 	// livePlays 是直播播放会话表（sid → 频道）。
 	livePlays *livePlayRegistry
+	// tvProbe 是「频道探测」这一次后台运行的状态。
+	//
+	// 只有 running 是内存态（防重入）；探了多少、通不通全部从库里的
+	// probe/probe_ok 现算（见 store.TVChannelProbeStats），
+	// 所以刷新页面、重启进程都不会把进度归零。
+	tvProbe tvProbeState
+
+	// baseCtx 是服务的生命周期 context（后台任务用，见 SetBaseContext）。
+	baseCtx context.Context
 }
 
 // New 构造 Server。
@@ -66,25 +78,44 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		encoders = encoder.NewStore(encoder.StoreOptions{FFmpeg: cfg.FFmpeg.Path, Log: log})
 	}
 	return &Server{
-		cfg:        cfg,
-		store:      st,
-		log:        log,
-		ffmpeg:     ff,
-		images:     img,
-		scraper:    scraper,
-		settings:   settingsSvc,
-		meta:       meta,
-		started:    time.Now(),
-		limiter:    newLoginLimiter(8, 15*time.Minute),
-		scans:      scan.NewManager(st, log),
-		streams:    streams,
-		plays:      newPlayRegistry(),
-		subs:       newSubtitleJobs(),
-		encoders:   encoders,
-		liveFetch:  livetv.NewFetcher(),
+		cfg:      cfg,
+		store:    st,
+		log:      log,
+		ffmpeg:   ff,
+		images:   img,
+		scraper:  scraper,
+		settings: settingsSvc,
+		meta:     meta,
+		started:  time.Now(),
+		limiter:  newLoginLimiter(8, 15*time.Minute),
+		scans:    scan.NewManager(st, log),
+		streams:  streams,
+		plays:    newPlayRegistry(),
+		subs:     newSubtitleJobs(),
+		encoders: encoders,
+		live: livetvsync.New(st, livetvsync.Options{
+			ProbePath:        cfg.FFmpeg.ProbePath,
+			ProbeTimeout:     time.Duration(cfg.LiveTV.ProbeTimeoutSeconds) * time.Second,
+			ProbeConcurrency: cfg.LiveTV.ProbeConcurrency,
+			Logger:           log,
+		}),
 		liveSigner: signer,
 		livePlays:  newLivePlayRegistry(),
 	}
+}
+
+// SetBaseContext 把服务的生命周期 context 交给 Server。
+//
+// 后台任务（直播频道探测）不能挂在某一次 HTTP 请求上 —— 请求一返回 ctx 就取消了，
+// 探测会刚起步就被掐掉。没设置时后台任务用 context.Background()。
+func (s *Server) SetBaseContext(ctx context.Context) { s.baseCtx = ctx }
+
+// base 返回后台任务用的 context。
+func (s *Server) base() context.Context {
+	if s.baseCtx != nil {
+		return s.baseCtx
+	}
+	return context.Background()
 }
 
 // Streams 暴露转封装管理器（供 main 在退出时停干净，不留孤儿 ffmpeg）。
@@ -205,8 +236,13 @@ func (s *Server) Handler() http.Handler {
 	// ---- 直播电视（M5）----
 	// 频道列表与播放是普通登录用户就能用；源的增删改（会把频道表整体改动的操作）限管理员。
 	mux.Handle("GET /api/v1/livetv/channels", s.requireAuth(s.handleListTVChannels))
+	mux.Handle("GET /api/v1/livetv/channels/{id}", s.requireAuth(s.handleGetTVChannel))
 	mux.Handle("PATCH /api/v1/livetv/channels/{id}", s.requireAuth(s.handleUpdateTVChannel))
 	mux.Handle("POST /api/v1/livetv/channels/{id}/favorite", s.requireAuth(s.handleToggleTVFavorite))
+	// 频道探测（失效源标记）：真连一次源站，把结果写回 probe / probe_ok / probe_at。
+	// 会真的去连几百个源站，所以只给管理员；查进度普通用户也能看。
+	mux.Handle("GET /api/v1/livetv/channels/probe", s.requireAuth(s.handleTVProbeStatus))
+	mux.Handle("POST /api/v1/livetv/channels/probe", s.requireAdmin(s.handleStartTVProbe))
 	mux.Handle("GET /api/v1/livetv/export.m3u", s.requireAuth(s.handleExportTVM3U))
 	mux.Handle("GET /api/v1/livetv/sources", s.requireAuth(s.handleListTVSources))
 	mux.Handle("POST /api/v1/livetv/sources", s.requireAdmin(s.handleCreateTVSource))
