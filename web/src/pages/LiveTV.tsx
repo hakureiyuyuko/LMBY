@@ -19,10 +19,27 @@
 import Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '../api';
-import { hasNativeHls } from '../capabilities';
+import { detectProfile, hasNativeHls } from '../capabilities';
 import { useAuth } from '../auth';
 import { useI18n } from '../i18n';
 import type { TVChannel } from '../api';
+
+/**
+ * 浏览器能解开的视频编码（只探测一次）。
+ *
+ * 服务端拿它决定「转封装够不够」：报不出来的（老浏览器 / 探测失败）就少报，
+ * 让服务端倾向转码 —— 宁可多花点 CPU，也别发一路放不了的流。
+ */
+let cachedCodecs: string[] | null = null;
+function clientCodecs(): string[] {
+  if (cachedCodecs) return cachedCodecs;
+  try {
+    cachedCodecs = detectProfile().videoCodecs;
+  } catch {
+    cachedCodecs = ['h264']; // 探测失败时保守：只声明最普遍的底线
+  }
+  return cachedCodecs;
+}
 
 export function LiveTV() {
   const { t } = useI18n();
@@ -42,6 +59,10 @@ export function LiveTV() {
   /** 当前这一路的 sid（断开时要显式告诉服务端）。 */
   const sidRef = useRef<string | null>(null);
   const [browserMs, setBrowserMs] = useState<number | null>(null);
+  /** 这一路实际用的方式（copy / transcode）：界面上标「转码」，也用于防重试死循环。 */
+  const [mode, setMode] = useState<'copy' | 'transcode'>('copy');
+  /** 已经为当前频道「转码重试」过的标记：每个频道只重试一次。 */
+  const retriedRef = useRef<number | null>(null);
   /** 收起来的分组（默认全展开：第一次进来要能一眼看到有哪些台）。 */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -98,7 +119,23 @@ export function LiveTV() {
     setPlaying(null);
     setPlayErr('');
     setStarting(false);
+    setMode('copy');
   }, []);
+
+  /**
+   * 「这一路放不出来」时的兜底：如果刚才用的是转封装、而且这个频道还没重试过，
+   * 就带 force=transcode 再来一次（服务端会转码成 H.264）。
+   *
+   * 用 ref 而不是直接闭包，是为了让 attach 里的监听器拿到最新的 play/playing。
+   * 每个频道只重试一次：真的解不开就别来回折腾用户。
+   */
+  const onPlaybackFailedRef = useRef<(() => void) | null>(null);
+  const playingRef = useRef<TVChannel | null>(null);
+  const modeRef = useRef<'copy' | 'transcode'>('copy');
+  useEffect(() => {
+    playingRef.current = playing;
+    modeRef.current = mode;
+  }, [playing, mode]);
 
   const attach = useCallback(
     (src: string) => {
@@ -113,7 +150,13 @@ export function LiveTV() {
       v.addEventListener('playing', onPlaying, { once: true });
       v.addEventListener(
         'error',
-        () => setPlayErr(t('浏览器报错：这个流它放不了（可能是编码或传输问题）')),
+        () => {
+          setPlayErr(t('浏览器报错：这个流它放不了（可能是编码或传输问题）'));
+          // 上一把是转封装、而且这个频道还没重试过 → 转码再来一次。
+          // 这一条是「源编码未知（没探测过）」时的兜底路径：服务端拿不到编码信息，
+          // 只能等浏览器真放不出来再转。
+          onPlaybackFailedRef.current?.();
+        },
         { once: true },
       );
 
@@ -134,6 +177,7 @@ export function LiveTV() {
         if (!data.fatal) return;
         setPlayErr(t('播放出错（{detail}）', { detail: data.details }));
         setStarting(false);
+        onPlaybackFailedRef.current?.();
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         void v.play().catch(() => setNotice(t('浏览器拦了自动播放，点一下播放键开始')));
@@ -145,7 +189,7 @@ export function LiveTV() {
   );
 
   const play = useCallback(
-    async (ch: TVChannel) => {
+    async (ch: TVChannel, force?: 'transcode' | 'copy') => {
       setNotice('');
       setPlayErr('');
       setStarting(true);
@@ -157,8 +201,15 @@ export function LiveTV() {
       }
       setPlaying(ch);
       try {
-        const s = await api.startLivePlay(ch.id);
+        // 把「我能解哪些编码」告诉服务端：它据此判断转封装够不够。
+        // 浏览器解不开源编码（HEVC / MPEG-2）时，服务端会直接转码，
+        // 免得发一路我们放不了的分片。
+        const s = await api.startLivePlay(ch.id, {
+          codecs: clientCodecs(),
+          force,
+        });
         sidRef.current = s.sid;
+        setMode(s.mode === 'transcode' ? 'transcode' : 'copy');
         attach(s.playlistUrl);
       } catch (e) {
         setPlayErr(e instanceof ApiError ? e.message : t('起播失败'));
@@ -167,6 +218,19 @@ export function LiveTV() {
     },
     [attach, t],
   );
+
+  // 钩子本体：转封装放过、这个频道还没重试过 → 转码再来一次
+  useEffect(() => {
+    onPlaybackFailedRef.current = () => {
+      const ch = playingRef.current;
+      if (!ch) return;
+      if (modeRef.current !== 'copy') return; // 已经转过了，再转没意义
+      if (retriedRef.current === ch.id) return; // 每个频道只重试一次
+      retriedRef.current = ch.id;
+      setNotice(t('这个流浏览器解不开，已自动改成转码重试…'));
+      void play(ch, 'transcode');
+    };
+  }, [play, t]);
 
   /** 上一个 / 下一个：就在换台栏这一串里走（到头绕回去）。 */
   const step = useCallback(
@@ -324,6 +388,12 @@ export function LiveTV() {
                   {playing.group || t('未分组')} · {playing.kind.toUpperCase()}
                   {playing.hasHeaders ? t(' · 带请求头') : ''}
                 </span>
+                {/* 转码中要给用户一个解释：为什么这次 CPU 转起来了、画质可能不如原画 */}
+                {mode === 'transcode' && (
+                  <span className="badge" title={t('源编码浏览器解不开，正在实时转码（H.264）')}>
+                    {t('转码中')}
+                  </span>
+                )}
               </>
             ) : (
               <span className="faint">{t('未在播放')}</span>

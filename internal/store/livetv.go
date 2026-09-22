@@ -207,19 +207,25 @@ type TVChannel struct {
 	SortOrder int
 	Disabled  bool
 	// Probe 是最近一次探测的摘要；ProbeOK == nil 表示还没探过。
-	Probe     string
-	ProbeOK   *bool
-	ProbeAt   *time.Time
-	Favorite  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Probe    string
+	ProbeOK  *bool
+	ProbeAt  *time.Time
+	Favorite bool
+
+	// VideoCodec/VideoHeight 是探测时顺手记下的源视频信息（可能为空/0）：
+	// 起播靠它判断「转封装够不够」—— 浏览器解不开的编码（HEVC / MPEG-2）直接转码。
+	VideoCodec  string
+	VideoHeight int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Kind 返回源地址的协议类型。
 func (c TVChannel) Kind() string { return livetv.Kind(c.URL) }
 
 const tvChannelColumns = `c.id, c.source_id, c.name, c.url, c.group_name, c.logo, c.tvg_id, c.headers,
-	c.sort_order, c.disabled, c.probe, c.probe_ok, c.probe_at, c.created_at, c.updated_at`
+	c.sort_order, c.disabled, c.probe, c.probe_ok, c.probe_at, c.created_at, c.updated_at,
+	coalesce(c.video_codec, ''), c.video_height`
 
 // TVChannelQuery 是频道列表的筛选条件。
 type TVChannelQuery struct {
@@ -305,7 +311,7 @@ func scanTVChannel(row pgx.Row) (*TVChannel, error) {
 	var c TVChannel
 	if err := row.Scan(&c.ID, &c.SourceID, &c.Name, &c.URL, &c.Group, &c.Logo, &c.TvgID, &c.Headers,
 		&c.SortOrder, &c.Disabled, &c.Probe, &c.ProbeOK, &c.ProbeAt,
-		&c.CreatedAt, &c.UpdatedAt, &c.Favorite); err != nil {
+		&c.CreatedAt, &c.UpdatedAt, &c.VideoCodec, &c.VideoHeight, &c.Favorite); err != nil {
 		return nil, err
 	}
 	return &c, nil
@@ -380,10 +386,14 @@ func (s *Store) UpdateTVChannel(ctx context.Context, id int64, p TVChannelPatch)
 }
 
 // SetTVChannelProbe 保存探测结果（ok=false 即「失效源标记」）。
-func (s *Store) SetTVChannelProbe(ctx context.Context, id int64, probe string, ok bool) error {
+//
+// 顺带记下源视频编码/高度（判不出来就置空/0）：起播时靠它决定
+// 「转封装就行」还是「浏览器吃不下这份源，得转码」。
+func (s *Store) SetTVChannelProbe(ctx context.Context, id int64, probe string, ok bool, videoCodec string, videoHeight int) error {
 	_, err := s.pool.Exec(ctx,
-		`update tv_channels set probe = $2, probe_ok = $3, probe_at = now(), updated_at = now()
-		 where id = $1`, id, truncate(probe, 500), ok)
+		`update tv_channels set probe = $2, probe_ok = $3, probe_at = now(), updated_at = now(),
+		 video_codec = nullif($4, ''), video_height = $5
+		 where id = $1`, id, truncate(probe, 500), ok, strings.ToLower(strings.TrimSpace(videoCodec)), videoHeight)
 	if err != nil {
 		return fmt.Errorf("保存频道探测结果失败: %w", err)
 	}

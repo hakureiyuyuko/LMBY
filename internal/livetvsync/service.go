@@ -285,7 +285,8 @@ func (s *Service) ProbeChannels(ctx context.Context, opt ProbeOptions, progress 
 				}
 				ch := channels[i]
 				res := Probe(ctx, s.probePath, ch.URL, livetv.InputArgs(ch.URL, ch.Headers), s.probeTimeout)
-				if err := s.st.SetTVChannelProbe(ctx, ch.ID, res.Summary, res.OK); err != nil {
+				// 顺带记下源视频编码/高度：起播要靠它判断「转封装够不够」
+				if err := s.st.SetTVChannelProbe(ctx, ch.ID, res.Summary, res.OK, res.VideoCodec, res.VideoHeight); err != nil {
 					log.Warn("保存频道探测结果失败", "channel", ch.ID, "name", ch.Name, "err", err)
 				}
 

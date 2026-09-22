@@ -21,7 +21,11 @@ import (
 type ProbeResult struct {
 	OK      bool
 	Summary string
-	Elapsed time.Duration
+	// VideoCodec/VideoHeight：源视频编码与高度（判不出来就为空/0）——
+	// 起播靠它决定「转封装就行」还是「浏览器吃不下，得转码」。
+	VideoCodec  string
+	VideoHeight int
+	Elapsed     time.Duration
 }
 
 // 探测时「为了认出流」最多读多少数据（与点播探测同一个量级）。
@@ -93,18 +97,39 @@ func Probe(ctx context.Context, probePath, rawurl string, inputArgs []string, ti
 		return ProbeResult{OK: false, Summary: truncateSummary(summary), Elapsed: elapsed}
 	}
 
-	summary, ok := SummarizeStreams(stdout.Bytes())
+	summary, info, ok := SummarizeStreams(stdout.Bytes())
 	if !ok {
 		// 连上了、也读到东西了，但认不出音视频流（比如地址指向的是网页）
 		return ProbeResult{OK: false, Summary: "拉到了内容但认不出音视频流", Elapsed: elapsed}
 	}
-	return ProbeResult{OK: true, Summary: truncateSummary(fmt.Sprintf("%s（%.1fs）", summary, elapsed.Seconds())), Elapsed: elapsed}
+	return ProbeResult{
+		OK:          true,
+		Summary:     truncateSummary(fmt.Sprintf("%s（%.1fs）", summary, elapsed.Seconds())),
+		VideoCodec:  info.VideoCodec,
+		VideoHeight: info.VideoHeight,
+		Elapsed:     elapsed,
+	}
 }
 
 // SummarizeStreams 把 ffprobe 的 JSON 概括成一句人话；没有可用的音视频流时 ok=false。
 //
 // 抽成纯函数是为了能离线单测（不起进程、不连网络）。
-func SummarizeStreams(data []byte) (string, bool) {
+func SummarizeStreams(data []byte) (string, StreamInfo, bool) {
+	return summarizeStreams(data)
+}
+
+// StreamInfo 是探测里顺手拿到、**后面真的要用的**结构化信息。
+//
+// 只留这两项：起播要判断「浏览器吃不吃这份源」——吃不下就直接转码。
+// 其余细节（采样率/声道/位深）对人有用，对决策没用，就别存了。
+type StreamInfo struct {
+	// VideoCodec 是 ffprobe 的 codec_name，小写原样（hevc / h264 / mpeg2video …）。
+	VideoCodec string
+	// VideoHeight 是源视频高度（0 = 不知道）：转码时决定要不要往下缩。
+	VideoHeight int
+}
+
+func summarizeStreams(data []byte) (string, StreamInfo, bool) {
 	var out struct {
 		Streams []struct {
 			CodecType  string `json:"codec_type"`
@@ -116,10 +141,11 @@ func SummarizeStreams(data []byte) (string, bool) {
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", false
+		return "", StreamInfo{}, false
 	}
 
 	var video, audio string
+	var info StreamInfo
 	for _, s := range out.Streams {
 		switch s.CodecType {
 		case "video":
@@ -128,6 +154,8 @@ func SummarizeStreams(data []byte) (string, bool) {
 				continue
 			}
 			video = codecLabel(s.CodecName)
+			info.VideoCodec = strings.ToLower(strings.TrimSpace(s.CodecName))
+			info.VideoHeight = s.Height
 			if s.Width > 0 && s.Height > 0 {
 				video += fmt.Sprintf(" %dx%d", s.Width, s.Height)
 			}
@@ -153,14 +181,14 @@ func SummarizeStreams(data []byte) (string, bool) {
 		parts = append(parts, audio)
 	}
 	if len(parts) == 0 {
-		return "", false
+		return "", StreamInfo{}, false
 	}
 	summary := strings.Join(parts, " / ")
 	if video != "" && audio == "" {
 		// 有视频没音轨的直播源是真实存在的，标出来省得用户以为音量坏了
 		summary += "（无音轨）"
 	}
-	return summary, true
+	return summary, info, true
 }
 
 // FailureSummary 把 ffprobe 的报错概括成一句人话；认不出时返回原始报错行（可能为空）。

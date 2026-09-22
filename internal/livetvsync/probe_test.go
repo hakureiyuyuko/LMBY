@@ -105,7 +105,7 @@ func TestSummarizeStreams(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := SummarizeStreams([]byte(c.in))
+			got, _, ok := SummarizeStreams([]byte(c.in))
 			if ok != c.ok {
 				t.Fatalf("ok = %v，期望 %v（summary=%q）", ok, c.ok, got)
 			}
@@ -195,5 +195,37 @@ func TestSummarizeTruncatesLongOutput(t *testing.T) {
 	got := FailureSummary(string(long))
 	if len([]rune(got)) > 301 {
 		t.Fatalf("摘要没有截断：%d 字", len([]rune(got)))
+	}
+}
+
+// 起播要靠 VideoCodec/VideoHeight 判断「转封装够不够」，所以这两个字段必须真的被解析出来。
+// 实测场景（2026-09-22）：IPTV 源里有 H.265，浏览器基本解不开 —— 有这些信息才能直接转码。
+func TestSummarizeStreamsExtractsVideoCodec(t *testing.T) {
+	const in = `{
+		"streams": [
+			{"index": 0, "codec_type": "video", "codec_name": "hevc", "width": 1920, "height": 1080},
+			{"index": 1, "codec_type": "audio", "codec_name": "aac", "channels": 2}
+		],
+		"format": {"format_name": "mpegts"}
+	}`
+	summary, info, ok := SummarizeStreams([]byte(in))
+	if !ok {
+		t.Fatalf("应当能解析：%s", summary)
+	}
+	if info.VideoCodec != "hevc" {
+		t.Fatalf("VideoCodec = %q，期望 hevc", info.VideoCodec)
+	}
+	if info.VideoHeight != 1080 {
+		t.Fatalf("VideoHeight = %d，期望 1080", info.VideoHeight)
+	}
+
+	// 判不出来时不能瞎猜：只有音频流也算「探测通」（源站能出流），
+	// 但视频编码必须留空 = 未知 —— 起播那时按转封装走，放不出来再由前端带 force 重试兜底。
+	_, info2, ok2 := SummarizeStreams([]byte(`{"streams":[{"codec_type":"audio","codec_name":"mp2"}]}`))
+	if !ok2 {
+		t.Fatalf("只有音频流也算探测通（原语义），不该判失败")
+	}
+	if info2.VideoCodec != "" || info2.VideoHeight != 0 {
+		t.Fatalf("没有视频流时不该给出编码信息：%+v", info2)
 	}
 }

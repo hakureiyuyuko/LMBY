@@ -497,9 +497,19 @@ export const api = {
   /**
    * 起播一个频道：同一频道所有观众共享一路 ffmpeg，所以这里返回的 sid
    * 只是「我这次观看」的票，不是新起的一路流。
+   *
+   * codecs：浏览器能解的编码（capabilities.ts 的 detectProfile()）。服务端拿它
+   * 判断「转封装够不够」—— HEVC / MPEG-2 这类它解不开的会直接转码。
+   * force：'transcode' 是「刚才放不出来，转码重试一次」；'copy' 是明确要求别转。
    */
-  startLivePlay: (channelId: number) =>
-    request<LivePlayback>(`/api/v1/livetv/channels/${channelId}/play`, { method: 'POST' }),
+  startLivePlay: (
+    channelId: number,
+    body: { codecs?: string[]; force?: 'transcode' | 'copy' } = {},
+  ) =>
+    request<LivePlayback>(`/api/v1/livetv/channels/${channelId}/play`, {
+      method: 'POST',
+      ...json(body),
+    }),
   stopLivePlay: (sid: string) =>
     request<{ ok: boolean; viewers: number }>(`/api/v1/live/${encodeURIComponent(sid)}/stop`, {
       method: 'POST',
@@ -1299,6 +1309,10 @@ export interface LivePlayback {
   segmentSeconds: number;
   listSize: number;
   viewers: number;
+  /** 这一路实际用的方式：copy（转封装，默认）或 transcode（转码成 H.264）。 */
+  mode?: 'copy' | 'transcode';
+  /** 源视频编码（探测记下的，空 = 未知）。 */
+  videoCodec?: string;
 }
 
 /** 正在跑的直播会话（监控用）。 */

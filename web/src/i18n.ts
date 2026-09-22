@@ -829,6 +829,11 @@ const en: Record<string, string> = {
   '还没有能看的频道。': 'No watchable channels yet.',
   '导出 m3u（全部频道）': 'Export m3u (all channels)',
   '从左边选一个频道开始看': 'Pick a channel on the left to start watching',
+  '这个流浏览器解不开，已自动改成转码重试…':
+    'This browser cannot decode the stream — retrying with transcoding…',
+  '转码中': 'Transcoding',
+  '源编码浏览器解不开，正在实时转码（H.264）':
+    'The browser cannot decode the source codec, so it is being transcoded to H.264 in real time',
   '未在播放': 'Not playing',
   '上一个': 'Previous',
   '下一个': 'Next',

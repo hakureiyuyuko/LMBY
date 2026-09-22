@@ -66,6 +66,10 @@ type livePlaySession struct {
 	sid       string
 	channelID int64
 	streamKey string
+	// mode 是这一路用的处理方式（copy / transcode）。会话中途死了要重建时，
+	// 必须用**同一个**方式：否则一个「转码」的播放会变成「转封装」，
+	// 用户看到的画面会忽然卡死（源编码他本来就没法解）。
+	mode      liveVideoMode
 	userID    int64
 	createdAt time.Time
 	lastSeen  time.Time
@@ -149,7 +153,12 @@ func newLivePlayID() string {
 // ---------------------------------------------------------------- 会话配方
 
 // liveStreamKey 是每个频道固定的 stream 会话 key：同一频道共用一路 ffmpeg。
-func liveStreamKey(channelID int64) string { return fmt.Sprintf("live:ch%d", channelID) }
+// liveStreamKey 是共享会话的键。**必须带处理方式**：同一个频道的
+// 「转封装」与「转码」是两路不同的 ffmpeg，不能互相复用
+// （典型场景：Chrome 解不开 HEVC 走转码，Safari 能解走转封装，两人看同一个台）。
+func liveStreamKey(channelID int64, mode liveVideoMode) string {
+	return fmt.Sprintf("live:ch%d:%s", channelID, mode)
+}
 
 // liveInputArgs 按源地址的协议给出输入参数。
 //
@@ -161,32 +170,36 @@ func liveInputArgs(ch store.TVChannel) []string {
 
 // liveSpec 组装直播会话的规格：视频原样复制、音频转 AAC（IPTV 源多为 MP2，
 // 浏览器放不了），滚动窗口。
-func (s *Server) liveSpec(ch store.TVChannel) stream.Spec {
+func (s *Server) liveSpec(ctx context.Context, ch store.TVChannel, mode liveVideoMode) stream.Spec {
 	return stream.Spec{
-		Key:            liveStreamKey(ch.ID),
+		// 会话键带上处理方式：同一个频道，「转封装」与「转码」是两路不同的 ffmpeg，
+		// 不能互相复用（Chrome 与 Safari 同时看一个 HEVC 台就是这种情况）。
+		Key:            liveStreamKey(ch.ID, mode),
 		Path:           ch.URL,
 		Live:           true,
 		SegmentSeconds: liveSegmentSeconds,
 		LiveListSize:   liveListSize,
-		Video: stream.VideoEncode{
-			Copy: true,
-			// 直播源参数与转码的硬件加速参数都在 -i 之前，走同一个字段
-			InputArgs: liveInputArgs(ch),
-		},
-		Audio: stream.AudioEncode{Args: []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2"}},
+		Video:          s.liveVideoEncode(ctx, &ch, mode),
+		Audio:          stream.AudioEncode{Args: []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2"}},
 	}
 }
 
 // ensureLiveSession 取（必要时拉起）某频道的直播会话。
-func (s *Server) ensureLiveSession(ctx context.Context, ch store.TVChannel) (*stream.Session, error) {
-	return s.streams.Ready(ctx, s.liveSpec(ch), liveStartTimeout)
+// mode 决定这一路是转封装还是转码（见 liveVideoModeOf）。
+func (s *Server) ensureLiveSession(ctx context.Context, ch store.TVChannel, mode liveVideoMode) (*stream.Session, error) {
+	return s.streams.Ready(ctx, s.liveSpec(ctx, ch, mode), liveStartTimeout)
 }
 
 // ---------------------------------------------------------------- 起播 / 停止
 
 // livePlayResponse 是起播接口的响应。
 type livePlayResponse struct {
-	SID         string `json:"sid"`
+	SID string `json:"sid"`
+	// Mode 是这一路实际用的方式（copy / transcode）：界面拿它显示「转码」徽标，
+	// 前端也能靠它判断「已经转过了就别再重试转码」。
+	Mode string `json:"mode"`
+	// VideoCodec 是源视频编码（探测记下的，空 = 未知）。
+	VideoCodec  string `json:"videoCodec,omitempty"`
 	ChannelID   int64  `json:"channelId"`
 	Name        string `json:"name"`
 	Kind        string `json:"kind"`
@@ -204,6 +217,17 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := currentAuth(r)
+	// 请求体是可选的（老前端不发）：codecs 是浏览器声明的可解码编码，
+	// force 是前端「上一把放不出来」后的重试开关。
+	var body struct {
+		Codecs []string `json:"codecs"`
+		Force  string   `json:"force"`
+	}
+	if r.ContentLength > 0 {
+		if !decodeJSON(w, r, &body) {
+			return
+		}
+	}
 	ctx, cancel := contextWithTimeout(r, liveStartTimeout+10*time.Second)
 	defer cancel()
 
@@ -225,8 +249,11 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 浏览器解不开源编码（HEVC / MPEG-2 …）就转码，别发一路它放不了的分片
+	mode := liveVideoModeOf(ch, body.Codecs, body.Force)
+
 	started := time.Now()
-	sess, err := s.ensureLiveSession(ctx, *ch)
+	sess, err := s.ensureLiveSession(ctx, *ch, mode)
 	startupMs := time.Since(started).Milliseconds()
 	if err != nil {
 		s.log.Warn("直播起播失败", "channel", ch.ID, "name", ch.Name, "err", err)
@@ -242,7 +269,8 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 	s.livePlays.add(&livePlaySession{
 		sid:       sid,
 		channelID: ch.ID,
-		streamKey: liveStreamKey(ch.ID),
+		streamKey: liveStreamKey(ch.ID, mode),
+		mode:      mode,
 		userID:    a.User.ID,
 		createdAt: time.Now(),
 		lastSeen:  time.Now(),
@@ -253,6 +281,8 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, livePlayResponse{
 		SID:         sid,
+		Mode:        string(mode),
+		VideoCodec:  ch.VideoCodec,
 		ChannelID:   ch.ID,
 		Name:        ch.Name,
 		Kind:        livetv.KindLabel(ch.URL),
@@ -310,7 +340,8 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 
 	sess := s.streams.Get(ps.streamKey)
 	if sess == nil || (!sess.Ready() && sess.Exited()) {
-		sess, err = s.ensureLiveSession(ctx, *ch)
+		// 按当初的**同一个处理方式**重建（键里带着 mode，别把转码会话换成转封装）
+		sess, err = s.ensureLiveSession(ctx, *ch, ps.mode)
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
 			return nil, false
@@ -507,7 +538,9 @@ func (s *Server) sharedChannel(w http.ResponseWriter, r *http.Request) (*stream.
 		writeError(w, http.StatusForbidden, "频道已停用")
 		return nil, false
 	}
-	sess, err := s.ensureLiveSession(ctx, *ch)
+	// 外链是给外部播放器（VLC/Kodi）用的，它们的解码能力比浏览器强得多：
+	// 这里不做「浏览器解不解得开」的判断，一律转封装（老行为，最省 CPU）。
+	sess, err := s.ensureLiveSession(ctx, *ch, liveModeCopy)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
 		return nil, false

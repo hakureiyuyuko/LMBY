@@ -41,24 +41,30 @@ type tvChannelView struct {
 	Probe      string `json:"probe,omitempty"`
 	ProbeOK    *bool  `json:"probeOk,omitempty"`
 	ProbeAt    string `json:"probeAt,omitempty"`
+	// VideoCodec/VideoHeight：探测记下的源视频信息（空/0 = 未知）。
+	// 界面/脚本靠它判断这一路会不会转码（浏览器解不开 HEVC 时服务端会转码）。
+	VideoCodec  string `json:"videoCodec,omitempty"`
+	VideoHeight int    `json:"videoHeight,omitempty"`
 }
 
 func viewTVChannel(c store.TVChannel) tvChannelView {
 	v := tvChannelView{
-		ID:         c.ID,
-		SourceID:   c.SourceID,
-		Name:       c.Name,
-		URL:        c.URL,
-		Kind:       livetv.KindLabel(c.URL),
-		Group:      c.Group,
-		Logo:       c.Logo,
-		TvgID:      c.TvgID,
-		HasHeaders: strings.TrimSpace(c.Headers) != "",
-		SortOrder:  c.SortOrder,
-		Disabled:   c.Disabled,
-		Favorite:   c.Favorite,
-		Probe:      c.Probe,
-		ProbeOK:    c.ProbeOK,
+		ID:          c.ID,
+		SourceID:    c.SourceID,
+		Name:        c.Name,
+		URL:         c.URL,
+		Kind:        livetv.KindLabel(c.URL),
+		Group:       c.Group,
+		Logo:        c.Logo,
+		TvgID:       c.TvgID,
+		HasHeaders:  strings.TrimSpace(c.Headers) != "",
+		SortOrder:   c.SortOrder,
+		Disabled:    c.Disabled,
+		Favorite:    c.Favorite,
+		Probe:       c.Probe,
+		ProbeOK:     c.ProbeOK,
+		VideoCodec:  c.VideoCodec,
+		VideoHeight: c.VideoHeight,
 	}
 	if c.ProbeAt != nil {
 		v.ProbeAt = c.ProbeAt.Format(time.RFC3339)
