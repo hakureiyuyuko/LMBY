@@ -354,6 +354,29 @@ async function main() {
   check(`视频真的出画面（试了 ${candidates.length} 个频道，${playedName || '都没成'}）`, true, started);
   if (started) await shot('02-livetv-playing');
 
+  // ⚠️ 切台后**必须还能接着播**：换台时如果不把上一条 hls 实例/MediaSource 拆干净，
+  // 新实例 attachMedia 会挂在一个被占住的 <video> 上，分片直接 levelLoadError ——
+  // 界面表现为「播放出错（levelLoadError）」，刷新页面才好（2026-09-22 真踩到）。
+  // 所以这里不只验「底部频道名变了」，还要验「没有报错浮层 + 视频真的在往前走」。
+  check(
+    '切台后没有「播放出错」浮层',
+    false,
+    await evaluate(`!!document.querySelector('.tv-hint-err')`),
+  );
+  const beforeT = await evaluate(`(() => { const v = document.querySelector('video'); return v ? v.currentTime : 0; })()`);
+  const advanced = await waitFor(
+    '切台后视频仍在前进',
+    async () => {
+      const v = await evaluate(
+        `(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, paused: v.paused } : null; })()`,
+      );
+      return Boolean(v) && !v.paused && v.t > beforeT;
+    },
+    12000,
+  );
+  check('切台后视频仍在前进（没卡在报错上）', true, advanced);
+  check('切台后仍然没有报错浮层', false, await evaluate(`!!document.querySelector('.tv-hint-err')`));
+
   log('\n== 6. 下一个 / 断开 ==');
   const first = await evaluate(`document.querySelector('.tv-bar strong')?.textContent?.trim()`);
   await evaluate(

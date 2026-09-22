@@ -142,6 +142,16 @@ export function LiveTV() {
       const v = videoRef.current;
       if (!v) return;
       const started = performance.now();
+
+      // ⚠️ 换台时**必须先把上一条彻底拆掉**：hls 实例 + 媒体元素上的 MediaSource。
+      // 不拆的话，新实例 attachMedia 会挂在一个已被旧 MediaSource 占住的 <video> 上，
+      // 分片加载直接报 `播放出错（levelLoadError）` —— 刷新页面（新元素）才正常。
+      // 2026-09-22 真踩到：连看两个台必现。
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      v.removeAttribute('src');
+      v.load();
+
       const onPlaying = () => {
         setBrowserMs(Math.round(performance.now() - started));
         setStarting(false);
