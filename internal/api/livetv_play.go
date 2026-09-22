@@ -267,7 +267,13 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 	startupMs := time.Since(started).Milliseconds()
 	if err != nil {
 		s.log.Warn("直播起播失败", "channel", ch.ID, "name", ch.Name, "err", err)
-		writeError(w, http.StatusBadGateway, "拉流失败："+err.Error())
+		// 起播失败可能是源站变了（302 换了调度节点、节点挂了），而前台可见性
+		// 用的是探测快照 —— 后台重探一次，让「这台还能不能看」有最新答案。
+		// 本地并发打满（ErrTooMany）不算，里面自己判。见 livetv_reprobe.go。
+		s.scheduleChannelReprobe(*ch, err)
+		// 回给人话 + 可翻译的 code（原始 err 已经进日志了）
+		code, text := livePlayFailText(err)
+		writeErrorCode(w, http.StatusBadGateway, code, text)
 		return
 	}
 
@@ -359,7 +365,8 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 		// 按当初的**同一个处理方式**重建（键里带着 mode，别把转码会话换成转封装）
 		sess, err = s.ensureLiveSession(ctx, *ch, ps.mode)
 		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
+			code, text := livePlayFailText(err)
+			writeErrorCode(w, http.StatusServiceUnavailable, code, text)
 			return nil, false
 		}
 	}

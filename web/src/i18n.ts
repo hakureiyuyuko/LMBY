@@ -495,6 +495,12 @@ const en: Record<string, string> = {
   '浏览器拦了自动播放，点一下播放键开始': 'The browser blocked autoplay — hit play to start',
   '这个浏览器既不支持原生 HLS，也不支持 MSE，放不了直播流':
     'This browser supports neither native HLS nor MSE, so live streams cannot play',
+  // 起播失败的「人话」（后端只给 code，文案在前端）——见 internal/api/livetv_play_text.go
+  '同时播放的路数已达上限，先停掉一路再试':
+    'Too many streams are playing right now — stop one and try again',
+  '源站没有及时返回画面（这个频道可能已失效，我们已经自动重新探测过）':
+    "The source did not send video in time (this channel may be offline — we re-probed it automatically)",
+  '拉流失败：{detail}': 'Stream failed: {detail}',
   ' · 浏览器起播 {ms} ms': ' · browser start {ms} ms',
   '重新载入': 'Reload',
   '停止': 'Stop',

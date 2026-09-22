@@ -31,6 +31,7 @@ import type { TVChannel } from '../api';
  * 让服务端倾向转码 —— 宁可多花点 CPU，也别发一路放不了的流。
  */
 let cachedCodecs: string[] | null = null;
+
 function clientCodecs(): string[] {
   if (cachedCodecs) return cachedCodecs;
   try {
@@ -39,6 +40,30 @@ function clientCodecs(): string[] {
     cachedCodecs = ['h264']; // 探测失败时保守：只声明最普遍的底线
   }
   return cachedCodecs;
+}
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/**
+ * 起播失败 → 给用户看的那一句话。
+ *
+ * 服务端的原始错误是写给日志的：「拉流失败：等待转封装起步超时：等待第一个分片超过 8s」
+ * 里「转封装 / 起步 / 分片」对用户全是黑话。所以带 `code` 的错误在这里翻成人话，
+ * 没带 code 的（其它接口的错误）继续用服务端文案（中文兜底）。
+ */
+function livePlayErrText(e: unknown, t: Translate): string {
+  if (!(e instanceof ApiError)) return t('起播失败');
+  switch (e.code) {
+    case 'livetv_busy':
+      return t('同时播放的路数已达上限，先停掉一路再试');
+    case 'livetv_source_timeout':
+      return t('源站没有及时返回画面（这个频道可能已失效，我们已经自动重新探测过）');
+    case 'livetv_failed':
+      // 兜底那条服务端会带原始原因，这里只掐掉重复的「拉流失败：」前缀
+      return t('拉流失败：{detail}', { detail: e.message.replace(/^拉流失败：/, '') });
+    default:
+      return e.message;
+  }
 }
 
 export function LiveTV() {
@@ -222,7 +247,7 @@ export function LiveTV() {
         setMode(s.mode === 'transcode' ? 'transcode' : 'copy');
         attach(s.playlistUrl);
       } catch (e) {
-        setPlayErr(e instanceof ApiError ? e.message : t('起播失败'));
+        setPlayErr(livePlayErrText(e, t));
         setStarting(false);
       }
     },

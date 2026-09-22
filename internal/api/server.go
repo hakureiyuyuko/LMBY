@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/config"
@@ -60,6 +61,10 @@ type Server struct {
 	// probe/probe_ok 现算（见 store.TVChannelProbeStats），
 	// 所以刷新页面、重启进程都不会把进度归零。
 	tvProbe tvProbeState
+	// liveReprobeLast 记「某频道最后一次因起播失败被重探」的时间，用来节流
+	// （观众反复点 / 多人同时点同一台，只探一次）。零值可直接用，
+	// 所以不必在 NewServer 里初始化。细节见 livetv_reprobe.go。
+	liveReprobeLast sync.Map
 
 	// baseCtx 是服务的生命周期 context（后台任务用，见 SetBaseContext）。
 	baseCtx context.Context

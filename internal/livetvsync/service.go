@@ -329,6 +329,36 @@ func (s *Service) ProbeChannels(ctx context.Context, opt ProbeOptions, progress 
 	return run, nil
 }
 
+// ProbeOne 探测**一条**频道，并把结果写回库里。
+//
+// 给「起播失败后自动重探」用：`probe_ok` / `probe_at` 是一份**快照**，而源站是外部世界
+// （RTSP 会 302 换调度节点、节点会挂）。起播失败时真探一次，前台（`hide_failed`）
+// 下一次刷新就能按最新结果决定这一台还该不该出现；探通了也顺手把快照刷新一遍。
+//
+// 与 ProbeChannels 共用同一套输入参数（`livetv.InputArgs`）和同一条底线：
+// **先确认 ffprobe 真能跑，跑不了就一条结果都不写** —— 否则「工具没了」会被写成
+// 「这个频道失效」，前台把好频道藏起来是最坏的失败模式。
+//
+// 不复用那个「单飞」状态：全量探测在跑时也该允许重探一条（两者互不妨碍）。
+func (s *Service) ProbeOne(ctx context.Context, channelID int64) (ProbeResult, error) {
+	chans, err := s.st.ListTVChannelsForProbe(ctx, store.TVProbeFilter{IDs: []int64{channelID}})
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	if len(chans) == 0 {
+		return ProbeResult{}, store.ErrNotFound
+	}
+	if err := s.CheckProbeTool(ctx); err != nil {
+		return ProbeResult{}, err
+	}
+	ch := chans[0]
+	res := Probe(ctx, s.probePath, ch.URL, livetv.InputArgs(ch.URL, ch.Headers), s.probeTimeout)
+	if err := s.st.SetTVChannelProbe(ctx, ch.ID, res.Summary, res.OK, res.VideoCodec, res.VideoHeight); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
 // CheckProbeTool 确认 ffprobe 真的能跑（起探测前调）。
 //
 // 探测的判定结果会**覆盖**用户之前看到的状态，所以「工具不可用」这种情况

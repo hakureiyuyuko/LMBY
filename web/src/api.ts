@@ -69,11 +69,18 @@ export interface ChangePasswordResult {
 /** 后端返回的结构化错误。 */
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * 服务端给的可翻译标识（`livetv_source_timeout` 这种）；没有就是 undefined。
+   *
+   * 界面拿到它自己查 i18n 词条（后端那句 `message` 是中文兜底）。
+   */
+  readonly code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -101,11 +108,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const message =
-      data && typeof data === 'object' && 'error' in data
-        ? String((data as { error: unknown }).error)
-        : `请求失败（HTTP ${res.status}）`;
-    throw new ApiError(res.status, message);
+    const obj = data && typeof data === 'object' ? (data as { error?: unknown; code?: unknown }) : null;
+    const message = obj && 'error' in obj ? String(obj.error) : `请求失败（HTTP ${res.status}）`;
+    const code = obj && typeof obj.code === 'string' ? obj.code : undefined;
+    throw new ApiError(res.status, message, code);
   }
 
   return data as T;
