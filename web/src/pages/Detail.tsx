@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
+import { t, useI18n } from '../i18n';
 import { roleLabel } from '../people';
 import type {
   ChildSummary,
@@ -27,21 +28,33 @@ import type {
  *   - **演职员如实说明来源**：本地 nfo 才有，TMDB 的 credits 还没接 ——
  *     界面上要写清楚，否则用户会以为是坏了。
  */
-const stateLabels: Record<string, string> = {
-  local: '未刮削',
-  nfo: '来自 nfo',
-  matched: '已匹配',
-  review: '待确认',
-  manual: '已人工处理',
-  failed: '没找到',
-};
-
 /** 把 ticks（100ns）换成「1 小时 23 分」。 */
 function runtimeText(ticks?: number): string {
   if (!ticks || ticks <= 0) return '';
   const min = Math.round(ticks / 600000000);
-  if (min < 60) return `${min} 分钟`;
-  return `${Math.floor(min / 60)} 小时 ${min % 60} 分`;
+  if (min < 60) return t('{n} 分钟', { n: min });
+  return t('{h} 小时 {m} 分', { h: Math.floor(min / 60), m: min % 60 });
+}
+
+/** 匹配状态 → 人话。是**函数而不是常量表**：标签要在渲染时取当前语言，
+ * 模块级常量表会在 import 时就把语言钉死（切语言后不跟着变）。 */
+function stateLabel(state: string | undefined): string {
+  switch (state) {
+    case 'local':
+      return t('未刮削');
+    case 'nfo':
+      return t('来自 nfo');
+    case 'matched':
+      return t('已匹配');
+    case 'review':
+      return t('待确认');
+    case 'manual':
+      return t('已人工处理');
+    case 'failed':
+      return t('没找到');
+    default:
+      return state ?? '';
+  }
 }
 
 /** 把 ticks 换成播放器时间轴那种「1:23:45」。 */
@@ -62,6 +75,7 @@ function sizeText(bytes?: number): string {
 }
 
 export function Detail() {
+  const { t } = useI18n();
   const params = useParams();
   const itemId = Number(params.id);
 
@@ -85,7 +99,7 @@ export function Detail() {
 
   const load = useCallback(async () => {
     if (!Number.isFinite(itemId) || itemId <= 0) {
-      setError('条目 id 非法');
+      setError(t('条目 id 非法'));
       return;
     }
     setError('');
@@ -99,7 +113,7 @@ export function Detail() {
       api.itemProgress(itemId).catch(() => null),
     ]);
     if (!d) {
-      setError('读不到这个条目（可能已被删除，或者链接不对）');
+      setError(t('读不到这个条目（可能已被删除，或者链接不对）'));
       return;
     }
     setDetail(d);
@@ -164,10 +178,10 @@ export function Detail() {
     async (listId: number, name: string) => {
       try {
         const res = await api.addToList(listId, [itemId]);
-        setListMsg(res.added > 0 ? `已加入「${name}」` : `「${name}」里本来就有这个条目`);
+        setListMsg(res.added > 0 ? t('已加入「{name}」', { name }) : t('「{name}」里本来就有这个条目', { name }));
         await loadLists();
       } catch (e) {
-        setListMsg(e instanceof ApiError ? e.message : '加入列表失败');
+        setListMsg(e instanceof ApiError ? e.message : t('加入列表失败'));
       }
     },
     [itemId, loadLists],
@@ -184,7 +198,7 @@ export function Detail() {
         setNewListName('');
         await addTo(created.playlist.id, created.playlist.name);
       } catch (e2) {
-        setListMsg(e2 instanceof ApiError ? e2.message : '新建列表失败');
+        setListMsg(e2 instanceof ApiError ? e2.message : t('新建列表失败'));
       }
     },
     [newListName, addTo],
@@ -212,15 +226,15 @@ export function Detail() {
   if (error && !detail) {
     return (
       <div className="card">
-        <h2>读不到这个条目</h2>
+        <h2>{t('读不到这个条目')}</h2>
         <div className="alert alert-error">{error}</div>
         <Link className="btn" to="/posters">
-          回海报墙
+          {t('回海报墙')}
         </Link>
       </div>
     );
   }
-  if (!detail) return <p className="muted">正在读取…</p>;
+  if (!detail) return <p className="muted">{t('正在读取…')}</p>;
 
   const it = detail.item;
   const isSeries = it.kind === 'series';
@@ -269,21 +283,21 @@ export function Detail() {
             }}
           />
           <div className="detail-body">
-            <h2>{it.title || '（无标题）'}</h2>
+            <h2>{it.title || t('（无标题）')}</h2>
             <p className="muted small">
               {[
-                isSeries ? '剧集' : isSeason ? '季' : isEpisode ? '集' : '电影',
+                isSeries ? t('剧集') : isSeason ? t('季') : isEpisode ? t('集') : t('电影'),
                 it.year ? String(it.year) : '',
                 runtimeText(it.runtimeTicks),
                 it.communityRating ? `★ ${it.communityRating.toFixed(1)}` : '',
                 it.officialRating,
-                isSeries && episodeTotal > 0 ? `${seasons.length} 季 / ${episodeTotal} 集` : '',
+                isSeries && episodeTotal > 0 ? t('{s} 季 / {e} 集', { s: seasons.length, e: episodeTotal }) : '',
               ]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
             {it.originalTitle && it.originalTitle !== it.title && (
-              <p className="faint small">原名 {it.originalTitle}</p>
+              <p className="faint small">{t('原名')} {it.originalTitle}</p>
             )}
             {it.tagline && <p className="detail-tagline">{it.tagline}</p>}
             {(it.genres ?? []).length > 0 && (
@@ -296,27 +310,27 @@ export function Detail() {
               </p>
             )}
             {(it.studios?.length ?? 0) > 0 && (
-              <p className="faint small">制片 {(it.studios ?? []).join('、')}</p>
+              <p className="faint small">{t('制片')} {(it.studios ?? []).join('、')}</p>
             )}
             {it.overview && <p className="detail-overview">{it.overview}</p>}
 
             {watched && (
               <p className="small muted">
-                已看 {clockText(progress?.positionTicks)}
+                {t('已看')} {clockText(progress?.positionTicks)}
                 {percent > 0 ? `（${percent}%）` : ''}
               </p>
             )}
-            {progress?.played && <p className="small">已看完</p>}
+            {progress?.played && <p className="small">{t('已看完')}</p>}
 
             <div className="row" style={{ marginTop: 10 }}>
               {!isSeries && !isSeason && (
                 <Link className="btn btn-primary" to={playURL}>
-                  {watched ? '继续播放' : '播放'}
+                  {watched ? t('继续播放') : t('播放')}
                 </Link>
               )}
               {watched && !isSeries && !isSeason && (
                 <Link className="btn" to={`/play/${it.id}?restart=1`}>
-                  从头播放
+                  {t('从头播放')}
                 </Link>
               )}
               <button
@@ -326,14 +340,14 @@ export function Detail() {
                 data-favorite={fav?.favorite ? 'on' : 'off'}
                 onClick={() => void toggleFavorite()}
               >
-                ★ {fav?.favorite ? '已收藏' : '收藏'}
+                ★ {fav?.favorite ? t('已收藏') : t('收藏')}
               </button>
               {(fav?.count ?? 0) > 0 && (
-                <span className="faint small">{fav?.count} 人收藏</span>
+                <span className="faint small">{t('{n} 人收藏', { n: fav?.count ?? 0 })}</span>
               )}
               {versions.length > 1 && (
                 <label className="field-inline">
-                  <span>版本</span>
+                  <span>{t('版本')}</span>
                   <select value={version ?? ''} onChange={(e) => setVersion(Number(e.target.value))}>
                     {versions.map((f) => (
                       <option key={f.fileId} value={f.fileId}>
@@ -350,10 +364,10 @@ export function Detail() {
                 </label>
               )}
               <Link className="btn" to={`/items/${it.id}`}>
-                编辑元数据
+                {t('编辑元数据')}
               </Link>
               <Link className="btn btn-ghost" to={`/library/${it.libraryId}`}>
-                回海报墙
+                {t('回海报墙')}
               </Link>
               <button
                 type="button"
@@ -362,7 +376,7 @@ export function Detail() {
                 aria-expanded={listPanel}
                 onClick={() => void openListPanel()}
               >
-                ＋ 加入列表
+                ＋ {t('加入列表')}
               </button>
             </div>
 
@@ -370,9 +384,9 @@ export function Detail() {
             {listPanel && (
               <div className="list-picker" data-list-picker>
                 {listMsg && <p className="small">{listMsg}</p>}
-                {lists === null && <p className="muted small">正在读取列表…</p>}
+                {lists === null && <p className="muted small">{t('正在读取列表…')}</p>}
                 {lists !== null && lists.length === 0 && (
-                  <p className="muted small">还没有列表，在下面新建一个。</p>
+                  <p className="muted small">{t('还没有列表，在下面新建一个。')}</p>
                 )}
                 {lists !== null && lists.length > 0 && (
                   <ul className="list-picker-items">
@@ -384,10 +398,10 @@ export function Detail() {
                           data-add-to={p.id}
                           onClick={() => void addTo(p.id, p.name)}
                         >
-                          加入「{p.name}」
+                          {t('加入「{name}」', { name: p.name })}
                         </button>
                         <span className="faint small">
-                          {p.kind === 'collection' ? '合集' : '列表'} · {p.itemCount} 个条目
+                          {p.kind === 'collection' ? t('合集') : t('列表')} · {t('{n} 个条目', { n: p.itemCount })}
                         </span>
                       </li>
                     ))}
@@ -401,19 +415,19 @@ export function Detail() {
                   <input
                     value={newListName}
                     onChange={(e) => setNewListName(e.target.value)}
-                    placeholder="新建列表并加入"
-                    aria-label="新建列表名"
+                    placeholder={t('新建列表并加入')}
+                    aria-label={t('新建列表名')}
                   />
                   <button type="submit" className="btn btn-sm" disabled={!newListName.trim()}>
-                    新建并加入
+                    {t('新建并加入')}
                   </button>
                 </form>
               </div>
             )}
             <p className="faint small" style={{ marginTop: 8 }}>
-              状态 {stateLabels[it.matchState ?? ''] ?? it.matchState}
-              {it.metadataSource ? ` · 元数据来源 ${it.metadataSource}` : ''}
-              {chosen ? ` · 文件 ${chosen.containerKind.toUpperCase()} ${sizeText(chosen.sizeBytes)}` : ''}
+              {t('状态')} {stateLabel(it.matchState)}
+              {it.metadataSource ? ` · ${t('元数据来源 {src}', { src: it.metadataSource })}` : ''}
+              {chosen ? ` · ${t('文件')} ${chosen.containerKind.toUpperCase()} ${sizeText(chosen.sizeBytes)}` : ''}
             </p>
           </div>
         </div>
@@ -423,7 +437,7 @@ export function Detail() {
       {seasons.length > 0 && (
         <div className="card">
           <div className="row">
-            <h2 style={{ margin: 0 }}>季</h2>
+            <h2 style={{ margin: 0 }}>{t('季')}</h2>
             <div className="tabs" style={{ marginBottom: 0, marginLeft: 12 }}>
               {seasons.map((s) => (
                 <button
@@ -432,8 +446,8 @@ export function Detail() {
                   className={season === s.id ? 'tab active' : 'tab'}
                   onClick={() => setSeason(s.id)}
                 >
-                  第 {s.seasonNumber ?? '?'} 季
-                  <span className="faint"> · {children?.counts[String(s.id)] ?? 0} 集</span>
+                  {t('第 {n} 季', { n: s.seasonNumber ?? '?' })}
+                  <span className="faint"> · {t('{n} 集', { n: children?.counts[String(s.id)] ?? 0 })}</span>
                 </button>
               ))}
             </div>
@@ -442,12 +456,12 @@ export function Detail() {
       )}
       {loadingEpisodes && (
         <div className="card">
-          <p className="muted">正在读取集列表…</p>
+          <p className="muted">{t('正在读取集列表…')}</p>
         </div>
       )}
       {episodeItems.length > 0 && (
         <div className="card">
-          <h2>集（{episodeItems.length}）</h2>
+          <h2>{t('集（{n}）', { n: episodeItems.length })}</h2>
           <div className="ep-list">
             {episodeItems.map((ep) => (
               <div key={ep.id} className="ep-row">
@@ -467,7 +481,7 @@ export function Detail() {
                         S{String(ep.seasonNumber ?? 0).padStart(2, '0')}
                         E{String(ep.episodeNumber ?? 0).padStart(2, '0')}
                       </span>{' '}
-                      {ep.title || '（无标题）'}
+                      {ep.title || t('（无标题）')}
                     </div>
                     <div className="muted small">
                       {ep.year ? `${ep.year} · ` : ''}
@@ -478,10 +492,10 @@ export function Detail() {
                 </Link>
                 <div className="ep-actions">
                   <Link className="btn btn-sm btn-primary" to={`/play/${ep.id}`}>
-                    播放
+                    {t('播放')}
                   </Link>
                   <Link className="btn btn-sm btn-ghost" to={`/item/${ep.id}`}>
-                    详情
+                    {t('详情')}
                   </Link>
                 </div>
               </div>
@@ -492,7 +506,7 @@ export function Detail() {
 
       {/* 演职员 */}
       <div className="card">
-        <h2>演职员{people && people.length > 0 ? `（${people.length}）` : ''}</h2>
+        <h2>{t('演职员')}{people && people.length > 0 ? t('（{n}）', { n: people.length }) : ''}</h2>
         {people && people.length > 0 ? (
           <>
             <ul className="cast-list">
@@ -509,15 +523,11 @@ export function Detail() {
                 </li>
               ))}
             </ul>
-            <p className="faint small" style={{ marginTop: 8 }}>
-              演职员来自媒体同目录的 nfo（本地优先，不联网）。TMDB 的演职员还没接，
-              所以没有 nfo 的条目这里是空的。
+            <p className="faint small" style={{ marginTop: 8 }}>{t('演职员来自媒体同目录的 nfo（本地优先，不联网）。TMDB 的演职员还没接，所以没有 nfo 的条目这里是空的。')}
             </p>
           </>
         ) : (
-          <p className="muted small">
-            这条的同目录 nfo 里没有演职员信息。换成自带演职员的 nfo 之后，
-            在「库管理」里勾上「重读 nfo」重扫一次就会出现（不必改媒体文件）。
+          <p className="muted small">{t('这条的同目录 nfo 里没有演职员信息。换成自带演职员的 nfo 之后，在「库管理」里勾上「重读 nfo」重扫一次就会出现（不必改媒体文件）。')}
           </p>
         )}
       </div>
@@ -525,8 +535,8 @@ export function Detail() {
       {/* 相关推荐 */}
       {related.length > 0 && (
         <div className="card">
-          <h2>相关推荐</h2>
-          <p className="hint">同库里与它流派相近的（评分高的在前）—— 没配 TMDB 也算得出来。</p>
+          <h2>{t('相关推荐')}</h2>
+          <p className="hint">{t('同库里与它流派相近的（评分高的在前）—— 没配 TMDB 也算得出来。')}</p>
           <div className="poster-grid">
             {related.map((r) => (
               <Link key={r.id} className="poster-card" to={`/item/${r.id}`}>
@@ -546,7 +556,7 @@ export function Detail() {
                   />
                 </span>
                 <div className="poster-body">
-                  <div className="poster-title">{r.title || '（无标题）'}</div>
+                  <div className="poster-title">{r.title || t('（无标题）')}</div>
                   <div className="muted small">{[r.year, runtimeText(r.runtimeTicks)].filter(Boolean).join(' · ')}</div>
                 </div>
               </Link>
@@ -557,10 +567,10 @@ export function Detail() {
 
       <p className="faint small">
         <Link to={`/items/${it.id}`}>
-          条目 #{it.id}
+          {t('条目 #{id}', { id: it.id })}
         </Link>{' '}
-        · 更新于 {it.updatedAt ? new Date(it.updatedAt).toLocaleString() : '—'}
-        {it.scrapeError ? ` · 刮削留言：${it.scrapeError}` : ''}
+        · {t('更新于 {when}', { when: it.updatedAt ? new Date(it.updatedAt).toLocaleString() : '—' })}
+        {it.scrapeError ? ` · ${t('刮削留言：{msg}', { msg: it.scrapeError })}` : ''}
       </p>
     </>
   );

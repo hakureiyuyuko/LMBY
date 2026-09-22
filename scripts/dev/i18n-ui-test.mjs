@@ -320,7 +320,83 @@ async function main() {
   }
   await shot('03-posters-en');
 
-  log('\n== 5. 刷新后还记得（持久化） ==');
+  log('\n== 5. 详情页与播放器（看片这条路径） ==');
+  // 用接口拿一个条目 id（详情页要有真实样本）
+  const sample = await evaluate(`(async () => {
+    const libs = await (await fetch('/api/v1/libraries', { credentials: 'same-origin' })).json();
+    const lib = (libs.libraries || [])[0];
+    if (!lib) return null;
+    const page = await (await fetch('/api/v1/libraries/' + lib.id + '/items?kind=movie&limit=1',
+      { credentials: 'same-origin' })).json();
+    return (page.items || [])[0]?.id ?? null;
+  })()`);
+  log(`   样本条目：${sample}`);
+  if (sample) {
+    await send('Page.navigate', { url: `${BASE}/item/${sample}` });
+    await waitFor('详情页', async () =>
+      await evaluate(`!!document.querySelector('[data-favorite]')`),
+    );
+    await sleep(400);
+    // ⚠️ 不能查「整页没有中文」：标题/简介/流派/演职员都是**用户数据**，本来就是中文。
+    // 所以只查界面自己写的那些元素（动作按钮所在那一行）。
+    const detailBtns = await evaluate(`(() => {
+      const fav = document.querySelector('[data-favorite]');
+      const row = fav?.parentElement;
+      if (!row) return [];
+      return [...row.querySelectorAll('a, button')].map((e) => e.textContent.trim()).filter(Boolean);
+    })()`);
+    log(`   详情页按钮：${detailBtns.join(' / ')}`);
+    check(
+      '详情页的动作按钮都是英文',
+      false,
+      detailBtns.some((x) => /[\u4e00-\u9fff]/.test(x)),
+    );
+    check(
+      '详情页出现 Play / Favorite / Add to list',
+      true,
+      detailBtns.some((x) => /Play|Resume/.test(x)) &&
+        detailBtns.some((x) => /Favorite/.test(x)) &&
+        detailBtns.some((x) => /Add to list/.test(x)),
+    );
+    const detailText = await evaluate(bodyText);
+    check(
+      '详情页的区块标题是英文（Related / Cast）',
+      true,
+      /Related|Cast/.test(detailText) && !/相关推荐/.test(detailText),
+    );
+    await shot('04-detail-en');
+
+    await send('Page.navigate', { url: `${BASE}/play/${sample}` });
+    await waitFor('播放器', async () =>
+      await evaluate(`!!document.querySelector('.player-stage, video')`),
+    );
+    await sleep(1500);
+    const playerText = await evaluate(bodyText);
+    check(
+      '播放器顶部是英文（返回按钮）',
+      true,
+      await evaluate(`(() => {
+        const back = [...document.querySelectorAll('a, button')].find((e) => /返回|Back/.test(e.textContent || ''));
+        return !!back && /Back/.test(back.textContent);
+      })()`),
+    );
+    // 展开「为什么这么播」：只查**静态字段标签**（dt）是不是英文；
+    // 理由正文是后端给的（目前仍是中文，见 docs/notes/i18n.md 的已知缺口）。
+    await evaluate(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => /Why this stream/.test(x.textContent || ''));
+      if (b) { b.click(); return true; }
+      return false;
+    })()`);
+    await sleep(400);
+    const dts = await evaluate(
+      `[...document.querySelectorAll('dt')].map((e) => e.textContent.trim()).filter(Boolean)`,
+    );
+    log(`   理由面板字段：${dts.join(' / ')}`);
+    check('理由面板的字段标签是英文', true, dts.length > 0 && dts.every((x) => !/[\u4e00-\u9fff]/.test(x)));
+    await shot('05-player-en');
+  }
+
+  log('\n== 6. 刷新后还记得（持久化） ==');
   await send('Page.navigate', { url: `${BASE}/` });
   await waitFor('首页', async () => await evaluate(`!!document.querySelector('.nav')`));
   check('刷新后仍是英文（<html lang>）', 'en-US', await evaluate('document.documentElement.lang'));
@@ -335,7 +411,7 @@ async function main() {
     await evaluate(`localStorage.getItem('lmby.lang')`),
   );
 
-  log('\n== 6. 切回中文 ==');
+  log('\n== 7. 切回中文 ==');
   await evaluate(setSelect('.lang-select', 'zh-CN'));
   await sleep(400);
   check('<html lang> 变回中文', 'zh-CN', await evaluate('document.documentElement.lang'));

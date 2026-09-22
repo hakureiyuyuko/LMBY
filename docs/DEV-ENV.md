@@ -256,7 +256,7 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 
 # i18n 覆盖率（静态扫源码，不在容器里跑也行）：未包 t 的文案 + 用了 t 却没目录的键
 node scripts/dev/i18n-coverage.mjs            # 看现状
-node scripts/dev/i18n-coverage.mjs --max 599  # 守住预算（新增未翻译文案就报错）
+node scripts/dev/i18n-coverage.mjs --max 486  # 守住预算（新增未翻译文案就报错；随翻译推进收紧）
 
 > ⚠️ 界面测试在无头 Chrome 里会先把界面语言钉成中文（`localStorage`）：
 > i18n 按 `navigator.language` 探测，而 headless 默认 `en-US` —— 不钉住的话

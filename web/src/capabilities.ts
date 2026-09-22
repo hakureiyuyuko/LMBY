@@ -144,14 +144,16 @@ export function formatClock(sec: number): string {
 }
 
 /** 播放方式的界面标签与说明。 */
+import { t } from './i18n';
+
 export function modeLabel(mode: string): { label: string; hint: string } {
   switch (mode) {
     case 'direct':
-      return { label: '直接播放', hint: '原文件按 HTTP Range 分段送出，服务端零转码' };
+      return { label: t('直接播放'), hint: t('原文件按 HTTP Range 分段送出，服务端零转码') };
     case 'remux':
-      return { label: '转封装', hint: '视频不重新编码，只换容器（HLS 分片）' };
+      return { label: t('转封装'), hint: t('视频不重新编码，只换容器（HLS 分片）') };
     case 'transcode':
-      return { label: '需要转码', hint: '视频要重新编码，M4 才支持' };
+      return { label: t('需要转码'), hint: t('视频要重新编码（例如 10bit HEVC，或客户端选了更低的画质）') };
     default:
       return { label: mode, hint: '' };
   }
@@ -161,16 +163,16 @@ export function modeLabel(mode: string): { label: string; hint: string } {
 export function actionLabel(action: string): string {
   switch (action) {
     case 'copy':
-      return '原样复制';
+      return t('原样复制');
     case 'convert':
-      return '重新编码';
+      return t('重新编码');
     case 'transcode':
-      return '转码';
+      return t('转码');
     case 'burn':
-      return '烧录';
+      return t('烧录');
     case 'drop':
-      return '不显示';
+      return t('不显示');
     default:
-      return '不使用';
+      return t('不使用');
   }
 }

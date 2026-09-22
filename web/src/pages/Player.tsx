@@ -2,6 +2,7 @@ import Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { t, useI18n } from '../i18n';
 import type { ItemPlaylist, PlaybackState, PlaylistNeighbors } from '../api';
 import {
   actionLabel,
@@ -85,10 +86,10 @@ async function fetchSubtitleText(url: string, tries = 45): Promise<string> {
       await new Promise((res) => setTimeout(res, 1500));
       continue;
     }
-    if (!r.ok) throw new Error(`字幕取回失败：HTTP ${r.status}`);
+    if (!r.ok) throw new Error(t('字幕取回失败：HTTP {status}', { status: r.status }));
     return await r.text();
   }
-  throw new Error('字幕抽取超时');
+  throw new Error(t('字幕抽取超时'));
 }
 
 /**
@@ -182,7 +183,7 @@ function loadOctopusScript(): Promise<void> {
       s.src = '/subtitles-octopus/subtitles-octopus.js';
       s.async = true;
       s.onload = () => resolve();
-      s.onerror = () => reject(new Error('libass 渲染器加载失败'));
+      s.onerror = () => reject(new Error(t('libass 渲染器加载失败')));
       document.head.appendChild(s);
     });
   }
@@ -190,6 +191,8 @@ function loadOctopusScript(): Promise<void> {
 }
 
 export function Player() {
+  // 订阅语言：界面文案用组件内的 t（模块级 t 留给下面的辅助函数用）
+  const { t } = useI18n();
   const params = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
@@ -366,7 +369,7 @@ export function Player() {
         attach(st);
         if (st.subtitleUrl) void pollSubtitle(st.subtitleUrl);
       } catch (e) {
-        setError(messageOf(e, '开始播放失败'));
+        setError(messageOf(e, t('开始播放失败')));
         setLoading(false);
       }
     },
@@ -396,18 +399,18 @@ export function Player() {
     if (st.mode === 'direct' && st.directUrl) {
       v.src = st.directUrl;
       v.load();
-      void v.play().catch(() => setNotice('浏览器拦截了自动播放，点一下 ▶ 开始'));
+      void v.play().catch(() => setNotice(t('浏览器拦截了自动播放，点一下 ▶ 开始')));
       return;
     }
     if (!st.hlsUrl) return;
     if (hasNativeHls(v)) {
       v.src = st.hlsUrl;
       v.load();
-      void v.play().catch(() => setNotice('点一下 ▶ 开始播放'));
+      void v.play().catch(() => setNotice(t('点一下 ▶ 开始播放')));
       return;
     }
     if (!Hls.isSupported()) {
-      setError('这个浏览器既不支持原生 HLS，也不支持 MSE，无法播放转封装流');
+      setError(t('这个浏览器既不支持原生 HLS，也不支持 MSE，无法播放转封装流'));
       setLoading(false);
       return;
     }
@@ -419,13 +422,13 @@ export function Player() {
         hls.recoverMediaError();
         return;
       }
-      setError(`播放出错（${data.details}）`);
+      setError(t('播放出错（{details}）', { details: data.details }));
       void refreshState();
     });
     hls.loadSource(st.hlsUrl);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      void v.play().catch(() => setNotice('点一下 ▶ 开始播放'));
+      void v.play().catch(() => setNotice(t('点一下 ▶ 开始播放')));
     });
   }, []);
 
@@ -439,7 +442,7 @@ export function Player() {
           return;
         }
         if (res.status !== 202) {
-          setNotice('字幕提取失败，本次先不显示字幕');
+          setNotice(t('字幕提取失败，本次先不显示字幕'));
           return;
         }
       } catch {
@@ -447,7 +450,7 @@ export function Player() {
       }
       await new Promise((r) => setTimeout(r, 3000));
     }
-    setNotice('字幕还在抽取中，稍后重新打开播放器就能看到');
+    setNotice(t('字幕还在抽取中，稍后重新打开播放器就能看到'));
   }, []);
 
   /** 会话状态（ffmpeg 报错时能拿到 stderr 尾巴）。 */
@@ -512,12 +515,12 @@ export function Player() {
     const sid = sessionIdRef.current;
     const v = videoRef.current;
     if (!sid || !v) return;
-    setNotice(`续下一段（${formatClock(at)}）…`);
+    setNotice(t('续下一段（{at}）…', { at: formatClock(at) }));
     const wasPaused = v.paused;
     try {
       const st = await api.seekPlayback(sid, secondsToTicks(at));
       if (st.state === 'error' || !st.hlsUrl) {
-        setError(st.error || '续下一段失败');
+        setError(st.error || t('续下一段失败'));
         return;
       }
       baseRef.current = st.startSeconds;
@@ -530,7 +533,7 @@ export function Player() {
       // 如果只靠 10 秒一次的定期上报，这一次跳转就丢了。
       void report(true);
     } catch (e) {
-      setError(messageOf(e, '续下一段失败'));
+      setError(messageOf(e, t('续下一段失败')));
     }
   }, [report]);
 
@@ -669,7 +672,7 @@ export function Player() {
     const el = stageRef.current;
     if (!el) return;
     if (document.fullscreenElement) void document.exitFullscreen();
-    else void el.requestFullscreen().catch(() => setNotice('这个浏览器不允许全屏'));
+    else void el.requestFullscreen().catch(() => setNotice(t('这个浏览器不允许全屏')));
   }, []);
 
   useEffect(() => {
@@ -758,11 +761,11 @@ export function Player() {
             SubtitlesOctopus?: new (o: Record<string, unknown>) => OctopusInstance;
           }
         ).SubtitlesOctopus;
-        if (!Ctor) throw new Error('libass 渲染器未就绪');
+        if (!Ctor) throw new Error(t('libass 渲染器未就绪'));
         const font = await pickFallbackFont();
         if (cancelled) return;
         if (!font) {
-          setNotice('服务端没配兑底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了');
+          setNotice(t('服务端没配兜底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了'));
           return;
         }
         // 建实例之前先把可能残留的画布清掉：万一上次是被中途取消的（见下），
@@ -789,7 +792,7 @@ export function Player() {
           // 首次要等服务端把附件抽出来（要读一遍整部片子），先拿到多少就先给多少。
           fonts: attFonts,
           onError: () => {
-            if (!cancelled) setNotice('特效字幕渲染失败，本条字幕暂不显示');
+            if (!cancelled) setNotice(t('特效字幕渲染失败，本条字幕暂不显示'));
           },
         });
         // 创建是同步的，但上面几个 await 期间 effect 可能已经被取消 ——
@@ -800,7 +803,7 @@ export function Player() {
         }
         octopusRef.current = inst;
       } catch {
-        if (!cancelled) setNotice('特效字幕渲染器加载失败，本条字幕暂不显示');
+        if (!cancelled) setNotice(t('特效字幕渲染器加载失败，本条字幕暂不显示'));
       }
     })();
     // 视频尺寸会变（续段换窗口、切画质、进全屏）：octopus 只在创建时和 window resize
@@ -826,9 +829,9 @@ export function Player() {
   if (!Number.isFinite(itemId) || itemId <= 0) {
     return (
       <div className="card">
-        <h2>条目 id 非法</h2>
+        <h2>{t('条目 id 非法')}</h2>
         <Link className="btn" to="/">
-          返回概览
+          {t('返回首页')}
         </Link>
       </div>
     );
@@ -867,11 +870,11 @@ export function Player() {
     <div className="player" ref={stageRef}>
       <div className="player-topbar">
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => navigate(-1)}>
-          ← 返回
+          ← {t('返回')}
         </button>
-        <span className="player-title">{state?.title || `条目 ${itemId}`}</span>
+        <span className="player-title">{state?.title || t('条目 #{id}', { id: itemId })}</span>
         {queue && queue.index > 0 && (
-          <span className="badge" data-queue="1" title="这个条目在播放列表里的位置">
+          <span className="badge" data-queue="1" title={t('这个条目在播放列表里的位置')}>
             {queue.playlistName} {queue.index}/{queue.total}
           </span>
         )}
@@ -884,7 +887,7 @@ export function Player() {
               disabled={!queue.prevId}
               onClick={() => queue.prevId && goTo(queue.prevId)}
             >
-              ⏮ 上一项
+              ⏮ {t('上一项')}
             </button>
             <button
               type="button"
@@ -893,7 +896,7 @@ export function Player() {
               disabled={!queue.nextId}
               onClick={() => queue.nextId && goTo(queue.nextId)}
             >
-              下一项 ⏭
+              {t('下一项')} ⏭
             </button>
           </span>
         )}
@@ -904,7 +907,7 @@ export function Player() {
         )}
         <span className="spacer" />
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => setShowInfo((v) => !v)}>
-          {showInfo ? '隐藏详情' : '为什么这么播'}
+          {showInfo ? t('隐藏详情') : t('为什么这么播')}
         </button>
       </div>
 
@@ -934,28 +937,28 @@ export function Player() {
           }}
           onEnded={() => {
             void report(true);
-            setNotice('播放结束');
+            setNotice(t('播放结束'));
           }}
           onError={() => {
             if (!stateRef.current) return;
             void refreshState();
-            setError('媒体加载失败（服务端可能已回收这段流），点「重新开始」再试');
+            setError(t('媒体加载失败（服务端可能已回收这段流），点「重新开始」再试'));
             setLoading(false);
           }}
         >
           {/* ASS/SSA 由 libass 画在 canvas 上，不走原生轨道 */}
           {subtitleOn && state?.subtitleUrl && state.subtitleFormat !== 'ass' && (
-            <track kind="subtitles" src={state.subtitleUrl} srcLang="zh" label="字幕" default />
+            <track kind="subtitles" src={state.subtitleUrl} srcLang="zh" label={t('字幕')} default />
           )}
         </video>
 
-        {loading && canPlay && <div className="player-spinner">载入中…</div>}
+        {loading && canPlay && <div className="player-spinner">{t('载入中…')}</div>}
 
-        {!canPlay && !state && <div className="player-spinner">正在准备播放…</div>}
+        {!canPlay && !state && <div className="player-spinner">{t('正在准备播放…')}</div>}
 
         {!canPlay && state && (
           <div className="player-blocked">
-            <h3>这个条目现在放不了</h3>
+            <h3>{t('这个条目现在放不了')}</h3>
             {error && <div className="alert alert-error">{error}</div>}
             {state && (
               <>
@@ -964,18 +967,16 @@ export function Player() {
                     <li key={i}>{r}</li>
                   ))}
                 </ul>
-                <p className="hint">
-                  播放决策是「能直出就直出 → 不行就转封装 → 再不行才转码」。上面每一条都是
-                  服务端给出的具体原因（例如视频是 10bit HEVC，浏览器解不了，要重新编码成 h264）。
+                <p className="hint">{t('播放决策是「能直出就直出 → 不行就转封装 → 再不行才转码」。上面每一条都是服务端给出的具体原因（例如视频是 10bit HEVC，浏览器解不了，要重新编码成 h264）。')}
                 </p>
               </>
             )}
             <div className="row">
               <button type="button" className="btn" onClick={() => setSeq((v) => v + 1)}>
-                重新开始
+                {t('重新开始')}
               </button>
               <Link className="btn btn-ghost" to={`/item/${itemId}`}>
-                去条目详情
+                {t('去条目详情')}
               </Link>
             </div>
           </div>
@@ -989,33 +990,33 @@ export function Player() {
 
         {showInfo && state && (
           <div className="player-info">
-            <h4>为什么这么播</h4>
+            <h4>{t('为什么这么播')}</h4>
             <ul className="player-reasons">
               {state.reasons.map((r, i) => (
                 <li key={i}>{r}</li>
               ))}
             </ul>
             <dl className="kv">
-              <dt>播放方式</dt>
+              <dt>{t('播放方式')}</dt>
               <dd>
                 {mode?.label}（{state.mode}
                 {state.plan.segmentFormat ? ` / ${state.plan.segmentFormat}` : ''}）
               </dd>
-              <dt>视频</dt>
+              <dt>{t('视频')}</dt>
               <dd>
                 #{state.plan.video.index} {state.plan.video.codec} → {actionLabel(state.plan.video.action)}
               </dd>
-              <dt>音频</dt>
+              <dt>{t('音频')}</dt>
               <dd>
                 #{state.plan.audio.index} {state.plan.audio.codec} → {actionLabel(state.plan.audio.action)}
-                {state.plan.audio.downmix ? '（降为立体声）' : ''}
+                {state.plan.audio.downmix ? t('（降为立体声）') : ''}
               </dd>
-              <dt>字幕</dt>
+              <dt>{t('字幕')}</dt>
               <dd>
                 {state.plan.subtitle.index >= 0 ? `#${state.plan.subtitle.index} ${state.plan.subtitle.codec} → ` : ''}
                 {actionLabel(state.plan.subtitle.action)}
               </dd>
-              <dt>起播位置</dt>
+              <dt>{t('起播位置')}</dt>
               <dd>{formatClock(state.startSeconds)}</dd>
             </dl>
             {state.log && <pre className="player-log">{state.log}</pre>}
@@ -1044,7 +1045,7 @@ export function Player() {
           onKeyUp={commitSeek}
           onBlur={commitSeek}
           disabled={!canPlay}
-          aria-label="播放进度"
+          aria-label={t('播放进度')}
         />
         <label className="player-vol">
           <button
@@ -1074,7 +1075,7 @@ export function Player() {
                 setMuted(v.muted);
               }
             }}
-            aria-label="音量"
+            aria-label={t('音量')}
           />
         </label>
 
@@ -1083,9 +1084,9 @@ export function Player() {
             className="player-select"
             value={audioSel}
             onChange={(e) => setAudioSel(Number(e.target.value))}
-            aria-label="音轨"
+            aria-label={t('音轨')}
           >
-            <option value={0}>音轨：自动</option>
+            <option value={0}>{t('音轨：自动')}</option>
             {audioOptions.map((a) => (
               <option key={a.index} value={a.index}>
                 #{a.index} {a.codec} {a.channels ? `${a.channels}ch` : ''} {a.language || ''} {a.title || ''}
@@ -1099,14 +1100,14 @@ export function Player() {
             className="player-select"
             value={subSel}
             onChange={(e) => setSubSel(Number(e.target.value))}
-            aria-label="字幕"
+            aria-label={t('字幕')}
           >
-            <option value={0}>字幕：自动</option>
-            <option value={-1}>字幕：关闭</option>
+            <option value={0}>{t('字幕：自动')}</option>
+            <option value={-1}>{t('字幕：关闭')}</option>
             {subOptions.map((s) => (
               <option key={s.index} value={s.index}>
                 #{s.index} {s.codec} {s.language || ''} {s.title || ''}
-                {s.isImage ? '（图形，需烧录）' : ''}
+                {s.isImage ? t('（图形，需烧录）') : ''}
               </option>
             ))}
           </select>
@@ -1115,8 +1116,8 @@ export function Player() {
         {/* 图形字幕只能烧进画面（服务端要重编一遍）——这是有代价的选择，
             所以不在菜单里偷偷做，而是选完就把代价写出来。 */}
         {subBurn && (
-          <span className="faint" title="图形字幕是位图，只能烧进画面；服务端会重新编码一遍">
-            字幕将烧进画面（需重新编码）
+          <span className="faint" title={t('图形字幕是位图，只能烧进画面；服务端会重新编码一遍')}>
+            {t('字幕将烧进画面（需重新编码）')}
           </span>
         )}
 
@@ -1136,27 +1137,27 @@ export function Player() {
                 /* 隐私模式下写不进去，不影响播放 */
               }
             }}
-            aria-label="画质"
-            title="选低于源分辨率的档会让服务端转码输出"
+            aria-label={t('画质')}
+            title={t('选低于源分辨率的档会让服务端转码输出')}
           >
-            <option value="auto">画质：自动</option>
-            <option value="original">画质：原生（{sourceHeight}p）</option>
+            <option value="auto">{t('画质：自动')}</option>
+            <option value="original">{t('画质：原生（{h}p）', { h: sourceHeight })}</option>
             {qualityTiers.map((h) => (
               <option key={h} value={String(h)}>
-                画质：{h}p
+                {t('画质：{h}p', { h })}
               </option>
             ))}
           </select>
         )}
 
-        <button type="button" className="player-btn" onClick={toggleFullscreen} aria-label="全屏">
+        <button type="button" className="player-btn" onClick={toggleFullscreen} aria-label={t('全屏')}>
           {isFullscreen ? '⤢' : '⛶'}
         </button>
         <button
           type="button"
           className="player-btn"
           onClick={() => void start({ restart: true, position: 0, audio: audioSel, sub: subSel })}
-          title="从头播放"
+          title={t('从头播放')}
         >
           ⟲
         </button>
@@ -1165,9 +1166,9 @@ export function Player() {
 
       {canPlay && (
         <p className="faint player-hint">
-          快捷键：空格 播放/暂停 · ←/→ 快退快进 10 秒 · F 全屏 · M 静音。
+          {t('快捷键：空格 播放/暂停 · ←/→ 快退快进 10 秒 · F 全屏 · M 静音。')}
           {state?.mode === 'remux' &&
-            '（转封装模式下拖动到已生成窗口之外时，服务端会从新位置重新生成一段，需要一两秒）'}
+            t('（转封装模式下拖动到已生成窗口之外时，服务端会从新位置重新生成一段，需要一两秒）')}
         </p>
       )}
     </div>
