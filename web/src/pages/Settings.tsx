@@ -80,6 +80,12 @@ export function Settings() {
           >
             {t('直播源')}
           </NavLink>
+          <NavLink
+            to="/settings/users"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('用户')}
+          </NavLink>
         </nav>
       </div>
 
