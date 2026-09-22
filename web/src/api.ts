@@ -289,6 +289,92 @@ export const api = {
     return request<SearchPage>(`/api/v1/search?${sp.toString()}`);
   },
 
+  // ---------------------------------------------------------------- 直播电视（M5）
+  /**
+   * 频道列表。筛选全在服务端做（`probe=failed` 就是「只看失效的」）。
+   *
+   * 注意 url 是**频道自己的地址**（要复制到外部播放器用），而后端**不会**回显
+   * 自定义请求头的内容，只说 `hasHeaders`。
+   */
+  liveChannels: (params: {
+    q?: string;
+    group?: string;
+    enabled?: boolean;
+    favorites?: boolean;
+    probe?: string;
+  } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.q) sp.set('q', params.q);
+    if (params.group) sp.set('group', params.group);
+    if (params.enabled) sp.set('enabled', '1');
+    if (params.favorites) sp.set('favorites', '1');
+    if (params.probe) sp.set('probe', params.probe);
+    const qs = sp.toString();
+    return request<TVChannelPage>(`/api/v1/livetv/channels${qs ? `?${qs}` : ''}`);
+  },
+  liveChannel: (id: number) => request<TVChannel>(`/api/v1/livetv/channels/${id}`),
+  updateLiveChannel: (
+    id: number,
+    patch: { name?: string; group?: string; logo?: string; sortOrder?: number; disabled?: boolean },
+  ) => request<TVChannel>(`/api/v1/livetv/channels/${id}`, { method: 'PATCH', ...json(patch) }),
+  toggleLiveFavorite: (id: number) =>
+    request<{ ok: boolean; favorite: boolean }>(`/api/v1/livetv/channels/${id}/favorite`, {
+      method: 'POST',
+    }),
+
+  liveSources: () => request<TVSourcePage>('/api/v1/livetv/sources'),
+  createLiveSource: (body: {
+    name: string;
+    kind: 'paste' | 'file' | 'url';
+    url?: string;
+    content?: string;
+    refreshIntervalMinutes?: number;
+  }) => request<{ source: TVSource; import: TVImport; total: number }>('/api/v1/livetv/sources', {
+    method: 'POST',
+    ...json(body),
+  }),
+  updateLiveSource: (
+    id: number,
+    body: { name?: string; url?: string; enabled?: boolean; refreshIntervalMinutes?: number },
+  ) => request<TVSource>(`/api/v1/livetv/sources/${id}`, { method: 'PATCH', ...json(body) }),
+  deleteLiveSource: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/livetv/sources/${id}`, { method: 'DELETE' }),
+  refreshLiveSource: (id: number) =>
+    request<{ source: TVSource; import: TVImport; total: number; enabled: number }>(
+      `/api/v1/livetv/sources/${id}/refresh`,
+      { method: 'POST' },
+    ),
+
+  /** 导出启用的频道为 m3u（直接当 <a download> 用；要含停用的加 `?all=1`）。 */
+  liveExportURL: (all = false) => `/api/v1/livetv/export.m3u${all ? '?all=1' : ''}`,
+
+  /**
+   * 起播一个频道：同一频道所有观众共享一路 ffmpeg，所以这里返回的 sid
+   * 只是「我这次观看」的票，不是新起的一路流。
+   */
+  startLivePlay: (channelId: number) =>
+    request<LivePlayback>(`/api/v1/livetv/channels/${channelId}/play`, { method: 'POST' }),
+  stopLivePlay: (sid: string) =>
+    request<{ ok: boolean; viewers: number }>(`/api/v1/live/${encodeURIComponent(sid)}/stop`, {
+      method: 'POST',
+    }),
+  shareLiveChannel: (channelId: number, hours = 24) =>
+    request<{ path: string; url: string; expiresAt: string; channelId: number; name: string }>(
+      `/api/v1/livetv/channels/${channelId}/share`,
+      { method: 'POST', ...json({ hours }) },
+    ),
+  liveSessions: () =>
+    request<{ sessions: LiveSessionInfo[]; count: number }>('/api/v1/livetv/sessions'),
+
+  /** 频道探测进度（探了多少、通不通全部由服务端从库里现算）。 */
+  liveProbeStatus: () => request<TVProbeStatus>('/api/v1/livetv/channels/probe'),
+  /**
+   * 起一次频道探测（管理员；后台跑，立刻回 202）。
+   * 三个条件都可选，都不给就是全探启用中的频道。
+   */
+  startLiveProbe: (body: { onlyUnknown?: boolean; group?: string; channelIds?: number[] } = {}) =>
+    request<{ running: boolean }>('/api/v1/livetv/channels/probe', { method: 'POST', ...json(body) }),
+
   // ---------------------------------------------------------------- 条目详情与人工编辑
   item: (id: number) => request<ItemDetail>(`/api/v1/items/${id}`),
   updateItem: (id: number, body: { fields?: Record<string, unknown>; lockedFields?: string[] }) =>
@@ -779,7 +865,7 @@ export interface StartPlaybackBody {
   burnSubtitle?: boolean;
 }
 
-/** 条目下的文件与流（播放器的音轨/字幕选择器用）。 */
+/** 一个条目下的文件与流（播放器的音轨/字幕选择器用）。 */
 export interface PlaylistFile {
   fileId: number;
   container: string;
@@ -795,4 +881,118 @@ export interface PlaylistFile {
 export interface ItemPlaylist {
   itemId: number;
   files: PlaylistFile[];
+}
+
+// ---------------------------------------------------------------- 直播电视（M5）的类型
+
+/** 一条直播频道。`probeOk` 缺省 = 还没探过（后端三态：缺省 / true / false）。 */
+export interface TVChannel {
+  id: number;
+  sourceId?: number;
+  name: string;
+  /** 频道自己的地址：界面要能复制出去给外部播放器。 */
+  url: string;
+  kind: string;
+  group: string;
+  logo: string;
+  tvgId?: string;
+  /** 源站要求的自定义请求头（内容不回显，只说有没有）。 */
+  hasHeaders: boolean;
+  sortOrder: number;
+  disabled: boolean;
+  favorite: boolean;
+  /** 最近一次探测的摘要（人话，如 `H.264 1920x1080 / MP2 立体声 48kHz（0.3s）`）。 */
+  probe?: string;
+  probeOk?: boolean;
+  probeAt?: string;
+}
+
+export interface TVGroup {
+  name: string;
+  count: number;
+}
+
+export interface TVChannelPage {
+  channels: TVChannel[];
+  groups: TVGroup[];
+  total: number;
+  enabled: number;
+}
+
+/** 一个直播源（粘贴 / 上传文件 / 订阅 URL）。 */
+export interface TVSource {
+  id: number;
+  name: string;
+  kind: string;
+  url?: string;
+  enabled: boolean;
+  /** 0 = 不自动刷新。 */
+  refreshIntervalMinutes: number;
+  lastRefreshAt?: string;
+  lastStatus?: string;
+  lastChannelCount: number;
+  /** 当前挂在这个源下的频道数。 */
+  channelCount: number;
+}
+
+export interface TVSourcePage {
+  sources: TVSource[];
+  total: number;
+  enabled: number;
+}
+
+/** 一次导入的结果。 */
+export interface TVImport {
+  added: number;
+  updated: number;
+  kept: number;
+  removed: number;
+  total: number;
+}
+
+/** 起播响应（`playlistUrl` 就是要交给 hls.js / <video> 的地址）。 */
+export interface LivePlayback {
+  sid: string;
+  channelId: number;
+  name: string;
+  kind: string;
+  playlistUrl: string;
+  /** 服务端起播耗时（到首个分片可用），毫秒。 */
+  startupMs: number;
+  segmentSeconds: number;
+  listSize: number;
+  viewers: number;
+}
+
+/** 正在跑的直播会话（监控用）。 */
+export interface LiveSessionInfo {
+  key: string;
+  channelId: number;
+  name: string;
+  state: string;
+  viewers: number;
+  uptimeSec: number;
+  idleSec: number;
+  segments: number;
+  fps: number;
+  speed: number;
+  bitrate: string;
+  error?: string;
+}
+
+/** 探测进度：`progress` 是**这一次**的，`stats` 是库里的总账。 */
+export interface TVProbeStatus {
+  running: boolean;
+  startedAt?: string;
+  elapsedSeconds: number;
+  selection: { onlyUnknown?: boolean; group?: string; channelIds?: number[] };
+  progress: {
+    total: number;
+    done: number;
+    ok: number;
+    failed: number;
+    current?: string;
+    canceled: boolean;
+  };
+  stats: { total: number; pending: number; ok: number; failed: number };
 }

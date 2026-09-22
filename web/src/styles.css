@@ -1172,3 +1172,191 @@ th {
   max-width: 100%;
   max-height: 100%;
 }
+
+/* ---------------------------------------------------------------- 直播电视（M5）
+   直播页的频道列表与播放区。播放区刻意做得很小：直播不需要进度条/字幕/音轨选择，
+   所以直接用 <video controls> 的原生控件，这里只管把它摆成 16:9 的黑色舞台。 */
+
+.tv-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tv-toolbar .search-input {
+  max-width: 260px;
+}
+
+.tv-stage {
+  position: relative;
+  width: 100%;
+  max-width: 960px;
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tv-stage:fullscreen {
+  max-width: none;
+  border-radius: 0;
+}
+
+.tv-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+.tv-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #f2f5f9;
+  background: rgba(8, 10, 14, 0.72);
+  font-size: 14px;
+  text-align: center;
+  padding: 16px;
+}
+
+.tv-overlay-err {
+  background: rgba(84, 18, 14, 0.88);
+}
+
+.tv-player-bar {
+  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.tv-row:first-child {
+  border-top: none;
+}
+
+.tv-row:hover {
+  background: var(--bg-elev-2);
+}
+
+.tv-row-disabled .tv-name,
+.tv-row-disabled .tv-logo {
+  opacity: 0.55;
+}
+
+.tv-row-playing {
+  background: var(--bg-elev-2);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* logo 列做成固定小方块：有的源给的 logo 尺寸差几十倍，不定宽列表会参差不齐 */
+.tv-logo {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+}
+
+.tv-logo img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.tv-logo-ph {
+  font-size: 16px;
+  opacity: 0.6;
+}
+
+.tv-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0; /* flex 子项默认 min-width:auto：长频道名会把操作按钮挤出去 */
+}
+
+.tv-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-star {
+  color: var(--warn);
+}
+
+.tv-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.tv-src-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.tv-src-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.tv-src-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.tv-src-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.badge-ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.badge-bad {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}

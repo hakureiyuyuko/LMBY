@@ -25,6 +25,10 @@ export function Layout() {
           <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
             库管理
           </NavLink>
+          {/* 直播电视（M5）：普通用户也能用（频道列表 + 起播），源与探测只对管理员显示 */}
+          <NavLink to="/livetv" className={({ isActive }) => (isActive ? 'active' : '')}>
+            直播
+          </NavLink>
           <NavLink to="/match" className={({ isActive }) => (isActive ? 'active' : '')}>
             人工匹配
           </NavLink>
@@ -59,7 +63,7 @@ export function Layout() {
         <Outlet />
       </main>
 
-      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M4 播放（直出 / 转封装 / 转码）</footer>
+      <footer className="footer">LMBY {meta?.version ?? 'dev'} · M5 播放（直出 / 转封装 / 转码 / 直播）</footer>
     </div>
   );
 }
