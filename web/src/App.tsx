@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsOverview } from './pages/Settings';
+import { Settings, SettingsLiveTV, SettingsOverview } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
 
@@ -103,6 +103,7 @@ function AppRoutes() {
           <Route path="libraries" element={<Libraries />} />
           <Route path="match" element={<Match />} />
           <Route path="sessions" element={<Sessions />} />
+          <Route path="livetv" element={<SettingsLiveTV />} />
         </Route>
         {/* 旧地址重定向：老书签、浏览器历史、别人分享过的链接都还指向它们 */}
         <Route path="/libraries" element={<Navigate to="/settings/libraries" replace />} />

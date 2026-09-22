@@ -24,6 +24,8 @@ export function Libraries() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState<Record<number, ScanProgress>>({});
+  /** 正在编辑的库（一行内展开一个表单：改类型 / 改根路径）。 */
+  const [editing, setEditing] = useState<LibrarySummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -177,6 +179,13 @@ export function Libraries() {
                 <button
                   type="button"
                   className="btn btn-sm"
+                  onClick={() => setEditing(lib)}
+                >
+                  {t('编辑')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
                   title={t('网盘 / 只读挂载的库打开它：LMBY 不再写媒体目录，刮削产物落进数据目录的 overlay 层')}
                   onClick={() => void toggleReadOnly(lib)}
                 >
@@ -207,6 +216,20 @@ export function Libraries() {
               <div className="faint" style={{ marginTop: 6 }}>
                 {lib.paths.map((p2) => p2.path).join('　·　')}
               </div>
+
+              {editing?.id === lib.id && (
+                <EditLibraryForm
+                  library={lib}
+                  onCancel={() => setEditing(null)}
+                  onSaved={async (msg) => {
+                    setEditing(null);
+                    setNotice(msg);
+                    setError('');
+                    await load();
+                  }}
+                  onError={setError}
+                />
+              )}
 
               {running && (
                 <div style={{ marginTop: 8 }}>
@@ -314,6 +337,102 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
       <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>
         {busy ? t('创建中…') : t('创建媒体库')}
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- 编辑（类型 / 根路径）
+
+/**
+ * 就地编辑一个媒体库：改类型与根路径。
+ *
+ * 为什么只给这两项：库名在创建后很少变，而「扫描扫错了一类」与「换了挂载点」
+ * 才是真实需求。两者都是**策略**：改类型不影响已入库条目的 kind，
+ * 移除根路径也不删已入库的条目 —— 界面上写明了，免得用户以为是「把东西删了」。
+ */
+function EditLibraryForm({
+  library,
+  onCancel,
+  onSaved,
+  onError,
+}: {
+  library: LibrarySummary;
+  onCancel: () => void;
+  onSaved: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const { t } = useI18n();
+  const [kind, setKind] = useState(library.kind);
+  const [paths, setPaths] = useState(library.paths.map((p) => p.path).join('\n'));
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    const list = paths
+      .split('\n')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (list.length === 0) {
+      onError(t('至少需要一个根路径（想清空请删库）'));
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.updateLibrary(library.id, { kind, paths: list });
+      onSaved(t('已保存「{name}」的类型与根路径（重扫后生效）', { name: library.name }));
+    } catch (e) {
+      onError(e instanceof ApiError ? e.message : t('保存失败'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: '1px dashed var(--border)',
+      }}
+    >
+      <label className="field">
+        <span>{t('类型')}</span>
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          {libraryKindOptions().map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>{t('根路径（每行一个）')}</span>
+        <textarea
+          rows={3}
+          value={paths}
+          onChange={(e) => setPaths(e.target.value)}
+          style={{
+            width: '100%',
+            font: 'inherit',
+            fontSize: 14,
+            padding: '9px 12px',
+            borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border-strong)',
+            background: 'var(--bg)',
+            color: 'var(--fg)',
+          }}
+        />
+      </label>
+      <p className="hint">
+        {t('改类型只影响以后扫描怎么认条目（已入库的条目不变）；移除一条根路径不会删掉已入库的条目。改动要重扫一次才生效。')}
+      </p>
+      <div className="row">
+        <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void submit()}>
+          {busy ? t('保存中…') : t('保存')}
+        </button>
+        <button type="button" className="btn btn-sm" onClick={onCancel}>
+          {t('取消')}
+        </button>
+      </div>
     </div>
   );
 }

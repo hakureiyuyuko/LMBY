@@ -468,6 +468,8 @@ const en: Record<string, string> = {
     'Import a playlist and you can watch TV here. Clicking a channel starts playback in place; every viewer of a channel shares one ffmpeg process (two people watching will not pull the source twice).',
   '点频道就地起播；同一频道所有观众共享一路推流，切台不用离开页面。':
     'Clicking a channel starts playback in place; every viewer of a channel shares one stream, and switching channels never leaves the page.',
+  '去设置页的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。':
+    'Import a playlist under “Live sources” in Settings (paste, upload, or a subscription URL).',
   '去下面的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。':
     'Import a playlist under “Live sources” below (paste, upload, or a subscription URL).',
   '换个筛选条件试试。': 'Try a different filter.',
@@ -792,6 +794,31 @@ const en: Record<string, string> = {
   '初始化失败，请重试': 'Setup failed, please try again',
   '正在创建…': 'Creating…',
   '创建并进入': 'Create and continue',
+
+  // ---------------------------------------------------------------- 本轮：库编辑 / 叠加层看板 / 直播源收拢
+  '已保存「{name}」的类型与根路径（重扫后生效）':
+    'Saved the type and root paths of “{name}” (takes effect after a rescan)',
+  '至少需要一个根路径（想清空请删库）':
+    'At least one root path is required (delete the library to remove everything)',
+  '改类型只影响以后扫描怎么认条目（已入库的条目不变）；移除一条根路径不会删掉已入库的条目。改动要重扫一次才生效。':
+    'Changing the type only affects how future scans read items (already-scanned items keep their kind); removing a root path does not delete items already in the database. Both take effect after a rescan.',
+  '这里管直播源（导入 / 刷新 / 停用）与失效源探测；看频道、起播与切台在「直播」页。':
+    'This is where live sources are managed (import / refresh / disable) and dead sources are probed; watching channels and switching between them happens on the Live TV page.',
+  '要导入 / 刷新播放列表、探测失效源，去设置页的「直播源」页签。':
+    'To import or refresh a playlist or probe dead sources, open the “Live sources” tab in Settings.',
+  '只读库叠加层': 'Read-only library overlay',
+  '只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}':
+    'Scraped artifacts of read-only libraries (network drives / read-only mounts) live here: one tree per library under the data directory, never inside the media folders. Path: {root}',
+  '总计 {files} 个文件 / {size}': '{files} files / {size} in total',
+  '{files} 个文件 / {size}': '{files} files / {size}',
+  '还没有任何只读库的刮削产物。': 'No read-only library has produced any artifacts yet.',
+  '媒体库 #{id}': 'Library #{id}',
+  '清空叠加层': 'Clear overlay',
+  '清空中…': 'Clearing…',
+  '清空「{name}」的叠加层？只删数据目录里这个库的刮削产物，媒体目录与数据库一个字都不动。':
+    'Clear the overlay of “{name}”? This deletes only this library’s scraped artifacts under the data directory — media folders and the database are untouched.',
+  '已清空「{name}」的叠加层。': 'Cleared the overlay of “{name}”.',
+  '清空叠加层失败': 'Failed to clear the overlay',
 
   // ---------------------------------------------------------------- 详情页
   '未刮削': 'Not scraped',

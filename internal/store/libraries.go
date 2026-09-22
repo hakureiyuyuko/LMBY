@@ -180,6 +180,69 @@ func (s *Store) UpdateLibrary(ctx context.Context, id int64, name string) error 
 	return nil
 }
 
+// UpdateLibraryKind 改库类型（movie | tv | homevideo | mixed），不改动任何条目。
+//
+// 条目的 kind 已经定死了，所以改库类型只影响「扫描时怎么认它们」与界面展示 ——
+// 想让新规则生效要重扫（界面上写明了）。
+func (s *Store) UpdateLibraryKind(ctx context.Context, id int64, kind string) error {
+	tag, err := s.pool.Exec(ctx,
+		`update libraries set kind = $2, updated_at = now() where id = $1`, id, kind)
+	if err != nil {
+		return fmt.Errorf("更新库类型失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ReplaceLibraryPaths 把库的根路径换成给定的一份（事务里：新增的插进去、不再列的删掉）。
+//
+// ⚠️ 只是换「扫描时去哪些目录」，**已入库的条目不会被删**：
+// 移掉一条根路径，那条路径下的条目与文件记录仍然在库里（重新扫描时也不会被标成删除，
+// 因为扫描根本不会再走到那棵树）。想要彻底清掉得删库重建 —— 界面上写明了这一点。
+func (s *Store) ReplaceLibraryPaths(ctx context.Context, id int64, paths []string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("开启事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from libraries where id = $1)`, id).Scan(&exists); err != nil {
+		return fmt.Errorf("查询媒体库失败: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+
+	clean := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p = strings.TrimSpace(p); p != "" {
+			clean = append(clean, p)
+		}
+	}
+
+	// 先删掉不在新集合里的（用数组参数，避免拼 SQL）
+	if _, err := tx.Exec(ctx,
+		`delete from library_paths where library_id = $1 and not (path = any($2::text[]))`,
+		id, clean); err != nil {
+		return fmt.Errorf("移除根路径失败: %w", err)
+	}
+	for i, p := range clean {
+		if _, err := tx.Exec(ctx,
+			`insert into library_paths (library_id, path, sort_order) values ($1, $2, $3)
+			 on conflict (path) do update set library_id = excluded.library_id, sort_order = excluded.sort_order`,
+			id, p, i); err != nil {
+			return fmt.Errorf("添加根路径 %s 失败: %w", p, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `update libraries set updated_at = now() where id = $1`, id); err != nil {
+		return fmt.Errorf("更新媒体库时间失败: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
 // SetLibraryReadOnly 开关媒体库的「只读」模式。
 //
 // 同时把 library_paths.readonly 一起改掉：表上那一列是「根路径级」的事实，

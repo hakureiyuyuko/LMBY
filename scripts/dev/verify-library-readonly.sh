@@ -113,7 +113,87 @@ check "库详情里 readonly=false" false "$(json -b "$JAR" "$BASE/api/v1/librar
 check "根路径的 readonly 也回到 false" false "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.library.paths[0].readonly')"
 
 echo
-echo "== 5. 参数校验与鉴权 =="
+echo "== 5. 编辑媒体库：改类型 + 换根路径 =="
+ORIG_KIND=$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.library.kind')
+ORIG_PATHS=$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -c '[.library.paths[].path]')
+FIRST_PATH=$(jq -r '.[0]' <<<"$ORIG_PATHS")
+# 第二条用库自己的下一条根路径；没有就拿它的父目录（父目录通常也在，且不会跟第一条重叠）
+SECOND=$(jq -r '.[1] // empty' <<<"$ORIG_PATHS")
+[[ -z "$SECOND" ]] && SECOND=$(dirname "$FIRST_PATH")
+note "原类型 $ORIG_KIND，原根路径 $ORIG_PATHS"
+
+NEWKIND=mixed
+[[ "$ORIG_KIND" == "mixed" ]] && NEWKIND=homevideo
+TMPPATH=$(dirname "$FIRST_PATH")
+check "改类型 → 200" 200 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+    -H 'Content-Type: application/json' -d "$(jq -nc --arg k "$NEWKIND" '{kind:$k}')")"
+check "类型已改" "$NEWKIND" "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.library.kind')"
+
+# 换成「原来的第一条 + 第二条」：验证替换语义（不是追加）
+if [[ "$SECOND" == "$FIRST_PATH" || ! -d "$SECOND" ]]; then
+  note "没有第二条可用目录（$SECOND），跳过「两条路径」的检查"
+else
+  check "换根路径 → 200" 200 \
+    "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+      -H 'Content-Type: application/json' -d "$(jq -nc --arg a "$FIRST_PATH" --arg b "$SECOND" '{paths:[$a,$b]}')")"
+  check "根路径变成两条" 2 "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.library.paths | length')"
+  check "新路径在里面" true \
+    "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r --arg p "$SECOND" '[.library.paths[].path] | any(. == $p)')"
+fi
+# 只给一条 → 就只剩一条（PATCH 里的 paths 是「整份替换」）
+curl -s -o /dev/null -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+  -H 'Content-Type: application/json' -d "$(jq -nc --arg a "$FIRST_PATH" '{paths:[$a]}')"
+check "只给一条就只剩一条（替换不是追加）" 1 \
+  "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.library.paths | length')"
+check "已入库的条目不受影响（改策略不删数据）" "$before" \
+  "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB/items?limit=1" | jq -r '.total')"
+
+# 校验与恢复
+check "类型非法 → 400" 400 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+    -H 'Content-Type: application/json' -d '{"kind":"nope"}')"
+check "根路径写成相对路径 → 400" 400 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+    -H 'Content-Type: application/json' -d '{"paths":["相对路径/nope"]}')"
+check "根路径不存在 → 400" 400 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+    -H 'Content-Type: application/json' -d '{"paths":["/nonexistent-lmby-path"]}')"
+check "根路径给空 → 400" 400 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
+    -H 'Content-Type: application/json' -d '{"paths":[]}')"
+# 把类型与路径都改回去
+json -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg k "$ORIG_KIND" --argjson p "$ORIG_PATHS" '{kind:$k, paths:$p}')" >/dev/null
+check "已恢复原类型与原根路径" true \
+  "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r --arg k "$ORIG_KIND" --argjson p "$ORIG_PATHS" '(.library.kind == $k) and ([.library.paths[].path] == $p)')"
+
+echo
+echo "== 6. 叠加层看板与清空 =="
+# 回写只在只读库发生，后面要验「清空后再取图又会落回来」，先把开关打开
+json -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" -H 'Content-Type: application/json' -d '{"readonly":true}' >/dev/null
+check "GET /overlay 返回 total" true "$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r 'has("total")')"
+check "看板里带上库名" true \
+  "$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r --argjson id "$LIB" '[.libraries[] | select(.libraryId == $id)][0].name != null')"
+check "未登录看板 → 401" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/overlay")"
+check "未登录清空 → 401" 401 \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/v1/libraries/$LIB/overlay")"
+if [[ -n "$pick" ]]; then
+  check "清空该库叠加层 → 200" 200 \
+    "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X DELETE "$BASE/api/v1/libraries/$LIB/overlay")"
+  check "清空后该库文件数为 0" 0 \
+    "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.overlay.files')"
+  check "清空后磁盘上确实没了" 0 "$(find "$OVERLAY/$LIB" -type f 2>/dev/null | wc -l)"
+  # 再取一次图 → 应该又写回来（只读库的图会重新落地）
+  curl -s -o /dev/null -b "$JAR" "$BASE/api/v1/items/$pick/images/poster?w=300"
+  check "再取图又写回叠加层" true \
+    "$([[ "$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.overlay.files')" -gt 0 ]] && echo true || echo false)"
+else
+  note "前面没找到可回源的条目，跳过清空后的回写验证"
+fi
+
+echo
+echo "== 7. 参数校验与鉴权 =="
 check "空请求体（没有要更新的字段）→ 400" 400 \
   "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" \
     -H 'Content-Type: application/json' -d '{}')"

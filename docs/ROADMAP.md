@@ -670,12 +670,22 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
       图片写在取图的唯一漏斗 `images.Open`（`PutImageIfMissing`），
       这样「打开开关之前就缓存过的图」也会补上；元数据快照写在 `scrape.applyMeta`，
       写快照失败只记警告（不把刮削判成失败）。
-      `overlay.AssertWritable` 是唯一的写入闸门（写回媒体目录还没做，闸先立好并被单测钉住）。
-      验收：`verify-library-readonly.sh` **15/15** + `internal/overlay` 单测 7 个；
+      **写回媒体目录不做**（用户 2026-09-22 明确要求）—— overlay 就是最终落点，
+      换成设置页的叠加层看板（`GET /api/v1/overlay`）与「清空叠加层」按钮；
+      `overlay.AssertWritable` 作为以后真要做写回时的唯一闸门留着（已被单测钉住）。
+      验收：`verify-library-readonly.sh` **35/35** + `internal/overlay` 单测 9 个；
       设计与未做项见 `docs/notes/library-readonly.md`
+- [x] **媒体库可编辑（类型 / 根路径）**：`PATCH /libraries/{id}` 现同时受理
+      `name` / `kind` / `paths` / `readonly`；`paths` 是**整份替换**（事务里增删同步），
+      已入库条目不受影响（界面写明了）。非法类型 / 相对路径 / 不存在的路径 / 空数组都是 400
+- [x] **直播页瘦身 + 停用源前台不可见**：直播页只留「频道列表（换台）」与播放器，
+      源管理与失效源探测搬到**设置 → 直播源**页签；
+      **停用一个直播源，它带来的频道在前台不再出现**（`tvVisibleSourceCond`；
+      列表与头部统计（共 N 台 / 启用中 M）用同一套判据，频道自己的 `enabled` 不动）；
+      删源仍然「不删频道」—— `source_id` 是 `on delete set null`，孤儿频道照常可见。
+      验收：`verify-livetv-disabled-source.sh` **15/15**、`livetv-ui-test.mjs` **42/42**
 - [ ] 设置页：扫描计划、转码/硬件、用户与权限、日志查看
-      （库管理已随本轮进设置；「直播源」已随 M5 的直播页完成，**故意不放设置页**：
-      它与频道列表是一件事，拆到两个页面反而要来回跳）
+      （库管理与直播源已随本轮进设置；剩下的都是还没做的功能）
 - [ ] 明暗主题切换：**首屏/主页右上角常驻入口**（不藏在设置里）+ localStorage 先落盘，登录后与服务端偏好双向同步；跟随系统(`prefers-color-scheme`)作为初始默认
 - [x] **响应式（手机可用）+ i18n（zh-CN / en-US）** —— 两半都已完成：
       - **响应式**：三个断点（≤1024 / ≤768 / ≤480）；手机顶栏换两行、导航自己一行横滑；

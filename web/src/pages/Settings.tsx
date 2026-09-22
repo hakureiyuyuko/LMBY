@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { t, useI18n } from '../i18n';
+import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -18,6 +19,15 @@ import type { Health, ProviderTestResult, SettingsPayload } from '../api';
  */
 
 const languageOptions = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'];
+
+/** 字节数 → 「1.2 MB」这种人话（叠加层看板用）。 */
+function bytesText(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
 
 /** 把秒换成「3 小时 12 分」这类人话（服务状态那一栏用）。 */
 function formatUptime(sec: number): string {
@@ -63,6 +73,12 @@ export function Settings() {
           >
             {t('会话')}
           </NavLink>
+          <NavLink
+            to="/settings/livetv"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('直播源')}
+          </NavLink>
         </nav>
       </div>
 
@@ -84,7 +100,25 @@ function NotAdmin() {
   );
 }
 
-/** 设置首页（`/settings`）：TMDB 凭据 + 服务状态 + 系统信息。 */
+/** 设置页签：直播源与探测（M6 收尾从「直播」页搬过来的）。
+ *
+ * 看频道、起播与切台在「直播」页 —— 这里只管源：导入 / 刷新 / 停用与失效源探测。
+ * 两个面板的完成回调在设置页没有要刷新列表，传空函数即可。
+ */
+export function SettingsLiveTV() {
+  const { t } = useI18n();
+  return (
+    <>
+      <p className="hint">
+        {t('这里管直播源（导入 / 刷新 / 停用）与失效源探测；看频道、起播与切台在「直播」页。')}
+      </p>
+      <LiveSourcePanel onImported={() => {}} />
+      <LiveProbePanel onFinished={() => {}} />
+    </>
+  );
+}
+
+/** 设置首页（`/settings`）：TMDB 凭据 + 叠加层看板 + 服务状态 + 系统信息。 */
 export function SettingsOverview() {
   const { t } = useI18n();
   const { user } = useAuth();
@@ -125,6 +159,46 @@ export function SettingsOverview() {
       .then(setHealth)
       .catch(() => setHealth(null));
   }, []);
+
+  // 只读库叠加层看板：读不到就不显示（它只是「看一眼」的信息）
+  const [overlayStats, setOverlayStats] = useState<Awaited<
+    ReturnType<typeof api.overlayStats>
+  > | null>(null);
+  const [clearing, setClearing] = useState<number | null>(null);
+
+  const loadOverlay = useCallback(async () => {
+    try {
+      setOverlayStats(await api.overlayStats());
+    } catch {
+      setOverlayStats(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOverlay();
+  }, [loadOverlay]);
+
+  async function clearOverlay(libraryId: number, name: string) {
+    if (
+      !window.confirm(
+        t('清空「{name}」的叠加层？只删数据目录里这个库的刮削产物，媒体目录与数据库一个字都不动。',
+          { name }),
+      )
+    ) {
+      return;
+    }
+    setClearing(libraryId);
+    try {
+      await api.clearLibraryOverlay(libraryId);
+      await loadOverlay();
+      setNotice(t('已清空「{name}」的叠加层。', { name }));
+      setError('');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t('清空叠加层失败'));
+    } finally {
+      setClearing(null);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -301,6 +375,47 @@ export function SettingsOverview() {
                   : t('连接失败：{error}', { error: test.error ?? '' })}
               </div>
             )}
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>{t('只读库叠加层')}</h2>
+        <p className="hint">
+          {t('只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}',
+            { root: overlayStats?.root || '—' })}
+        </p>
+        {overlayStats && (
+          <>
+            <p className="small">
+              {t('总计 {files} 个文件 / {size}', {
+                files: overlayStats.total.files,
+                size: bytesText(overlayStats.total.bytes),
+              })}
+            </p>
+            {overlayStats.libraries.length === 0 && (
+              <p className="muted">{t('还没有任何只读库的刮削产物。')}</p>
+            )}
+            {overlayStats.libraries.map((row) => (
+              <div className="row" key={row.libraryId} style={{ marginBottom: 6 }}>
+                <span>{row.name || t('媒体库 #{id}', { id: row.libraryId })}</span>
+                <span className="faint small">
+                  {t('{files} 个文件 / {size}', {
+                    files: row.files,
+                    size: bytesText(row.bytes),
+                  })}
+                </span>
+                <div className="spacer" />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-danger"
+                  disabled={clearing === row.libraryId}
+                  onClick={() => void clearOverlay(row.libraryId, row.name || `#${row.libraryId}`)}
+                >
+                  {clearing === row.libraryId ? t('清空中…') : t('清空叠加层')}
+                </button>
+              </div>
+            ))}
           </>
         )}
       </div>

@@ -27,7 +27,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/store"
 )
@@ -201,6 +204,74 @@ func (s *Service) WriteItemMeta(ctx context.Context, itemID int64, v any) (strin
 		return "", fmt.Errorf("落盘元数据快照失败: %w", err)
 	}
 	return target, nil
+}
+
+// LibraryStats 是一个库的叠加层占用（设置页看板用）。
+type LibraryStats struct {
+	LibraryID int64 `json:"libraryId"`
+	Files     int   `json:"files"`
+	Bytes     int64 `json:"bytes"`
+}
+
+// AllStats 统计每个库的叠加层占用（只回非空的，看板不需要空行）。
+//
+// 目录不存在（还没写过任何只读库）就返回空列表，不算错。
+func (s *Service) AllStats() ([]LibraryStats, error) {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []LibraryStats{}, nil
+		}
+		return nil, fmt.Errorf("读取叠加层目录失败: %w", err)
+	}
+	out := []LibraryStats{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		libID, err := strconv.ParseInt(e.Name(), 10, 64)
+		if err != nil {
+			continue // 不是库目录（人手放进去的东西）：跳过
+		}
+		st, err := s.Stats(libID)
+		if err != nil {
+			return nil, err
+		}
+		if st.Files == 0 {
+			continue
+		}
+		out = append(out, LibraryStats{LibraryID: libID, Files: st.Files, Bytes: st.Bytes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LibraryID < out[j].LibraryID })
+	return out, nil
+}
+
+// Clear 清空某个库的叠加层（整棵目录树删掉），返回删了多少文件 / 多少字节。
+//
+// 安全阀：只逐库目录操作，且先把目录 rename 成 `<lib>.clearing-<随机>`
+// 再递归删 —— 万一有请求正在往里面写，新文件会落到新建的原目录名上，
+// 不会把写到一半的结果给劈了（也只影响这一个库）。
+func (s *Service) Clear(ctx context.Context, libraryID int64) (int, int64, error) {
+	if libraryID <= 0 {
+		return 0, 0, fmt.Errorf("overlay: 库 id 非法")
+	}
+	st, err := s.Stats(libraryID)
+	if err != nil {
+		return 0, 0, err
+	}
+	dir := s.LibraryDir(libraryID)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return 0, 0, nil
+	}
+	graveyard := filepath.Join(s.root, fmt.Sprintf(".clearing-%d-%d", libraryID, time.Now().UnixNano()))
+	if err := os.Rename(dir, graveyard); err != nil {
+		return 0, 0, fmt.Errorf("清空叠加层失败: %w", err)
+	}
+	if err := os.RemoveAll(graveyard); err != nil {
+		return 0, 0, fmt.Errorf("删除叠加层文件失败: %w", err)
+	}
+	_ = ctx
+	return st.Files, st.Bytes, nil
 }
 
 // Stats 统计某个库叠加层的文件数与占用（目录不存在就是 0）。

@@ -3,6 +3,8 @@ package api
 import (
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -175,6 +177,11 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 
 type updateLibraryRequest struct {
 	Name *string `json:"name"`
+	// Kind：库类型（movie | tv | homevideo | mixed）。改了只影响以后的扫描判定，
+	// 已入库的条目不会因此改变自己已定死的 kind。
+	Kind *string `json:"kind"`
+	// Paths：整份替换根路径（不是增量）。
+	Paths []string `json:"paths"`
 	// ReadOnly：网盘 / 只读挂载的库打开它 —— LMBY 就不再往库目录里写，
 	// 刮削产物（元数据快照 + 图片）落进数据目录的 overlay 层。
 	ReadOnly *bool `json:"readonly"`
@@ -185,7 +192,10 @@ type scanRequest struct {
 	RefreshMetadata bool `json:"refreshMetadata"`
 }
 
-// handleUpdateLibrary 支持改名与「只读」开关（两者可以一起改）。
+// handleUpdateLibrary 支持改名、改库类型、替换根路径与「只读」开关（可以一起改）。
+//
+// 一个 PATCH 干完所有编辑：界面上就是一张「编辑媒体库」表，多个字段一起提交时
+// 不应该出现「改了一半」的状态（每项各自一个事务，但顺序固定、失败即返回）。
 func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -195,11 +205,11 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Name == nil && req.ReadOnly == nil {
+	if req.Name == nil && req.Kind == nil && req.ReadOnly == nil && req.Paths == nil {
 		writeError(w, http.StatusBadRequest, "没有需要更新的字段")
 		return
 	}
-	ctx, cancel := contextWithTimeout(r, 10*time.Second)
+	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 
 	if req.Name != nil {
@@ -213,15 +223,120 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Kind != nil {
+		kind := strings.TrimSpace(*req.Kind)
+		if !store.ValidLibraryKind(kind) {
+			writeError(w, http.StatusBadRequest, "库类型只能是 movie / tv / homevideo / mixed")
+			return
+		}
+		if err := s.store.UpdateLibraryKind(ctx, id, kind); err != nil {
+			s.notFoundOrError(w, err)
+			return
+		}
+	}
+	if req.Paths != nil {
+		paths := make([]string, 0, len(req.Paths))
+		for _, p := range req.Paths {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) == 0 {
+			writeError(w, http.StatusBadRequest, "至少需要一个根路径（想清空请删库）")
+			return
+		}
+		for _, p := range paths {
+			if !filepath.IsAbs(p) {
+				writeError(w, http.StatusBadRequest, "根路径要写绝对路径: "+p)
+				return
+			}
+			if st, err := os.Stat(p); err != nil || !st.IsDir() {
+				writeError(w, http.StatusBadRequest, "根路径不存在或不是目录: "+p)
+				return
+			}
+		}
+		if err := s.store.ReplaceLibraryPaths(ctx, id, paths); err != nil {
+			s.notFoundOrError(w, err)
+			return
+		}
+		s.log.Info("媒体库根路径已更新", "libraryId", id, "paths", len(paths))
+	}
 	if req.ReadOnly != nil {
 		if err := s.store.SetLibraryReadOnly(ctx, id, *req.ReadOnly); err != nil {
 			s.notFoundOrError(w, err)
 			return
 		}
-		readOnly := *req.ReadOnly
-		s.log.Info("媒体库只读开关已更新", "libraryId", id, "readonly", readOnly)
+		s.log.Info("媒体库只读开关已更新", "libraryId", id, "readonly", *req.ReadOnly)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleClearLibraryOverlay 清空某个只读库的叠加层（刮削产物）。
+//
+// 只删数据目录里那个库的目录树，媒体目录与数据库一个字都不动；
+// 清完之后下次取图/刮削会重新往里面写。
+func (s *Server) handleClearLibraryOverlay(w http.ResponseWriter, r *http.Request) {
+	if s.overlay == nil {
+		s.serverError(w, "未接入叠加层", errors.New("overlay 未初始化"))
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := contextWithTimeout(r, 30*time.Second)
+	defer cancel()
+
+	files, bytes, err := s.overlay.Clear(ctx, id)
+	if err != nil {
+		s.serverError(w, "清空叠加层失败", err)
+		return
+	}
+	s.log.Info("叠加层已清空", "libraryId", id, "files", files, "bytes", bytes)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "bytes": bytes})
+}
+
+// handleOverlayStats 汇总各库的叠加层占用（设置页的看板用）。
+func (s *Server) handleOverlayStats(w http.ResponseWriter, r *http.Request) {
+	if s.overlay == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"root": "", "libraries": []overlay.LibraryStats{}, "total": overlay.Stats{},
+		})
+		return
+	}
+	stats, err := s.overlay.AllStats()
+	if err != nil {
+		s.serverError(w, "统计叠加层失败", err)
+		return
+	}
+	total := overlay.Stats{}
+	for _, st := range stats {
+		total.Files += st.Files
+		total.Bytes += st.Bytes
+	}
+
+	// 把库名带上，看板上就不用再查一次库列表（库可能刚被删，那时只显示 id）。
+	names := map[int64]string{}
+	nameCtx, cancelNames := contextWithTimeout(r, 5*time.Second)
+	defer cancelNames()
+	if libs, err := s.store.ListLibraries(nameCtx); err == nil {
+		for _, l := range libs {
+			names[l.ID] = l.Name
+		}
+	}
+	type row struct {
+		overlay.LibraryStats
+		Name string `json:"name"`
+	}
+	out := make([]row, 0, len(stats))
+	for _, st := range stats {
+		out = append(out, row{LibraryStats: st, Name: names[st.LibraryID]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"root":      s.overlay.Root(),
+		"libraries": out,
+		"total":     total,
+	})
 }
 
 // handleDeleteLibrary 删除媒体库（条目与文件级联删除）。

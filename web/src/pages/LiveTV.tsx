@@ -5,16 +5,17 @@ import type { LivePlayback, TVChannel, TVGroup } from '../api';
 import { hasNativeHls } from '../capabilities';
 import { useAuth } from '../auth';
 import { useI18n } from '../i18n';
-import { LiveProbePanel, LiveSourcePanel } from '../components/LiveSources';
 
 /**
  * 直播电视（M5）。
  *
- * 三件事在这一页：
- *   1. **频道列表**：分组 / 搜索 / 收藏 / 启用停用 / 排序 / logo / 失效标记；
+ * 两件事在这一页：
+ *   1. **频道列表**：分组 / 搜索 / 收藏 / 启用停用 / 排序 / logo / 失效标记（就是「换台」）；
  *   2. **播放**：点一下就地起播（同一频道所有观众共享一路 ffmpeg），
  *      切台只是换一个 sid；
- *   3. **源与探测**（管理员）：导入播放列表、刷新、按需探测失效源。
+ *
+ * 源与探测（管理员）**搬到了设置页的「直播源」页签**：这一页现在只管
+ * 「看什么、切哪个」，不再夹着一堆管理员才用得上的按钮。
  *
  * 直播与点播的播放器**刻意不同**：
  *   - 没有进度条、没有音轨/字幕选择（直播没有这些概念），所以直接用 <video controls>
@@ -393,7 +394,7 @@ export function LiveTV() {
           <p className="muted">
             {t('没有匹配的频道。')}
             {isAdmin
-              ? t('去下面的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。')
+              ? t('去设置页的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。')
               : t('换个筛选条件试试。')}
           </p>
         )}
@@ -491,8 +492,11 @@ export function LiveTV() {
         )}
       </div>
 
-      {isAdmin && <LiveProbePanel onFinished={() => void load()} />}
-      {isAdmin && <LiveSourcePanel onImported={() => void load()} />}
+      {isAdmin && (
+        <p className="hint">
+          {t('要导入 / 刷新播放列表、探测失效源，去设置页的「直播源」页签。')}
+        </p>
+      )}
     </>
   );
 }

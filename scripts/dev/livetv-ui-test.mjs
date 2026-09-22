@@ -570,7 +570,28 @@ async function main() {
     );
   }
 
-  log('\n== 14. 管理员能看到源与探测面板 ==');
+  log('\n== 14. 直播页不再夹着源与探测（M6 收尾搬到了设置）==');
+  check('直播页没有「频道探测」面板', false, await evaluate(`document.body.textContent.includes('频道探测')`));
+  check(
+    '直播页没有「重探全部」按钮',
+    false,
+    await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '重探全部')`),
+  );
+  check(
+    '导出 m3u 链接指向导出接口（这个留在直播页：它是频道列表的事）',
+    true,
+    await evaluate(`(document.querySelector('a[download]')?.getAttribute('href') || '').includes('/api/v1/livetv/export.m3u')`),
+  );
+  const exp = await evaluate(apiCall('/api/v1/livetv/export.m3u'));
+  check('导出的 m3u 以 #EXTM3U 开头', true, String(exp.body).startsWith('#EXTM3U'));
+
+  log('\n== 14b. 源与探测在「设置 → 直播源」页签里 ==');
+  await evaluate(clickSel('.nav a[href="/settings"]'));
+  check('先进设置页', true, await waitFor('设置页', async () =>
+    (await evaluate('location.pathname')) === '/settings'));
+  await evaluate(clickSel('[data-settings-tabs] a[href="/settings/livetv"]'));
+  check('进「直播源」页签', true, await waitFor('直播源页签', async () =>
+    (await evaluate('location.pathname')) === '/settings/livetv'));
   check('有「直播源」卡片', true, await waitFor('源面板', async () => (await evaluate(`document.body.textContent.includes('直播源')`))));
   check('有「频道探测」卡片', true, await evaluate(`document.body.textContent.includes('频道探测')`));
   check(
@@ -578,13 +599,7 @@ async function main() {
     true,
     await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '重探全部')`),
   );
-  check(
-    '导出 m3u 链接指向导出接口',
-    true,
-    await evaluate(`(document.querySelector('a[download]')?.getAttribute('href') || '').includes('/api/v1/livetv/export.m3u')`),
-  );
-  const exp = await evaluate(apiCall('/api/v1/livetv/export.m3u'));
-  check('导出的 m3u 以 #EXTM3U 开头', true, String(exp.body).startsWith('#EXTM3U'));
+  await shot('04-settings-livetv');
 
   if (USER2 && PASS2) {
     log('\n== 15. 普通用户视角（看不到源与探测） ==');
@@ -595,6 +610,7 @@ async function main() {
     await waitFor('频道行', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > 0);
     check('普通用户没有「直播源」卡片', false, await evaluate(`document.body.textContent.includes('直播源')`));
     check('普通用户没有「频道探测」卡片', false, await evaluate(`document.body.textContent.includes('频道探测')`));
+    check('普通用户导航里没有「设置」（管理面收在它里面）', false, await evaluate(`!!document.querySelector('.nav a[href="/settings"]')`));
     check(
       '普通用户仍能起播（有「播放」按钮）',
       true,

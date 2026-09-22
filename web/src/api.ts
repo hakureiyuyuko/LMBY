@@ -143,9 +143,21 @@ export const api = {
   library: (id: number) => request<LibraryDetail>(`/api/v1/libraries/${id}`),
   createLibrary: (name: string, kind: string, paths: string[]) =>
     request<LibrarySummary>('/api/v1/libraries', { method: 'POST', ...json({ name, kind, paths }) }),
-  /** 改名与「只读」开关共用这一个 PATCH（两者可以一起改）。 */
-  updateLibrary: (id: number, body: { name?: string; readonly?: boolean }) =>
+  /** 改名 / 改类型 / 替换根路径 / 只读开关，共用一个 PATCH。 */
+  updateLibrary: (id: number, body: { name?: string; kind?: string; paths?: string[]; readonly?: boolean }) =>
     request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'PATCH', ...json(body) }),
+  /** 清空某个只读库的叠加层（只删数据目录里那一块，媒体目录与数据库不动）。 */
+  clearLibraryOverlay: (id: number) =>
+    request<{ ok: boolean; files: number; bytes: number }>(`/api/v1/libraries/${id}/overlay`, {
+      method: 'DELETE',
+    }),
+  /** 各库叠加层占用汇总（设置页看板）。 */
+  overlayStats: () =>
+    request<{
+      root: string;
+      libraries: { libraryId: number; name: string; files: number; bytes: number }[];
+      total: { files: number; bytes: number };
+    }>('/api/v1/overlay'),
   deleteLibrary: (id: number) =>
     request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'DELETE' }),
 

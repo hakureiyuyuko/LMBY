@@ -233,8 +233,16 @@ type TVChannelQuery struct {
 }
 
 // ListTVChannels 按条件列出频道。
+// tvVisibleSourceCond 是「频道对前台可见」的条件：
+//
+// 频道属于某一个直播源；**源被停用时，它带来的频道在前台不再出现**
+// （清空页面上的死频道，比让用户一条条停用强）。
+// `source_id is null` 是手工建的/失去本源的频道，不受影响。
+const tvVisibleSourceCond = `(c.source_id is null or exists (
+		select 1 from tv_sources s where s.id = c.source_id and s.enabled))`
+
 func (s *Store) ListTVChannels(ctx context.Context, q TVChannelQuery) ([]TVChannel, error) {
-	where := []string{"true"}
+	where := []string{"true", tvVisibleSourceCond}
 	args := []any{q.UserID}
 	add := func(expr string, v any) {
 		args = append(args, v)
@@ -416,7 +424,7 @@ func (s *Store) ListTVChannelsForProbe(ctx context.Context, f TVProbeFilter) ([]
 	// 选列要带上 favorite（固定 false）：scanTVChannel 按 16 列扫
 	q := `select ` + tvChannelColumns + `, false as favorite
 		from tv_channels c
-		where not c.disabled and c.url <> ''`
+		where not c.disabled and c.url <> '' and ` + tvVisibleSourceCond
 	args := []any{}
 	if f.OnlyUnknown {
 		q += ` and c.probe_at is null`
@@ -473,11 +481,12 @@ func (s *Store) ListTVGroups(ctx context.Context) ([]TVGroup, error) {
 	return out, rows.Err()
 }
 
-// CountTVChannels 返回频道总数与启用数。
+// CountTVChannels 返回前台可见的频道总数与启用数（与列表同一套可见性：停用源的频道不算）。
 func (s *Store) CountTVChannels(ctx context.Context) (total, enabled int, err error) {
 	err = s.pool.QueryRow(ctx,
-		`select count(*)::int, coalesce(sum(case when not disabled then 1 else 0 end), 0)::int
-		 from tv_channels`).Scan(&total, &enabled)
+		`select count(*)::int, coalesce(sum(case when not c.disabled then 1 else 0 end), 0)::int
+		 from tv_channels c
+		 where `+tvVisibleSourceCond).Scan(&total, &enabled)
 	if err != nil {
 		return 0, 0, fmt.Errorf("统计频道数失败: %w", err)
 	}

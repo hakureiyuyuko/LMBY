@@ -158,6 +158,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/libraries/{id}", s.requireAuth(s.handleGetLibrary))
 	mux.Handle("PATCH /api/v1/libraries/{id}", s.requireAuth(s.handleUpdateLibrary))
 	mux.Handle("DELETE /api/v1/libraries/{id}", s.requireAuth(s.handleDeleteLibrary))
+	// 只读库的刮削产物（overlay）：清空 + 看板统计
+	mux.Handle("DELETE /api/v1/libraries/{id}/overlay", s.requireAuth(s.handleClearLibraryOverlay))
+	mux.Handle("GET /api/v1/overlay", s.requireAuth(s.handleOverlayStats))
 	mux.Handle("POST /api/v1/libraries/{id}/scan", s.requireAuth(s.handleStartScan))
 	mux.Handle("DELETE /api/v1/libraries/{id}/scan", s.requireAuth(s.handleCancelScan))
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))

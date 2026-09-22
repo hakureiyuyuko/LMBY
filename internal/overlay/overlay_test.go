@@ -212,6 +212,92 @@ func TestAssertWritable(t *testing.T) {
 	}
 }
 
+// Clear：只清指定库，别的库不受影响；返回删掉的文件数与字节数。
+func TestClear(t *testing.T) {
+	st := &fakeStore{items: map[int64]*store.Item{}, readOnly: map[int64]bool{}}
+	svc := newTestService(t, st)
+
+	write := func(lib, item int64, name, body string) string {
+		t.Helper()
+		dir := svc.ItemDir(lib, item)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	write(3, 1, "poster.jpg", "12345")
+	write(3, 1, "meta.json", "12")
+	write(4, 1, "poster.jpg", "999")
+
+	files, bytes, err := svc.Clear(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if files != 2 || bytes != 7 {
+		t.Fatalf("Clear 返回 %d 个文件 / %d 字节，想要 2 / 7", files, bytes)
+	}
+	if st3, _ := svc.Stats(3); st3.Files != 0 {
+		t.Fatalf("库 3 没清干净：%+v", st3)
+	}
+	if st4, _ := svc.Stats(4); st4.Files != 1 || st4.Bytes != 3 {
+		t.Fatalf("库 4 被误删：%+v", st4)
+	}
+	// 清一个从来没写过的库：不算错，返回 0
+	if f, b, err := svc.Clear(context.Background(), 9); err != nil || f != 0 || b != 0 {
+		t.Fatalf("清空库 9 = (%d,%d,%v)，想要 (0,0,nil)", f, b, err)
+	}
+	// 清空后还能继续写（目录被重建）
+	write(3, 1, "poster.jpg", "1")
+	if st3, _ := svc.Stats(3); st3.Files != 1 {
+		t.Fatalf("清空后写不进去了：%+v", st3)
+	}
+	// 清空用的临时目录（.clearing-*）不应该留在叠加层里
+	if ents, _ := os.ReadDir(svc.Root()); len(ents) != 2 { // 只有 3 与 4
+		t.Fatalf("叠加层根目录应只剩库目录，实际 %v", ents)
+	}
+}
+
+// AllStats：按库列出占用，空库与非库目录不算。
+func TestAllStats(t *testing.T) {
+	st := &fakeStore{items: map[int64]*store.Item{}, readOnly: map[int64]bool{}}
+	svc := newTestService(t, st)
+
+	for _, lib := range []int64{7, 3} {
+		dir := svc.ItemDir(lib, 1)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte("123"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 空的库目录（开过只读但还没写东西）+ 人手放进去的目录
+	if err := os.MkdirAll(svc.LibraryDir(5), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(svc.Root(), "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.AllStats()
+	if err != nil {
+		t.Fatalf("AllStats: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("AllStats 应只报非空库，得到 %+v", got)
+	}
+	if got[0].LibraryID != 3 || got[1].LibraryID != 7 {
+		t.Fatalf("AllStats 应按库 id 排序，得到 %+v", got)
+	}
+	if got[0].Files != 1 || got[0].Bytes != 3 {
+		t.Fatalf("库 3 统计 = %+v", got[0])
+	}
+}
+
 // 条目所属库查不到时，叠加层不该凭空创建目录。
 func TestTargetMissingItem(t *testing.T) {
 	st := &fakeStore{items: map[int64]*store.Item{}, readOnly: map[int64]bool{}}
