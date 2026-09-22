@@ -157,15 +157,21 @@ TV/Show (2020)/Season 01/season.nfo + season01-poster.jpg + S01E02 - X.mkv + S01
 
 ## 6. 直播电视（一期）
 
-> **实现状态（2026-09-22）**：源/频道/播放/外链出口已落地并真机验收（见 `docs/ROADMAP.md` 的 M5
-> 与 `docs/notes/livetv.md`）；频道管理 GUI、直播播放器随 M6；订阅源定时刷新与失效频道标记待做。
+> **实现状态（2026-09-22）**：源/频道/播放/外链出口/定时刷新/失效频道标记全部已落地并真机验收
+> （见 `docs/ROADMAP.md` 的 M5 与 `docs/notes/livetv.md`）；频道管理 GUI、直播播放器随 M6。
 > 下面几条里「保留启用状态与收藏」的实现是：**导入只写元数据，用户态（停用/收藏/探测）一律不覆盖**。
+> 「失效频道标记」的实现在于：探测是**真连一次源站**（ffprobe 走完协议握手），
+> 判定结果写进 `tv_channels.probe/probe_ok/probe_at`；**探测工具不可用时一条结果都不写**
+> （否则「ffprobe 没装」会变成「所有频道都失效」）。
 
 参考 tvhub（`C:\Users\admin\Desktop\dev\TV`）已验证的做法：
 - 源管理：M3U 粘贴/上传/订阅 URL 导入，按地址增量更新，保留启用状态与收藏
 - 频道共享一路 ffmpeg HLS 会话；空闲 45s 自动回收 + 清理分片
 - 视频 `-c:v copy` 不转码（源多为 H264 1080p），音频 MP2 → AAC 转码
 - 外部播放器出口 `/s/<token>/playlist.m3u`
+- 订阅源定时刷新（按每个源自己的 `refresh_interval_minutes`，调度器只负责「该不该刷」）
+- 频道探测（失效源标记）：真连一次源站，结果写回 `probe/probe_ok/probe_at`；
+  可按分组/指定频道/只补未探的来探（`lmby livetv probe` 与 `POST /api/v1/livetv/channels/probe`）
 - 扩展：EPG 导入（XMLTV，二期）、录制/DVR（二期）、按频道的转码档位选择
 
 ---
@@ -197,7 +203,7 @@ play_sessions(id,token,user_id,item_id,media_file_id,mode,profile jsonb,ffmpeg_p
 -- url 是频道的自然键（按地址增量更新）；收藏是**每用户**的，所以单独一张表
 -- （原计划把 favorite 放在 tv_channels 上，那样多用户（M7）就没法各自收藏）
 tv_sources(id,name,kind[paste|file|url],url,enabled,refresh_interval_minutes,
-  last_refresh_at,last_status,last_error,last_channel_count,created_at,updated_at)
+  last_refresh_at,last_status,last_channel_count,created_at,updated_at)
 tv_channels(id,source_id FK NULL,name,url UNIQUE,group_name,logo,tvg_id,headers,
   sort_order,disabled,probe,probe_ok,probe_at,created_at,updated_at)
 tv_favorites(user_id,channel_id,created_at, PRIMARY KEY(user_id,channel_id))

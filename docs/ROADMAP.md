@@ -529,16 +529,63 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 - [x] 频道播放：每频道共享一路 ffmpeg HLS 会话（`-c:v copy` + 音频 MP2→AAC），空闲回收 + 分片清理
       滚动窗口 `delete_segments+omit_endlist` + 1 秒分片（实测数据见 `docs/notes/livetv.md`）
 - [x] 外部播放器出口：`GET /s/<token>/playlist.m3u`（HMAC 签名 + 过期；限次数/限下载留给 M7）
-- [ ] 定时刷新订阅源（cron）+ 失效源标记（`probe` / `probe_ok` 字段已就位，判定与界面标记待做）
+- [x] 定时刷新订阅源（cron）+ 失效源标记（`probe` / `probe_ok` / `probe_at`）
+      —— 服务内调度器（每一跳只查「哪些源到点了」，间隔由每个源自己的
+      `refresh_interval_minutes` 决定，改间隔不必重启；`[livetv] auto_refresh=false` 可关）+ 
+      `lmby livetv status|refresh|probe` 三个命令行入口；
+      探测是**真连一次源站**（ffprobe 走完协议握手，参数与播放共用 `livetv.InputArgs`），
+      判定写回 `probe/probe_ok/probe_at`，可按分组/指定频道/只补未探的来探；
+      **ffprobe 不可用时一条结果都不写**（否则「工具没装」会变成「全部频道失效」）
+- [x] 频道单条读取接口 `GET /api/v1/livetv/channels/{id}` + 列表按探测结果筛（`?probe=pending|ok|failed`）
+      —— 顺带修掉一个旧缺口：验收脚本靠这个地址还原收藏现场，以前拿到 404 会多切一次收藏
 - [ ] 直播前端：Live TV 页 + 播放器（随 M6）
 - [x] **DoD**：导入 149 台单播源（其中 **26 台源站不可达** —— 它们 302 到一个从这张网连不上的地址，
       正好说明失效标记是必需的）；起播 **1351ms**（DoD < 2 秒；口径：服务端到首个分片可用，
       浏览器端随前端落地再验）；两人同看**只跑一路** ffmpeg（会话 `viewers=2`、进程数 1）；
       无人观看 **45s** 退出（判定按 `IdleSeconds - reapInterval`，实测 40~45s）
 
-> **真跑验收**：`scripts/dev/verify-livetv.sh`（32/32：源、频道、增量导入不冲用户状态、权限）、
-> `scripts/dev/verify-livetv-play.sh`（30/30：起播、共享一路、空闲回收、外链 token 篡改被拒）；
-> 回归 `verify-play.sh` 108/108 与 `verify-transcode.sh` 100/100（改过与点播共用的 stream 包）。
+> **真跑验收**
+>
+> M5-S1/S2（2026-09-22 早些时候）：`verify-livetv.sh` **32/32**、`verify-livetv-play.sh` **30/30**；
+> 当时改过与点播共用的 `internal/stream`，所以回归了 `verify-play.sh` 108/108 与 `verify-transcode.sh` 100/100。
+>
+> M5-S4（本次）：`scripts/dev/verify-livetv-sync.sh` **60/60**、`verify-livetv.sh` **32/32**（复跑）、
+> `verify-livetv-play.sh` **30/30**（复跑）。
+
+### M5 S4 验收记录（2026-09-22，开发容器实测）
+
+**新脚本** `scripts/dev/verify-livetv-sync.sh` **60/60**。它**自造源**而不是依赖真实 IPTV：
+本机 `python3 -m http.server` 上摆三个频道（一条真视频 / 一条连接被拒 / 一条不应答）
+加一份订阅列表，于是「探测判定」「按分组探」「按结果筛」「url 型源的刷新」都是确定的；
+最后临时把 `[livetv] refresh_tick_seconds` 调到 5 并重启服务，**真验服务内置的调度器会不会自己刷**，
+再验 `auto_refresh = false` 时它确实不动手，最后恢复配置（EXIT 陷阱）。
+
+**真源全量探测**（重庆联通单播源，以下均为**实例测量值**）：
+
+| 项 | 值 |
+|---|---|
+| 频道数 | 150（启用中且有地址） |
+| 耗时 | 4 并发 **164 秒** / 单并发 **642 秒** |
+| 判定 | 通 **67** / 不通 **83**（两种并发**完全一致**，集合逐个对比零差异） |
+| 能通的摘要 | `H.264 1920x1080 / MP2 立体声 48kHz（0.3~0.8s）` |
+| 不通的摘要 | 多数是 `超时（8s 内没有应答）`；少数是 `源站故障：… Server returned 5XX` |
+
+**顺带纠正一个旧数字**：M5-S2 记的「149 台里 26 台死源」**不是死源总数** ——
+那个数字来自播放验收脚本**「试到第一个能起播的就停」**的路径（它只试了前 27 台）。
+全量探测（每一台都真连）在同一时刻给的是 **67 通 / 83 不通**，而且并发与串行的判定
+一模一样 —— 所以这批不通的是源站那边真的不应答，不是我们探得太急。
+这正是「失效源标记」要做成**能看全量、能重探**的功能的原因：「26」这类数字
+会随脚本路径与时刻变化，只有真跑一遍才知道；而探测结果也只是「上次真连的结果」。
+
+**验收过程中抓到的两个真问题**：
+
+1. `ListTVChannelsForProbe` 的选列漏了 `favorite`（`scanTVChannel` 按 16 列扫），
+   于是**一条频道都选不出来**、探测全是空的 —— 服务日志里是
+   `number of field descriptions must equal number of destinations, got 15 and 16`。
+   这正是新验收脚本存在的意义（单测碰不到 SQL 与 scan 的列数对齐）。
+2. 新验收脚本自己的健康检查地址写成了 `/api/v1/health`（实际是 `/healthz`），
+   所以「重启后服务起没起来」永远判失败；容器里的 `/root/deploy-lmby.sh` 有**同一个错**
+   （一直打印 `health: 404`、`lmby -version` 也不是合法子命令），已一并修掉。
 
 ---
 
@@ -619,7 +666,6 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器里跑 `scripts/dev/lint.sh` 再推。
 
 ## 2026-09-22 的四条教训
-
 1. **占位页陷阱（真踩了）**：仓库里的 `web/dist/index.html` 是占位页，`go build` 会把它嵌进二进制。
    提交前要还原它（`git checkout HEAD -- web/dist/index.html`）—— 但**还原之后如果还要交叉编译，
    必须先重跑 `npm run build`**。本次连续几次部署把占位页打进二进制，服务端在发「前端未构建」，
@@ -634,3 +680,25 @@ staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器�
    本次靠它定位到「继续观看」卡片高矮不一的真因 —— flex 子项默认 `min-width: auto`，
    长标题（`nowrap`）把卡片顶得比 `flex-basis` 宽，实测同一行出现 358 / 168 / 270 三种宽度；
    加一行 `min-width: 0` 后全部回到 168。
+
+## 2026-09-22 的第二批教训（S4 验收时踩到）
+
+5. **验收脚本里的一句 SQL 与 `scanTVChannel` 的列数没对齐**：`ListTVChannelsForProbe` 少了
+   一列 `favorite`，探测一条频道都选不出来。这类 bug 单测碰不到（不连库），
+   是**新验收脚本第一次真跑就抓到**的 —— 所以每次加接口都要配一段真跑。
+6. **脚本的语法错误只能用工具找**：嵌套 `$( ) + [[ ]] + jq 单引号` 里多写一个引号，
+   `bash -n` 只会说「最后一行 EOF 少一个 `)`」。本次临时写了个「括号/引号配平扫描器」
+   （Python 小脚本）一次定位到行号；仓库里留下了 `scripts/dev/check-scripts.sh`
+   （对所有 `*.sh` 跑 `bash -n`，提交前跑一秒）。
+7. **验收脚本跑着的时候，别手动去动同一个服务**：本次为了查「起播为什么失败」
+   手动起了播放并 `rm -rf /var/lib/lmby/streams/*`，正好砸中同时在跑的
+   `verify-livetv-play.sh` → 21 通过 / 9 失败（全是假失败）；清场后单独重跑就是 30/30。
+   要查问题就先停掉脚本，或者换一个实例。
+8. **ssh 命令行里不要塞引号 / `&&` / 重定向**（已经第三次了）：
+   `ssh host 'nohup bash -c "env X=1 bash y.sh" &'` 里的内层引号会被 PowerShell 吃掉，
+   最后执行的是裸 `env`（把环境变量全打印出来当结果）。一律「本地写 .sh → scp → bash 跑」。
+9. **不要轻信脚本报出来的「死源数」**：`verify-livetv-play.sh` 是「试到第一个能起播的就停」，
+   所以它的「跳过死源 26 个」只是「它试过的前 26 台」；全量探测（每一台都真连）在同一时刻是
+   150 台里 67 通 / 83 不通（而且单并发与 4 并发的判定集合完全一致）。
+   推广一句：**任何「碰到第一个成功就停」的检查，它报的失败数都是下限**。
+   另外「探测不通」只是**上一次真连的结果**，会随源站状态变 —— 配置与界面都要按这个语义写。
