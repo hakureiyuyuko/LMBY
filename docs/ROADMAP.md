@@ -507,9 +507,10 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 - [x] **DoD**：目标机器 1080p HEVC→H264 硬件转码 ≥ 1x 实时（实测 11.8x）；
       转码中拖动/切集/关页无残留进程；4K→1080p 与 HDR→SDR 各有一条真实通过用例
 
-> 还差的（M4 收尾清单）：`-copyts -avoid_negative_ts disabled`（绝对时间轴，能删掉播放器的窗口簿记，风险最高）、
-> 外挂字幕的 GB18030 编码探测、ASS 附件字体（`fontsdir`）、Trickplay、探测补 `rotation`/`probe_score`、
-> DV P5 → HDR10、带宽自适应、外挂字幕上传。
+> 还差的（M4 收尾清单，**2026-09-22 决定整体移到二期**，不阻塞 M5/M6）：
+> `-copyts -avoid_negative_ts disabled`（绝对时间轴，能删掉播放器的窗口簿记，风险最高）、
+> 外挂字幕的 GB18030 编码探测、把服务端字体目录整个喂给 libass（mkv 内封字体已做）、
+> Trickplay、探测补 `rotation`/`probe_score`、DV P5 → HDR10、带宽自适应、外挂字幕上传。
 > 已顺手修掉的两个真 bug：Hi10P 硬解起不来导致「放不了」（现自动降级软解）、从影片中途续播被节流卡死。
 
 > 📌 **发 v0.1**：M3 结束即可发布（能播 h264 库 + 直出/remux）。M4 结束发 **v0.2**（硬件转码）。
@@ -520,13 +521,24 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 
 **参考**：`C:\Users\admin\Desktop\dev\TV`（tvhub，已验证，AGPL 可复用）+ Jellyfin `src/Jellyfin.LiveTv/*`
 
-- [ ] `tv_sources` / `tv_channels` 表 + 迁移
-- [ ] M3U 源导入：粘贴 / 上传文件 / 订阅 URL 拉取；按地址增量更新（保留启用状态与收藏）
+- [x] `tv_sources` / `tv_channels` 表 + 迁移（另加 `tv_favorites`；删源不删频道，url 是频道的身份）
+- [x] M3U 源导入：粘贴 / 订阅 URL 拉取；按地址增量更新（保留启用状态、收藏、探测结果）
+      —— 接口层已完成并验收；**选文件上传**属前端（随 M6 设置页）
 - [ ] 频道管理 GUI：分组、搜索、启用/禁用、收藏、排序、logo
-- [ ] 频道播放：每频道共享一路 ffmpeg HLS 会话（`-c:v copy` + 音频 MP2→AAC），空闲回收 + 分片清理
-- [ ] 外部播放器出口：`GET /s/<token>/playlist.m3u`
-- [ ] 定时刷新订阅源（cron）+ 失效源标记
-- [ ] **DoD**：导入 149 台单播源，浏览器起播 < 2 秒；两人同时看同一频道只跑一路 ffmpeg；无人观看后 45s 内进程退出
+      （接口已齐：列表/改字段/收藏切换/导出 m3u）
+- [x] 频道播放：每频道共享一路 ffmpeg HLS 会话（`-c:v copy` + 音频 MP2→AAC），空闲回收 + 分片清理
+      滚动窗口 `delete_segments+omit_endlist` + 1 秒分片（实测数据见 `docs/notes/livetv.md`）
+- [x] 外部播放器出口：`GET /s/<token>/playlist.m3u`（HMAC 签名 + 过期；限次数/限下载留给 M7）
+- [ ] 定时刷新订阅源（cron）+ 失效源标记（`probe` / `probe_ok` 字段已就位，判定与界面标记待做）
+- [ ] 直播前端：Live TV 页 + 播放器（随 M6）
+- [x] **DoD**：导入 149 台单播源（其中 **26 台源站不可达** —— 它们 302 到一个从这张网连不上的地址，
+      正好说明失效标记是必需的）；起播 **1351ms**（DoD < 2 秒；口径：服务端到首个分片可用，
+      浏览器端随前端落地再验）；两人同看**只跑一路** ffmpeg（会话 `viewers=2`、进程数 1）；
+      无人观看 **45s** 退出（判定按 `IdleSeconds - reapInterval`，实测 40~45s）
+
+> **真跑验收**：`scripts/dev/verify-livetv.sh`（32/32：源、频道、增量导入不冲用户状态、权限）、
+> `scripts/dev/verify-livetv-play.sh`（30/30：起播、共享一路、空闲回收、外链 token 篡改被拒）；
+> 回归 `verify-play.sh` 108/108 与 `verify-transcode.sh` 100/100（改过与点播共用的 stream 包）。
 
 ---
 
@@ -605,3 +617,20 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 于是它每次都在「加载配置」这一步就退出 —— 一条检查都没真跑过。
 已迁移到 v2 格式，并顺带修完它原本会报的 14 个问题（errcheck 3、unparam 6、unused 3、
 staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器里跑 `scripts/dev/lint.sh` 再推。
+
+## 2026-09-22 的四条教训
+
+1. **占位页陷阱（真踩了）**：仓库里的 `web/dist/index.html` 是占位页，`go build` 会把它嵌进二进制。
+   提交前要还原它（`git checkout HEAD -- web/dist/index.html`）—— 但**还原之后如果还要交叉编译，
+   必须先重跑 `npm run build`**。本次连续几次部署把占位页打进二进制，服务端在发「前端未构建」，
+   用户看到的只是浏览器缓存里的旧前端，误导了一阵排查。根治：走 `task build`（依赖链自带 `web:build`）。
+   现在的做法：交叉编译前用一行断言卡住 —— `web/dist/index.html` 里必须含 `/assets/`，否则中止。
+2. **`gofmt -w <目录>` 会改到你没碰过的文件**：它顺手重排了 `playback.go` 与 `throttle_test.go`
+   （这两个文件本来就不是 gofmt 干净状态）。只对本次改动的文件跑 `gofmt -w <文件>`。
+3. **推送前先跑容器里的同版本工具**：lint 又连红两次（unparam、errorlint），
+   第二次改成先 `bash /root/srccheck.sh`（gofmt + build + vet + test + golangci-lint）再推，一次过。
+   和 09-20 那条是同一个道理。
+4. **布局怪问题不要用肉眼看像素**：用无头 Chrome 走 CDP 把 `getBoundingClientRect` 与计算样式打出来。
+   本次靠它定位到「继续观看」卡片高矮不一的真因 —— flex 子项默认 `min-width: auto`，
+   长标题（`nowrap`）把卡片顶得比 `flex-basis` 宽，实测同一行出现 358 / 168 / 270 三种宽度；
+   加一行 `min-width: 0` 后全部回到 168。

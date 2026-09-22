@@ -228,6 +228,17 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-transcode.sh
 
 # M4 编码能力探测（13 项）：能力表与这台机器的实际表现逐条对照，含缓存命中与强制刷新
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-caps.sh
+
+# M5 直播源与频道（32 项）：导入（粘贴 / 订阅 URL）、按地址增量更新不冲用户状态（停用/收藏/探测）、
+# 分组与筛选、收藏切换、导出 m3u、删源后频道仍在、非管理员不能改源、空内容被拒且不留空源。
+# 真实播放列表用 LIVE_M3U= 传进来（仓库里只有假地址样例），LIVE_EXPECT= 写期望台数。
+LIVE_M3U=/root/某个真实列表.m3u LIVE_EXPECT=149 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-livetv.sh
+
+# M5 直播播放（30 项）：起播耗时（DoD < 2 秒）、滚动窗口、分片 no-store、两人同看只跑一路 ffmpeg、
+# 停一路不全灭、无人观看 45 秒回收、外链 token（可用/篡改被拒/伪造被拒/未登录被拒）。
+# 它自己会逐个试频道以跳过死源，所以可能跑几分钟；跑前确保没有别的播放（会数 ffmpeg 进程）。
+# 内网地址与真实源见 docs/local-notes.md（不进版本库）。
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-livetv-play.sh
 ```
 
 ■ 播放验收的几个坑（都是实测踩出来的）：
@@ -262,6 +273,14 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-caps.sh
    不加的话两路会从各自列表的不同位置起读（实测一个 4s、一个 40s），对照就变成
    「两个不同时刻的画面」在比 —— 连对照组都会报出两三百的帧差，看着像“烧录成功了”。
 
+9. **直播源（IPTV）的实测要点**（换源/换机器都得重测，数字不是常量）：
+   - rtsp 单播源必须 `-rtsp_transport tcp`（UDP 会偶发丢包花屏），`-timeout` 单位是**微秒**；
+   - **分片时长就是起播延迟的下限**：同一个源 `hls_time=2` 首个分片要 1859 ms，`hls_time=1` 只要 520 ms；
+   - 真实列表里**一定有死源**（一次实测 149 台里有 26 台起不来，它们的 302 跳到一个从本网
+     连不上的地址），所以别把「某台能起播」写进断言，起播超时给 8 秒；
+   - 源站音频常是 **MP2**，浏览器放不了，必须转 AAC。
+   完整实测与取舍见 `docs/notes/livetv.md`。
+
 ■ 脚本写完后**先跑 `bash -n`**（在容器里）再执行：曾因一行少了参数展开的 `}`，
 脚本跑到一半报「引号未闭合」，很难看出在哪一行。
 
@@ -279,6 +298,10 @@ task web:restore-placeholder # = git checkout -- web/dist/index.html，只在提
 （或者是更早的构建残留：index.html 引用的 bundle 根本不在包里 —— 界面白屏或
 “少几个入口” 且无任何报错，因为后端原先会把缺失的静态资源也回退成 index.html）。
 后端现在会对缺失资源回 404，至少能在控制台看到真正的错误。
+
+2026-09-22 真踩了一次：连续几次交叉编译前忘了重跑 `npm run build`，服务端在发「前端未构建」，
+而浏览器里缓存着旧前端，看着像「UI 没更新」，白排查了一阵。现在的做法是交叉编译前先断言
+`web/dist/index.html` 里含 `/assets/`，否则中止；更省事的是直接用 `task build`（依赖链自带 `web:build`）。
 
 这几个脚本都是**无依赖**的（`smoke-test.sh` / `verify-item-edit.sh` 只用 curl + jq；两个界面脚本只用
 Node 内置 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
