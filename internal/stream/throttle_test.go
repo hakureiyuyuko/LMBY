@@ -97,7 +97,7 @@ func TestThrottlePausesAndResumes(t *testing.T) {
 // 续播（起点 1403s）一算就是「领先 1403s」→ 立即暂停 → 20 秒产不出第一个分片
 // → 整路被判成放不了（表现：从中间接着看直接开不起来）。
 func TestThrottleMidMovieResume(t *testing.T) {
-	opts := Options{FFmpeg: "ffmpeg", Root: t.TempDir(), SegmentSeconds: 4,
+	opts := Options {FFmpeg: "ffmpeg", Root: t.TempDir(), SegmentSeconds: 4,
 		WindowSeconds: 300, MaxSessions: 2, IdleSeconds: 45, ThrottleSeconds: 60}
 	opts = opts.Normalize()
 	s := newSession(opts, Spec{Key: "k", Path: "/x.mkv", StartSeconds: 1403})
