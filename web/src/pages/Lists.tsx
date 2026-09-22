@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { PlaylistSummary } from '../api';
+import { useI18n } from '../i18n';
 
 /**
  * 「我的列表」：播放列表 + 合集。
@@ -13,6 +14,7 @@ import type { PlaylistSummary } from '../api';
  * 这些都是「列表管理」该有的最低限度；把条目加进来是详情页「加入列表」的活。
  */
 export function Lists() {
+  const { t } = useI18n();
   const [lists, setLists] = useState<PlaylistSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -28,7 +30,7 @@ export function Lists() {
       setLists(res.playlists);
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '读取列表失败');
+      setError(e instanceof ApiError ? e.message : t('读取列表失败'));
     } finally {
       setLoading(false);
     }
@@ -48,7 +50,7 @@ export function Lists() {
       setName('');
       await load();
     } catch (e2) {
-      setError(e2 instanceof ApiError ? e2.message : '新建失败');
+      setError(e2 instanceof ApiError ? e2.message : t('新建失败'));
     } finally {
       setBusy(false);
     }
@@ -62,19 +64,24 @@ export function Lists() {
       setEditing(null);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '改名失败');
+      setError(e instanceof ApiError ? e.message : t('改名失败'));
     }
   }
 
   async function remove(p: PlaylistSummary) {
     // 删列表**不动媒体文件** —— 这句要写在确认里，不然用户会以为片子被删了
-    if (!window.confirm(`删除${p.kind === 'collection' ? '合集' : '列表'}「${p.name}」？\n（只删这个列表，媒体文件不受影响）`))
+    if (!window.confirm(
+      t('删除{kind}「{name}」？\n（只删这个列表，媒体文件不受影响）', {
+        kind: p.kind === 'collection' ? t('合集') : t('列表'),
+        name: p.name,
+      }),
+    ))
       return;
     try {
       await api.deleteList(p.id);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '删除失败');
+      setError(e instanceof ApiError ? e.message : t('删除失败'));
     }
   }
 
@@ -84,41 +91,43 @@ export function Lists() {
   return (
     <>
       <div className="card">
-        <h2>我的列表</h2>
+        <h2>{t('我的列表')}</h2>
         <p className="hint">
-          播放列表是私人的（只有你自己看得到）；<strong>合集</strong>对所有人可见，由管理员维护。
-          条目是在影片详情页的「加入列表」里加进来的。
+          {t('播放列表是私人的（只有你自己看得到）；')}
+          <strong>{t('合集')}</strong>
+          {t('对所有人可见，由管理员维护。')}
+          {t('条目是在影片详情页的「加入列表」里加进来的。')}
         </p>
         <form className="row" onSubmit={create}>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="新列表的名字，如「周末补番」"
-            aria-label="新列表名字"
+            placeholder={t('新列表的名字，如「周末补番」')}
+            aria-label={t('新列表的名字')}
           />
           <select value={kind} onChange={(e) => setKind(e.target.value as 'playlist' | 'collection')}>
-            <option value="playlist">私人播放列表</option>
-            <option value="collection">合集（所有人可见）</option>
+            <option value="playlist">{t('私人播放列表')}</option>
+            <option value="collection">{t('合集（所有人可见）')}</option>
           </select>
           <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
-            新建
+            {t('新建')}
           </button>
         </form>
         {error && <div className="alert alert-error">{error}</div>}
       </div>
 
       <div className="card">
-        {loading && <p className="muted">正在加载…</p>}
+        {loading && <p className="muted">{t('正在加载…')}</p>}
         {!loading && lists.length === 0 && (
           <p className="muted">
-            还没有任何列表。上面新建一个，然后去影片详情页把它加进去
-            （详情页的「加入列表」按钮）。
+            {t('还没有任何列表。上面新建一个，然后去影片详情页把它加进去')}
+            {t('（详情页的「加入列表」按钮）。')}
           </p>
         )}
 
         {[
-          { title: '我的', items: mine },
-          { title: '合集（所有人可见）', items: others },
+          { title: t('我的'), items: mine },
+          { title: t('合集（所有人可见）'), items: others },
         ].map((group) =>
           group.items.length === 0 ? null : (
             <div key={group.title}>
@@ -137,7 +146,7 @@ export function Lists() {
                           }}
                         />
                       ) : (
-                        <span className="list-cover-empty">空</span>
+                        <span className="list-cover-empty">{t('空')}</span>
                       )}
                     </Link>
                     <div className="list-body">
@@ -146,14 +155,14 @@ export function Lists() {
                           <input
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                            aria-label="新的列表名"
+                            aria-label={t('新的列表名')}
                             autoFocus
                           />
                           <button type="button" className="btn btn-sm" onClick={() => void rename(p.id)}>
-                            保存
+                            {t('保存')}
                           </button>
                           <button type="button" className="btn btn-sm" onClick={() => setEditing(null)}>
-                            取消
+                            {t('取消')}
                           </button>
                         </div>
                       ) : (
@@ -162,12 +171,13 @@ export function Lists() {
                         </Link>
                       )}
                       <div className="muted small">
-                        {p.kind === 'collection' ? '合集' : '播放列表'} · {p.itemCount} 个条目
-                        {!p.mine && p.ownerName ? ` · 由 ${p.ownerName} 维护` : ''}
+                        {p.kind === 'collection' ? t('合集') : t('播放列表')} ·{' '}
+                        {t('{n} 个条目', { n: p.itemCount })}
+                        {!p.mine && p.ownerName ? ` · ${t('由 {name} 维护', { name: p.ownerName })}` : ''}
                       </div>
                       <div className="row" style={{ marginTop: 6 }}>
                         <Link className="btn btn-sm" to={`/list/${p.id}`}>
-                          打开
+                          {t('打开')}
                         </Link>
                         {(p.mine || p.kind === 'collection') && (
                           <button
@@ -178,12 +188,12 @@ export function Lists() {
                               setEditName(p.name);
                             }}
                           >
-                            改名
+                            {t('改名')}
                           </button>
                         )}
                         {(p.mine || p.kind === 'collection') && (
                           <button type="button" className="btn btn-sm" onClick={() => void remove(p)}>
-                            删除
+                            {t('删除')}
                           </button>
                         )}
                       </div>

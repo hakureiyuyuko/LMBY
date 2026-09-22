@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { Item, PlaylistSummary } from '../api';
 import { formatClock } from '../capabilities';
+import { useI18n } from '../i18n';
 import { kindLabel } from '../media';
 
 /**
@@ -18,6 +19,7 @@ import { kindLabel } from '../media';
  * 代价是几十行代码而不是一个拖拽库（依赖能少一个是一个）。
  */
 export function ListDetail() {
+  const { t } = useI18n();
   const { id = '' } = useParams();
   const listId = Number(id);
   const [playlist, setPlaylist] = useState<PlaylistSummary | null>(null);
@@ -38,7 +40,7 @@ export function ListDetail() {
       setTotal(page.total);
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '读取列表失败');
+      setError(e instanceof ApiError ? e.message : t('读取列表失败'));
     } finally {
       setLoading(false);
     }
@@ -59,7 +61,7 @@ export function ListDetail() {
     try {
       await api.reorderList(listId, next.map((it) => it.id));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '排序失败');
+      setError(e instanceof ApiError ? e.message : t('排序失败'));
       await load(); // 失败就把服务端的真顺序拉回来，别让界面停在假状态
     } finally {
       setBusy(false);
@@ -73,7 +75,7 @@ export function ListDetail() {
       setItems((cur) => cur.filter((it) => it.id !== itemId));
       setTotal((t) => Math.max(0, t - 1));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '移出失败');
+      setError(e instanceof ApiError ? e.message : t('移出失败'));
     } finally {
       setBusy(false);
     }
@@ -85,14 +87,14 @@ export function ListDetail() {
     <>
       <div className="card">
         <div className="row">
-          <h2 style={{ margin: 0 }}>{playlist?.name ?? '列表'}</h2>
-          {playlist?.kind === 'collection' && <span className="badge">合集</span>}
+          <h2 style={{ margin: 0 }}>{playlist?.name ?? t('列表')}</h2>
+          {playlist?.kind === 'collection' && <span className="badge">{t('合集')}</span>}
           {playlist && !playlist.mine && playlist.ownerName && (
-            <span className="faint small">由 {playlist.ownerName} 维护</span>
+            <span className="faint small">{t('由 {name} 维护', { name: playlist.ownerName })}</span>
           )}
         </div>
         <p className="muted small" style={{ marginTop: 6 }}>
-          {total} 个条目
+          {t('{n} 个条目', { n: total })}
           {playlist?.overview ? ` · ${playlist.overview}` : ''}
         </p>
 
@@ -103,11 +105,11 @@ export function ListDetail() {
               to={`/play/${first.id}?list=${listId}`}
               data-play-all={listId}
             >
-              ▶ 播放全部
+              ▶ {t('播放全部')}
             </Link>
           ) : (
             <button type="button" className="btn" disabled>
-              列表是空的
+              {t('列表是空的')}
             </button>
           )}
           <button
@@ -116,20 +118,22 @@ export function ListDetail() {
             onClick={() => setSorting((v) => !v)}
             disabled={items.length < 2}
           >
-            {sorting ? '完成排序' : '调整顺序'}
+            {sorting ? t('完成排序') : t('调整顺序')}
           </button>
           <div className="spacer" />
           <Link className="btn" to="/lists">
-            回列表页
+            {t('回列表页')}
           </Link>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {loading && <p className="muted">正在加载…</p>}
+        {loading && <p className="muted">{t('正在加载…')}</p>}
         {!loading && !error && items.length === 0 && (
           <p className="muted">
-            这个列表还是空的。到影片的<strong>详情页</strong>点「加入列表」，把想看的加进来
-            （收藏按钮旁边）。
+            {t('这个列表还是空的。到影片的')}
+            <strong>{t('详情页')}</strong>
+            {t('点「加入列表」，把想看的加进来')}
+            {t('（收藏按钮旁边）。')}
           </p>
         )}
       </div>
@@ -150,7 +154,7 @@ export function ListDetail() {
                     }}
                   />
                   <div className="search-card-body">
-                    <div className="search-title">{it.title || '（无标题）'}</div>
+                    <div className="search-title">{it.title || t('（无标题）')}</div>
                     <div className="muted small">
                       {kindLabel(it.kind)}
                       {it.year ? ` · ${it.year}` : ''}
@@ -166,7 +170,7 @@ export function ListDetail() {
                       <button
                         type="button"
                         className="btn btn-sm"
-                        aria-label="上移"
+                        aria-label={t('上移')}
                         disabled={i === 0 || busy}
                         onClick={() => void move(i, -1)}
                       >
@@ -175,7 +179,7 @@ export function ListDetail() {
                       <button
                         type="button"
                         className="btn btn-sm"
-                        aria-label="下移"
+                        aria-label={t('下移')}
                         disabled={i === items.length - 1 || busy}
                         onClick={() => void move(i, 1)}
                       >
@@ -189,7 +193,7 @@ export function ListDetail() {
                     disabled={busy}
                     onClick={() => void removeItem(it.id)}
                   >
-                    移出
+                    {t('移出')}
                   </button>
                 </div>
               </div>
@@ -197,7 +201,7 @@ export function ListDetail() {
           </div>
           {total > items.length && (
             <p className="muted small" style={{ marginTop: 10 }}>
-              列表里共有 {total} 个条目，这里显示了前 {items.length} 个。
+              {t('列表里共有 {n} 个条目，这里显示了前 {m} 个。', { n: total, m: items.length })}
             </p>
           )}
         </div>

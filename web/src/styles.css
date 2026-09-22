@@ -2279,3 +2279,29 @@ th {
     padding: 7px 14px;
   }
 }
+
+/* 界面语言选择器：与主题切换同一排，紧凑一点（它不是主操作） */
+.lang-select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 未登录页面（登录/初始化）：浮在右上角、在主题按钮左边 */
+.lang-float {
+  position: fixed;
+  top: 16px;
+  right: 128px;
+  z-index: 20;
+}
+
+@media (max-width: 480px) {
+  .lang-float {
+    right: 104px;
+  }
+}

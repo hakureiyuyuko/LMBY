@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { LibrarySummary, SearchFacets, SearchPage, SearchPeoplePage } from '../api';
 import { SearchBox } from '../components/SearchBox';
+import { useI18n } from '../i18n';
 import { kindLabel } from '../media';
 import { roleText } from '../people';
 
@@ -30,6 +31,7 @@ const PAGE_SIZE = 24;
 const PEOPLE_PAGE_SIZE = 24;
 
 export function Search() {
+  const { t } = useI18n();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -114,7 +116,7 @@ export function Search() {
         })
         .catch((e) => {
           if (!alive) return;
-          setError(e instanceof ApiError ? e.message : '搜索失败');
+          setError(e instanceof ApiError ? e.message : t('搜索失败'));
           setPeople(null);
         })
         .finally(done);
@@ -137,7 +139,7 @@ export function Search() {
         })
         .catch((e) => {
           if (!alive) return;
-          setError(e instanceof ApiError ? e.message : '搜索失败');
+          setError(e instanceof ApiError ? e.message : t('搜索失败'));
           setData(null);
         })
         .finally(done);
@@ -189,7 +191,7 @@ export function Search() {
   }
 
   const libraryName = (id?: number | null) =>
-    libraries.find((l) => l.id === id)?.name ?? (id ? `库 ${id}` : '');
+    libraries.find((l) => l.id === id)?.name ?? (id ? t('库 {id}', { id }) : '');
 
   const shown = data ? Math.min(data.offset + data.items.length, data.total) : 0;
   const peopleShown = people ? Math.min(people.offset + people.people.length, people.total) : 0;
@@ -197,11 +199,15 @@ export function Search() {
   return (
     <>
       <div className="card">
-        <h2>搜索</h2>
+        <h2>{t('搜索')}</h2>
         <p className="hint">
-          中文按二元组切词（「炼金」能搜到《钢之炼金术师》），英文按整词，并且<strong>容忍错字</strong>
-          （「钢之炼金术土」也能命中）。搜的既有<strong>作品</strong>（标题 / 原始标题），
-          也有<strong>演职员</strong>的名字 —— 敲几个字就会有联想，点人名可以只看他的作品。
+          {t('中文按二元组切词（「炼金」能搜到《钢之炼金术师》），英文按整词，并且')}
+          <strong>{t('容忍错字')}</strong>
+          {t('（「钢之炼金术土」也能命中）。搜的既有')}
+          <strong>{t('作品')}</strong>
+          {t('（标题 / 原始标题），也有')}
+          <strong>{t('演职员')}</strong>
+          {t('的名字 —— 敲几个字就会有联想，点人名可以只看他的作品。')}
         </p>
 
         <form
@@ -220,7 +226,7 @@ export function Search() {
             onPickPerson={(s) => pickPerson(s.id, s.title)}
           />
           <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? '搜索中…' : '搜索'}
+            {busy ? t('搜索中…') : t('搜索')}
           </button>
           <div className="spacer" />
           {anything && (
@@ -232,25 +238,24 @@ export function Search() {
                 setParams({});
               }}
             >
-              清空
-            </button>
-          )}
+              {t('清空')}
+            </button>          )}
         </form>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {!anything && <p className="muted">输入片名或演员名开始搜索。</p>}
+        {!anything && <p className="muted">{t('输入片名或演员名开始搜索。')}</p>}
       </div>
 
       {anything && facets && (
         <div className="card">
           <div className="facet-row">
-            <span className="facet-label">结果</span>
+            <span className="facet-label">{t('结果')}</span>
             <button
               type="button"
               className={`chip${!kind ? ' chip-on' : ''}`}
               onClick={() => go({ kind: '', tab: 'items', page: 0 })}
             >
-              全部 <span className="chip-count">{facets.total}</span>
+              {t('全部')} <span className="chip-count">{facets.total}</span>
             </button>
             {facets.kind.map((c) => (
               <button
@@ -275,14 +280,14 @@ export function Search() {
                 // 留着那些高亮会让人以为「人」也筛过了
                 onClick={() => go({ tab: 'people', kind: '', genre: '', lib: '', page: 0 })}
               >
-                人 <span className="chip-count">{facets.people}</span>
+                {t('人')} <span className="chip-count">{facets.people}</span>
               </button>
             )}
           </div>
 
           {facets.library.length > 0 && (
             <div className="facet-row">
-              <span className="facet-label">媒体库</span>
+              <span className="facet-label">{t('媒体库')}</span>
               {facets.library.map((f) => (
                 <button
                   type="button"
@@ -302,7 +307,7 @@ export function Search() {
 
           {facets.genre.length > 0 && (
             <div className="facet-row">
-              <span className="facet-label">流派</span>
+              <span className="facet-label">{t('流派')}</span>
               {facets.genre.map((f) => (
                 <button
                   type="button"
@@ -322,14 +327,13 @@ export function Search() {
 
           {someFilter && (
             <div className="facet-row">
-              <span className="facet-label">筛选</span>
+              <span className="facet-label">{t('筛选')}</span>
               {kind && (
                 <span className="chip chip-static">
-                  {kindLabel(kind)}
-                  <button
+                  {kindLabel(kind)}                  <button
                     type="button"
                     className="chip-x"
-                    aria-label="取消类型筛选"
+                    aria-label={t('取消类型筛选')}
                     onClick={() => go({ kind: '', page: 0 })}
                   >
                     ×
@@ -342,7 +346,7 @@ export function Search() {
                   <button
                     type="button"
                     className="chip-x"
-                    aria-label="取消流派筛选"
+                    aria-label={t('取消流派筛选')}
                     onClick={() => go({ genre: '', page: 0 })}
                   >
                     ×
@@ -355,7 +359,7 @@ export function Search() {
                   <button
                     type="button"
                     className="chip-x"
-                    aria-label="取消媒体库筛选"
+                    aria-label={t('取消媒体库筛选')}
                     onClick={() => go({ lib: '', page: 0 })}
                   >
                     ×
@@ -364,11 +368,11 @@ export function Search() {
               )}
               {person && (
                 <span className="chip chip-static chip-person">
-                  {personName || `人 #${person}`}
+                  {personName || t('人 #{id}', { id: person })}
                   <button
                     type="button"
                     className="chip-x"
-                    aria-label="取消按人筛选"
+                    aria-label={t('取消按人筛选')}
                     onClick={() => go({ person: '', name: '', page: 0 })}
                   >
                     ×
@@ -383,7 +387,7 @@ export function Search() {
                   setParams({});
                 }}
               >
-                清除全部
+                  {t('清除全部')}
               </button>
             </div>
           )}
@@ -394,15 +398,17 @@ export function Search() {
         <div className="card">
           <p className="muted small">
             {q ? `「${data.query}」` : ''}
-            {person ? `只看「${personName || `人 #${person}`}」参与的作品：` : ''}
-            共 {data.total} 条
-            {data.total > 0 ? `，显示第 ${data.offset + 1}~${shown} 条` : ''}
+            {person ? t('只看「{name}」参与的作品：', { name: personName || `#${person}` }) : ''}
+            {t('共 {n} 条', { n: data.total })}
+            {data.total > 0
+              ? t('，显示第 {a}~{b} 条', { a: data.offset + 1, b: shown })
+              : ''}
           </p>
 
           {data.items.length === 0 && (
             <p className="muted">
-              没有匹配的条目。试试只搜其中两个字，或者换个译名；也可以点上面的「人」看看
-              是不是在找某位演职员。
+              {t('没有匹配的条目。试试只搜其中两个字，或者换个译名；也可以点上面的「人」看看')}{' '}
+              {t('是不是在找某位演职员。')}
             </p>
           )}
 
@@ -421,7 +427,7 @@ export function Search() {
                       }}
                     />
                     <div className="search-card-body">
-                      <div className="search-title">{it.title || '（无标题）'}</div>
+                      <div className="search-title">{it.title || t('（无标题）')}</div>
                       <div className="muted small">
                         {kindLabel(it.kind)}
                         {it.seasonNumber != null ? ` S${it.seasonNumber}` : ''}
@@ -444,18 +450,20 @@ export function Search() {
                     disabled={page === 0}
                     onClick={() => go({ page: page - 1 })}
                   >
-                    上一页
+                    {t('上一页')}
                   </button>
                   <span className="faint">
-                    第 {page + 1} / {Math.max(1, Math.ceil(data.total / PAGE_SIZE))} 页
-                  </span>
-                  <button
+                    {t('第 {a} / {b} 页', {
+                      a: page + 1,
+                      b: Math.max(1, Math.ceil(data.total / PAGE_SIZE)),
+                    })}
+                  </span>                  <button
                     type="button"
                     className="btn btn-sm"
                     disabled={(page + 1) * PAGE_SIZE >= data.total}
                     onClick={() => go({ page: page + 1 })}
                   >
-                    下一页
+                    {t('下一页')}
                   </button>
                 </div>
               )}
@@ -467,13 +475,17 @@ export function Search() {
       {tab === 'people' && people && (
         <div className="card" data-tab="people">
           <p className="muted small">
-            「{people.query}」命中 {people.total} 位演职员
-            {people.total > 0 ? `，显示第 ${people.offset + 1}~${peopleShown} 位` : ''}。
-            点「看作品」列出他参与过的条目。
+            {t('「{q}」命中 {n} 位演职员', { q: people.query, n: people.total })}
+            {people.total > 0
+              ? t('，显示第 {a}~{b} 位', { a: people.offset + 1, b: peopleShown })
+              : ''}
+            {t('点「看作品」列出他参与过的条目。')}
           </p>
 
           {people.people.length === 0 && (
-            <p className="muted">没有匹配的演职员。演职员数据来自媒体同目录的 nfo（本地优先）。</p>
+            <p className="muted">
+              {t('没有匹配的演职员。演职员数据来自媒体同目录的 nfo（本地优先）。')}
+            </p>
           )}
 
           {people.people.length > 0 && (
@@ -486,7 +498,9 @@ export function Search() {
                       <span className="people-name">{p.name}</span>
                       <span className="faint small">
                         {roleText(p.roles)}
-                        {p.works ? `${roleText(p.roles) ? ' · ' : ''}${p.works} 部作品` : ''}
+                        {p.works
+                          ? `${roleText(p.roles) ? ' · ' : ''}${t('{n} 部作品', { n: p.works })}`
+                          : ''}
                       </span>
                     </span>
                     <button
@@ -494,7 +508,7 @@ export function Search() {
                       className="btn btn-sm"
                       onClick={() => pickPerson(p.id, p.name)}
                     >
-                      看作品
+                      {t('看作品')}
                     </button>
                   </li>
                 ))}
@@ -508,10 +522,13 @@ export function Search() {
                     disabled={page === 0}
                     onClick={() => go({ page: page - 1 })}
                   >
-                    上一页
+                    {t('上一页')}
                   </button>
                   <span className="faint">
-                    第 {page + 1} / {Math.max(1, Math.ceil(people.total / PEOPLE_PAGE_SIZE))} 页
+                    {t('第 {a} / {b} 页', {
+                      a: page + 1,
+                      b: Math.max(1, Math.ceil(people.total / PEOPLE_PAGE_SIZE)),
+                    })}
                   </span>
                   <button
                     type="button"
@@ -519,7 +536,7 @@ export function Search() {
                     disabled={(page + 1) * PEOPLE_PAGE_SIZE >= people.total}
                     onClick={() => go({ page: page + 1 })}
                   >
-                    下一页
+                    {t('下一页')}
                   </button>
                 </div>
               )}

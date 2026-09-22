@@ -1,9 +1,11 @@
+import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 
 /** 明暗主题切换按钮。默认放右上角；floating 用于登录/初始化这类居中页面。 */
 export function ThemeToggle({ floating = false }: { floating?: boolean }) {
   const { resolved, toggle } = useTheme();
-  const label = resolved === 'dark' ? '切换到亮色主题' : '切换到暗色主题';
+  const { t } = useI18n();
+  const label = resolved === 'dark' ? t('切换到亮色主题') : t('切换到暗色主题');
 
   return (
     <button
@@ -14,7 +16,7 @@ export function ThemeToggle({ floating = false }: { floating?: boolean }) {
       aria-label={label}
     >
       <span aria-hidden="true">{resolved === 'dark' ? '☾' : '☀'}</span>
-      <span>{resolved === 'dark' ? '暗色' : '亮色'}</span>
+      <span>{resolved === 'dark' ? t('暗色') : t('亮色')}</span>
     </button>
   );
 }

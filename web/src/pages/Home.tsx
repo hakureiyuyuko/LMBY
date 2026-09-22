@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { ContinueWatchingEntry, HomePayload, HomeTaste, Item } from '../api';
+import type { ContinueWatchingEntry, HomePayload, HomeSection, HomeTaste, Item } from '../api';
 import { formatClock } from '../capabilities';
+import { useI18n } from '../i18n';
 import { kindLabel } from '../media';
 
 /**
@@ -31,6 +32,7 @@ import { kindLabel } from '../media';
 const HERO_ROTATE_MS = 8000;
 
 export function Home() {
+  const { t } = useI18n();
   const [data, setData] = useState<HomePayload | null>(null);
   const [error, setError] = useState('');
   const [hero, setHero] = useState(0);
@@ -41,13 +43,68 @@ export function Home() {
       setData(await api.home());
       setError('');
     } catch {
-      setError('读取首页失败');
+      setError(t('读取首页失败'));
     }
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * 行的标题/副标题**按 key 本地化**，服务端给的中文只当兜底。
+   *
+   * 为什么这样做：API 要保持语言中立（它是给所有客户端与脚本用的），而文案属于界面。
+   * `key` 是稳定标识，界面按它自己写话 —— 于是切英文不必重启服务，也不必给后端做双语数据。
+   */
+  function rowTitle(s: HomeSection): string {
+    switch (s.key) {
+      case 'continue':
+        return t('继续观看');
+      case 'favorites':
+        return t('我的收藏');
+      case 'recommend':
+        return t('为你推荐');
+      case 'recent':
+        return t('最近添加');
+      case 'top':
+        return t('评分最高');
+      default:
+        return s.title;
+    }
+  }
+
+  /** 副标题同理；推荐那一行用后端一并返回的「口味画像」拼出真正的依据。 */
+  function rowSubtitle(s: HomeSection): string | undefined {
+    switch (s.key) {
+      case 'continue':
+        return t('进度按账号独立保存');
+      case 'favorites':
+        return t('你收藏过的 {n} 个条目', { n: s.items.length });
+      case 'recent':
+        return t('刚入库或元数据刚更新过的');
+      case 'top':
+        return t('还没有观看记录，先从这些开始');
+      case 'recommend': {
+        const genres = (s.taste ?? [])
+          .slice(0, 2)
+          .map((x) => x.genre)
+          .join(' · ');
+        if (s.sourceWorks === 1 && s.seedTitle) {
+          return t('因为你看过《{title}》', { title: s.seedTitle });
+        }
+        if (genres) {
+          return t('因为你喜欢 {genres}（最近看过 {n} 部作品）', {
+            genres,
+            n: s.sourceWorks ?? 0,
+          });
+        }
+        return t('根据你最近看过的 {n} 部作品', { n: s.sourceWorks ?? 0 });
+      }
+      default:
+        return s.subtitle;
+    }
+  }
 
   const heroItems = data?.hero ?? [];
 
@@ -76,7 +133,7 @@ export function Home() {
   return (
     <div className="home">
       {error && <div className="alert alert-error">{error}</div>}
-      {!data && !error && <p className="muted">正在加载首页…</p>}
+      {!data && !error && <p className="muted">{t('正在加载首页…')}</p>}
 
       {current && (
         <section
@@ -112,7 +169,7 @@ export function Home() {
               {current.officialRating ? ` · ${current.officialRating}` : ''}
               {current.communityRating ? ` · ★ ${current.communityRating.toFixed(1)}` : ''}
             </div>
-            <h1 className="hero-title">{current.title || '（无标题）'}</h1>
+            <h1 className="hero-title">{current.title || t('（无标题）')}</h1>
             {current.genres && current.genres.length > 0 && (
               <div className="hero-genres">
                 {current.genres.slice(0, 4).map((g) => (
@@ -129,10 +186,10 @@ export function Home() {
                 className="btn btn-primary hero-play"
                 to={resume ? `/play/${resume.item.id}` : `/play/${current.id}`}
               >
-                ▶ {resume ? '继续播放' : '播放'}
+                ▶ {resume ? t('继续播放') : t('播放')}
               </Link>
               <Link className="btn" to={`/item/${current.id}`}>
-                详情
+                {t('详情')}
               </Link>
             </div>
 
@@ -142,7 +199,8 @@ export function Home() {
                   <span style={{ width: `${progressPct(resume)}%` }} />
                 </span>
                 <span className="faint small">
-                  {resume.item.title} · 看到 {formatClock(resume.progress.positionTicks / 10_000_000)}
+                  {resume.item.title} ·{' '}
+                  {t('看到 {t}', { t: formatClock(resume.progress.positionTicks / 10_000_000) })}
                 </span>
               </div>
             )}
@@ -153,7 +211,7 @@ export function Home() {
               <button
                 type="button"
                 className="hero-arrow"
-                aria-label="上一部"
+                aria-label={t('轮播上一部')}
                 onClick={() => setHero((i) => (i - 1 + heroItems.length) % heroItems.length)}
               >
                 ‹
@@ -164,7 +222,7 @@ export function Home() {
                     type="button"
                     key={h.id}
                     className={`hero-dot${i === hero ? ' on' : ''}`}
-                    aria-label={`第 ${i + 1} 部：${h.title}`}
+                    aria-label={t('第 {n} 部：{title}', { n: i + 1, title: h.title })}
                     data-hero-dot={i}
                     onClick={() => setHero(i)}
                   />
@@ -173,7 +231,7 @@ export function Home() {
               <button
                 type="button"
                 className="hero-arrow"
-                aria-label="下一部"
+                aria-label={t('轮播下一部')}
                 onClick={() => setHero((i) => (i + 1) % heroItems.length)}
               >
                 ›
@@ -184,7 +242,7 @@ export function Home() {
       )}
 
       {data && data.continue.length > 0 && (
-        <RowBlock title="继续观看" subtitle="进度按账号独立保存" itemsKey="continue">
+        <RowBlock title={t('继续观看')} subtitle={t('进度按账号独立保存')} itemsKey="continue">
           {data.continue.map((e) => (
             <Link className="continue-card" key={e.item.id} to={`/play/${e.item.id}`}>
               <span className="continue-poster">
@@ -201,10 +259,10 @@ export function Home() {
                 </span>
               </span>
               <span className="continue-title" title={e.item.title}>
-                {e.item.title || '（无标题）'}
+                {e.item.title || t('（无标题）')}
               </span>
               <span className="muted small">
-                还剩 {formatClock(e.remainingTicks / 10_000_000)}
+                {t('还剩 {t}', { t: formatClock(e.remainingTicks / 10_000_000) })}
               </span>
             </Link>
           ))}
@@ -214,8 +272,8 @@ export function Home() {
       {data?.sections.map((s) => (
         <RowBlock
           key={s.key}
-          title={s.title}
-          subtitle={s.subtitle}
+          title={rowTitle(s)}
+          subtitle={rowSubtitle(s)}
           taste={s.taste}
           itemsKey={s.key}
         >
@@ -227,10 +285,12 @@ export function Home() {
 
       {data && data.hero.length === 0 && data.sections.length === 0 && (
         <div className="card">
-          <h2>欢迎使用 LMBY</h2>
+          <h2>{t('欢迎使用 LMBY')}</h2>
           <p className="muted">
-            媒体库里还没有内容。先去 <Link to="/libraries">库管理</Link> 添加一个媒体库并扫描，
-            条目的海报、简介与演职员会从同目录的 nfo 读进来（本地优先，不联网）。
+            {t('媒体库里还没有内容。先去')} <Link to="/libraries">{t('库管理')}</Link>{' '}
+            {t(
+              '添加一个媒体库并扫描，条目的海报、简介与演职员会从同目录的 nfo 读进来（本地优先，不联网）。',
+            )}
           </p>
         </div>
       )}
@@ -254,6 +314,7 @@ function RowBlock(props: {
   itemsKey: string;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const ref = useRef<HTMLDivElement | null>(null);
 
   // 一次滚动 80% 可视宽度：留一点重叠，用户才知道「刚才那几张还在左边」
@@ -280,10 +341,10 @@ function RowBlock(props: {
           </span>
         )}
         <div className="spacer" />
-        <button type="button" className="row-arrow" aria-label="向左滚动" onClick={() => scroll(-1)}>
+        <button type="button" className="row-arrow" aria-label={t('向左滚动')} onClick={() => scroll(-1)}>
           ‹
         </button>
-        <button type="button" className="row-arrow" aria-label="向右滚动" onClick={() => scroll(1)}>
+        <button type="button" className="row-arrow" aria-label={t('向右滚动')} onClick={() => scroll(1)}>
           ›
         </button>
       </div>
@@ -296,6 +357,7 @@ function RowBlock(props: {
 
 /** 海报卡片：与海报墙、详情页的推荐用的是同一套类名（卡片全站只有一套定义）。 */
 function PosterCard({ item }: { item: Item }) {
+  const { t } = useI18n();
   return (
     <Link className="poster-card row-item" to={`/item/${item.id}`}>
       {/* 占位块在下、图在上：没海报时不会留下空洞 */}
@@ -313,13 +375,13 @@ function PosterCard({ item }: { item: Item }) {
       </span>
       <div className="poster-body">
         <div className="poster-title" title={item.title}>
-          {item.title || '（无标题）'}
+          {item.title || t('（无标题）')}
         </div>
         <div className="muted small">
           {item.year ?? ''}
           {item.seasonNumber != null ? ` S${item.seasonNumber}` : ''}
           {item.episodeNumber != null ? `E${item.episodeNumber}` : ''}
-          {item.kind === 'series' ? ' 剧集' : ''}
+          {item.kind === 'series' ? t('剧集') : ''}
         </div>
       </div>
     </Link>

@@ -248,6 +248,20 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-lists.sh
 # M6 播放列表：界面验收（37 项）——建列表 → 详情页加入 → 调序 → 播放全部 → 下一项 → 移出 → 删除
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/lists-ui-test.mjs
 
+# M6 响应式：界面验收（35 项）——8 个页面 × 3 个宽度扩横向滚动 + 手机上的导航/海报墙/分面/表格
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/responsive-ui-test.mjs
+
+# M6 i18n：界面验收（25 项）——切英文 → 逐元素查文案 → 刷新还记着 → 切回中文
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/i18n-ui-test.mjs
+
+# i18n 覆盖率（静态扫源码，不在容器里跑也行）：未包 t 的文案 + 用了 t 却没目录的键
+node scripts/dev/i18n-coverage.mjs            # 看现状
+node scripts/dev/i18n-coverage.mjs --max 599  # 守住预算（新增未翻译文案就报错）
+
+> ⚠️ 界面测试在无头 Chrome 里会先把界面语言钉成中文（`localStorage`）：
+> i18n 按 `navigator.language` 探测，而 headless 默认 `en-US` —— 不钉住的话
+> 断言中文的那些用例全假失败（详见 docs/notes/i18n.md）。
+
 # M2 海报墙 / 剧集视图 / 批量 / 设置页：真库 HTTP 验收
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-browse.sh    # 40 项
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-settings.sh  # 38 项

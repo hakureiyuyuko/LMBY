@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { api } from '../api';
 import type { Suggestion } from '../api';
+import { useI18n } from '../i18n';
 import { kindLabel } from '../media';
 import { roleText } from '../people';
 
@@ -38,6 +39,7 @@ export interface SearchBoxProps {
 export function SearchBox(props: SearchBoxProps) {
   const { value, onChange, onSubmit, onPickItem, onPickPerson, placeholder, autoFocus } = props;
 
+  const { t } = useI18n();
   const [items, setItems] = useState<Suggestion[]>([]);
   const [people, setPeople] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -155,7 +157,7 @@ export function SearchBox(props: SearchBoxProps) {
         className="search-input"
         value={value}
         autoFocus={autoFocus}
-        placeholder={placeholder ?? '片名、原名或演员名，如「言叶之庭」「宫崎骏」「Matrix」'}
+        placeholder={placeholder ?? t('片名、原名或演员名，如「言叶之庭」「宫崎骏」「Matrix」')}
         aria-label="搜索"
         autoComplete="off"
         onChange={(e) => {
@@ -182,7 +184,7 @@ export function SearchBox(props: SearchBoxProps) {
         >
           {items.length > 0 && (
             <>
-              <div className="suggest-group">作品</div>
+              <div className="suggest-group">{t('作品')}</div>
               {items.map((s) => (
                 <button
                   type="button"
@@ -202,7 +204,7 @@ export function SearchBox(props: SearchBoxProps) {
                     }}
                   />
                   <span className="suggest-body">
-                    <span className="suggest-title">{s.title || '（无标题）'}</span>
+                    <span className="suggest-title">{s.title || t('（无标题）')}</span>
                     <span className="faint small">
                       {s.kind ? kindLabel(s.kind) : ''}
                       {s.year ? ` · ${s.year}` : ''}
@@ -215,7 +217,7 @@ export function SearchBox(props: SearchBoxProps) {
 
           {people.length > 0 && (
             <>
-              <div className="suggest-group">演职员</div>
+              <div className="suggest-group">{t('演职员')}</div>
               {people.map((s) => (
                 <button
                   type="button"
@@ -247,7 +249,9 @@ export function SearchBox(props: SearchBoxProps) {
               onSubmit(value.trim());
             }}
           >
-            <span className="suggest-body">搜索「{value.trim()}」的全部结果</span>
+            <span className="suggest-body">
+              {t('搜索「{q}」的全部结果', { q: value.trim() })}
+            </span>
           </button>
         </div>
       )}

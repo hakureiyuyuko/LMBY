@@ -102,9 +102,12 @@ func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSe
 			Key:      "recommend",
 			Title:    "为你推荐",
 			Subtitle: recommendSubtitle(rec),
-			// 画像一起返回：界面显示「你爱看哪几类」，验收脚本用它断言「每条推荐都命中画像」
-			Taste: rec.Taste,
-			Items: rec.Items,
+			// 画像与依据一起返回：界面显示「你爱看哪几类」/「因为你看过《X》」，
+			// 验收脚本用它断言「每条推荐都命中画像」
+			Taste:       rec.Taste,
+			SourceWorks: rec.SourceWorks,
+			SeedTitle:   rec.SeedTitle,
+			Items:       rec.Items,
 		})
 
 	case rec.SourceWorks == 0:

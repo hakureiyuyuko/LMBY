@@ -819,6 +819,10 @@ export interface HomeSection {
   subtitle?: string;
   /** 只有「为你推荐」有：口味画像。 */
   taste?: HomeTaste[];
+  /** 只有「为你推荐」有：画像用到了多少部作品（界面拼本地化依据用）。 */
+  sourceWorks?: number;
+  /** 只有「为你推荐」有：最近看过的那部作品名。 */
+  seedTitle?: string;
   items: Item[];
 }
 

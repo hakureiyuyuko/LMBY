@@ -33,7 +33,12 @@ type HomeSection struct {
 	// Taste 只有「为你推荐」有：口味画像（流派 + 权重，按权重倒序）。
 	// 它的存在是给两件事用：界面显示「你爱看哪几类」、验收脚本做精确断言。
 	Taste []TasteGenre `json:"taste,omitempty"`
-	Items []Item       `json:"items"`
+	// SourceWorks / SeedTitle 也只有「为你推荐」有：
+	// 界面用它**在客户端**拼出本地化的推荐依据（「因为你看过《X》」），
+	// 这样 API 不必为每种语言准备一份文案。
+	SourceWorks int    `json:"sourceWorks,omitempty"`
+	SeedTitle   string `json:"seedTitle,omitempty"`
+	Items       []Item `json:"items"`
 }
 
 // ListRecentItems 取最近更新/入库的顶层条目（电影 / 剧集），供轮播与「最近添加」用。

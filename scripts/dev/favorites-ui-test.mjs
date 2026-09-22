@@ -176,6 +176,14 @@ async function main() {
   await connect(tab.webSocketDebuggerUrl);
   await send('Page.enable');
   await send('Runtime.enable');
+  // 把界面语言钉成中文：i18n 按 navigator.language 探测，而 headless Chrome 默认是 en-US。
+  // ⚠️ 用 localStorage + reload 钉，而不是 Emulation.setLocaleOverride ——
+  //    后者在部分 Chrome 上只影响 Intl、不改 navigator.language（实测无效）。
+  await send('Page.navigate', { url: `${BASE}/login` });
+  await sleep(900);
+  await evaluate(`localStorage.setItem('lmby.lang', 'zh-CN')`);
+  await send('Page.reload');
+  await sleep(900);
   await send('Log.enable');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
+import { useI18n } from '../i18n';
 import type { BrowsePage, LibrarySummary } from '../api';
 
 /**
@@ -16,9 +17,7 @@ const kindTabs = [
   { v: '', l: '全部' },
   { v: 'movie', l: '电影' },
   { v: 'series', l: '剧集' },
-];
-
-const sortOptions = [
+];const sortOptions = [
   { v: 'title', l: '按标题' },
   { v: 'year', l: '按年份' },
   { v: 'added', l: '最近添加' },
@@ -27,6 +26,7 @@ const sortOptions = [
 const PAGE_SIZE = 60;
 
 export function Browse() {
+  const { t } = useI18n();
   const params0 = useParams();
   const libraryId = Number(params0.id);
   const [params, setParams] = useSearchParams();
@@ -56,7 +56,7 @@ export function Browse() {
 
   useEffect(() => {
     if (!Number.isFinite(libraryId) || libraryId <= 0) {
-      setError('媒体库 id 非法');
+      setError(t('媒体库 id 非法'));
       return;
     }
     api
@@ -80,7 +80,7 @@ export function Browse() {
       })
       .catch((e) => {
         if (!alive) return;
-        setError(e instanceof ApiError ? e.message : '读取失败');
+        setError(e instanceof ApiError ? e.message : t('读取失败'));
         setData(null);
       })
       .finally(() => {
@@ -129,16 +129,16 @@ export function Browse() {
 
       <div className="card">
         <div className="row">
-          <h2 style={{ margin: 0 }}>{library?.name ?? '海报墙'}</h2>
+          <h2 style={{ margin: 0 }}>{library?.name ?? t('海报墙')}</h2>
           <div className="tabs" style={{ marginBottom: 0, marginLeft: 12 }}>
-            {kindTabs.map((t) => (
+            {kindTabs.map((tab) => (
               <button
-                key={t.v}
+                key={tab.v}
                 type="button"
-                className={kind === t.v ? 'tab active' : 'tab'}
-                onClick={() => setParams(buildParams(t.v, sort))}
+                className={kind === tab.v ? 'tab active' : 'tab'}
+                onClick={() => setParams(buildParams(tab.v, sort))}
               >
-                {t.l}
+                {t(tab.l)}
               </button>
             ))}
           </div>
@@ -154,21 +154,27 @@ export function Browse() {
             </select>
           </label>
           <Link className="btn btn-sm" to={`/libraries?lib=${libraryId}`}>
-            库管理
+            {t('库管理')}
           </Link>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {!data && !error && <p className="muted">正在读取…</p>}
+        {!data && !error && <p className="muted">{t('正在读取…')}</p>}
         {data && (
           <p className="muted small" style={{ marginTop: 10 }}>
-            共 {data.total} 条{data.total > 0 ? `，显示第 ${data.offset + 1}~${Math.min(data.offset + data.items.length, data.total)} 条` : ''}
-            {busy ? ' · 加载中…' : ''}
+            {t('共 {n} 条', { n: data.total })}
+            {data.total > 0
+              ? t('，显示第 {a}~{b} 条', {
+                  a: data.offset + 1,
+                  b: Math.min(data.offset + data.items.length, data.total),
+                })
+              : ''}
+            {busy ? t(' · 加载中…') : ''}
           </p>
         )}
         {data && data.items.length === 0 && (
           <p className="muted">
-            这里还没有条目。先在「库管理」里扫描一次 —— 扫描会登记文件、导入同目录的 nfo 与图片。
+            {t('这里还没有条目。先在「库管理」里扫描一次 —— 扫描会登记文件、导入同目录的 nfo 与图片。')}
           </p>
         )}
       </div>

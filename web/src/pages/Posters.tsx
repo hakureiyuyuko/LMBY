@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import type { LibrarySummary } from '../api';
+import { useI18n } from '../i18n';
 
 /**
  * 海报墙入口（导航栏里的「海报墙」）。
@@ -11,6 +12,7 @@ import type { LibrarySummary } from '../api';
  * 多个库时让他挑一个，一个都没有就指到库管理。
  */
 export function Posters() {
+  const { t } = useI18n();
   const [libs, setLibs] = useState<LibrarySummary[] | null>(null);
   const [error, setError] = useState('');
 
@@ -22,7 +24,7 @@ export function Posters() {
         if (alive) setLibs(r.libraries ?? []);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof ApiError ? e.message : '读取媒体库失败');
+        if (alive) setError(e instanceof ApiError ? e.message : t('读取媒体库失败'));
       });
     return () => {
       alive = false;
@@ -32,26 +34,26 @@ export function Posters() {
   if (error) {
     return (
       <div className="card">
-        <h2>读不到媒体库</h2>
+        <h2>{t('读不到媒体库')}</h2>
         <div className="alert alert-error">{error}</div>
         <Link className="btn" to="/libraries">
-          去库管理看看
+          {t('去库管理看看')}
         </Link>
       </div>
     );
   }
 
-  if (!libs) return <p className="muted">正在读取媒体库…</p>;
+  if (!libs) return <p className="muted">{t('正在读取媒体库…')}</p>;
 
   if (libs.length === 0) {
     return (
       <div className="card">
-        <h2>还没有媒体库</h2>
+        <h2>{t('还没有媒体库')}</h2>
         <p className="hint">
-          媒体库是「一个目录树 = 一面海报墙」。先在库管理里把服务器上的目录加进来，扫一次就有了。
+          {t('媒体库是「一个目录树 = 一面海报墙」。先在库管理里把服务器上的目录加进来，扫一次就有了。')}
         </p>
         <Link className="btn btn-primary" to="/libraries">
-          去建媒体库
+          {t('去建媒体库')}
         </Link>
       </div>
     );
@@ -63,15 +65,15 @@ export function Posters() {
 
   return (
     <div className="card">
-      <h2>选择媒体库</h2>
-      <p className="hint">每个库是一面独立的墙。</p>
+      <h2>{t('选择媒体库')}</h2>
+      <p className="hint">{t('每个库是一面独立的墙。')}</p>
       <div className="row">
         {libs.map((l) => (
           <Link key={l.id} className="btn" to={`/library/${l.id}`}>
             {l.name}
             <span className="faint small">
               {' '}
-              {(l.counts?.movie ?? 0) + (l.counts?.series ?? 0)} 条
+              {t('{n} 条', { n: (l.counts?.movie ?? 0) + (l.counts?.series ?? 0) })}
             </span>
           </Link>
         ))}

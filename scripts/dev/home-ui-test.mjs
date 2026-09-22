@@ -179,6 +179,14 @@ async function main() {
   await connect(tab.webSocketDebuggerUrl);
   await send('Page.enable');
   await send('Runtime.enable');
+  // 把界面语言钉成中文：i18n 按 navigator.language 探测，而 headless Chrome 默认是 en-US。
+  // ⚠️ 用 localStorage + reload 钉，而不是 Emulation.setLocaleOverride ——
+  //    后者在部分 Chrome 上只影响 Intl、不改 navigator.language（实测无效）。
+  await send('Page.navigate', { url: `${BASE}/login` });
+  await sleep(900);
+  await evaluate(`localStorage.setItem('lmby.lang', 'zh-CN')`);
+  await send('Page.reload');
+  await sleep(900);
   await send('Log.enable');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
 
@@ -261,13 +269,13 @@ async function main() {
       true,
       await evaluate(`document.querySelector('.hero-dot[data-hero-dot="1"]')?.classList.contains('on')`),
     );
-    await evaluate(`document.querySelector('.hero-arrow[aria-label="下一部"]').click()`);
+    await evaluate(`document.querySelector('.hero-arrow[aria-label="轮播下一部"]').click()`);
     check(
       '点 › → 换到第 3 条',
       String(home.hero[2].id),
       await evaluate(`document.querySelector('.hero[data-hero-id]')?.dataset.heroId || ''`),
     );
-    await evaluate(`document.querySelector('.hero-arrow[aria-label="上一部"]').click()`);
+    await evaluate(`document.querySelector('.hero-arrow[aria-label="轮播上一部"]').click()`);
     check(
       '点 ‹ → 退回第 2 条',
       String(home.hero[1].id),
