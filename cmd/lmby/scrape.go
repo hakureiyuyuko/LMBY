@@ -177,7 +177,7 @@ func targetLibraryIDs(ctx context.Context, st *store.Store, libraryID int64) ([]
 		}
 		return []int64{libraryID}, nil
 	}
-	libs, err := st.ListLibraries(ctx)
+	libs, err := st.ListLibraries(ctx, nil) /* CLI 是本地管理命令，不受库授权限制 */
 	if err != nil {
 		return nil, err
 	}

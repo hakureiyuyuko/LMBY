@@ -51,6 +51,10 @@ type SearchQuery struct {
 	Genre string
 	// PersonID 限定「这个人参与过的条目」（空 = 不限），走 item_people 表。
 	PersonID *int64
+	// LibraryIDs 是**权限**意义上的可见库（nil/空 = 不过滤）。
+	// 与上面的 LibraryID 不是一回事：那个是用户自己选的筛选（$1），
+	// 这个是「这个人本来就不该看到别的库」，列表、总数、分面、联想都要带。
+	LibraryIDs []int64
 	// Limit/Offset 分页；Limit <= 0 用默认 24，上限 100。
 	Limit  int
 	Offset int
@@ -129,6 +133,14 @@ const searchColumns = `i.id, i.library_id, i.kind, i.parent_id, i.series_id, i.s
 //
 // 筛选维度都写成 `$n 为空 = 不限`：空值判断在前，整个条件少一层拼装。
 // 词的最后一组三路并列，$5 为空串时整组恒为真（= 不加词过滤）。
+// searchConditionOf 在共用搜索条件后接上「权限可见库」条件。
+//
+// 占位符由调用方给（"$6"/"$7"/"$8"）：各查询里 limit/offset 的编号不同，
+// 硬写一个编号必然错位（而这类错位只在运行时才炸，所以宁可显式传）。
+func searchConditionOf(libs string) string {
+	return searchCondition + ` and (cardinality(` + libs + `::bigint[]) = 0 or i.library_id = any(` + libs + `))`
+}
+
 const searchCondition = `
 	i.deleted_at is null
 	and ($1::bigint is null or i.library_id = $1)
@@ -238,9 +250,9 @@ func (s *Store) SearchItems(ctx context.Context, q SearchQuery) ([]SearchHit, in
 			        greatest(word_similarity($5, i.title),
 			                 word_similarity($5, i.original_title)) as similarity
 			 from media_items i
-			 where `+searchCondition+searchOrder+`
+			 where `+searchConditionOf("$8")+searchOrder+`
 			 limit $6 offset $7`,
-			append(append([]any{}, args...), limit, offset)...)
+			append(append(append([]any{}, args...), limit, offset), q.LibraryIDs)...)
 		if err != nil {
 			return fmt.Errorf("搜索条目失败: %w", err)
 		}
@@ -264,7 +276,8 @@ func (s *Store) SearchItems(ctx context.Context, q SearchQuery) ([]SearchHit, in
 		rows.Close()
 
 		return tx.QueryRow(ctx,
-			`select count(*) from media_items i where `+searchCondition, args...).Scan(&total)
+			`select count(*) from media_items i where `+searchConditionOf("$6"),
+			append(append([]any{}, args...), q.LibraryIDs)...).Scan(&total)
 	})
 	if err != nil {
 		return nil, 0, err
@@ -314,18 +327,21 @@ func (s *Store) SearchFacets(ctx context.Context, q SearchQuery) (SearchFacets, 
 			dst  *[]SearchFacet
 			take int
 		}{
-			{dimKind, `select i.kind, count(*) from media_items i where ` + searchCondition +
+			{dimKind, `select i.kind, count(*) from media_items i where ` + searchConditionOf("$6") +
 				` group by 1 order by 2 desc, 1`, &out.Kind, 0},
-			{dimLibrary, `select i.library_id::text, count(*) from media_items i where ` + searchCondition +
+			// 库这一维也带可见库条件：分面里出现「看不见的库」比列表里出现更糟
+			// （等于把库的存在连同条数一起漏出去）。
+			{dimLibrary, `select i.library_id::text, count(*) from media_items i where ` + searchConditionOf("$6") +
 				` group by 1 order by 2 desc, 1`, &out.Library, 0},
 			// 流派要先把 jsonb 数组摊开：一条条目有多个流派，所以每行只算一个流派
 			// （于是 sum(genre) 会大于条目数，这是对的，不该被「修」成相等）。
 			// 只取前 20 个流派：几百条命中里长尾流派对「筛一下」没有帮助。
 			{dimGenre, `select g, count(*) from media_items i, jsonb_array_elements_text(i.genres) g where ` +
-				searchCondition + ` group by 1 order by 2 desc, 1 limit 20`, &out.Genre, 0},
+				searchConditionOf("$6") + ` group by 1 order by 2 desc, 1 limit 20`, &out.Genre, 0},
 		}
 		for _, t := range terms {
-			rows, err := tx.Query(ctx, t.sql, q.filters(t.dim)...)
+			terms_args := append(append([]any{}, q.filters(t.dim)...), q.LibraryIDs)
+			rows, err := tx.Query(ctx, t.sql, terms_args...)
 			if err != nil {
 				return fmt.Errorf("统计 %s 分面失败: %w", t.dim, err)
 			}
@@ -361,7 +377,7 @@ func (s *Store) SearchFacets(ctx context.Context, q SearchQuery) (SearchFacets, 
 
 		// 总数：用完整的筛选（与 SearchItems 完全一致的那一段）
 		if err := tx.QueryRow(ctx,
-			`select count(*) from media_items i where `+searchCondition, q.filters("")...).Scan(&out.Total); err != nil {
+			`select count(*) from media_items i where `+searchConditionOf("$6"), append(q.filters(""), q.LibraryIDs)...).Scan(&out.Total); err != nil {
 			return fmt.Errorf("统计搜索结果失败: %w", err)
 		}
 		return nil
@@ -490,7 +506,7 @@ type Suggestions struct {
 // 为什么不复用 SearchItems 的查询：联想每次按键都要跑（还带防抖），
 // 只需要 id/title/kind/year 这几列，把 29 列与 overview 一起拉回来是浪费；
 // 但**排的是同一个序**（searchOrder），否则「回车后东西换了位置」。
-func (s *Store) SearchSuggest(ctx context.Context, text string, limit int) (Suggestions, error) {
+func (s *Store) SearchSuggest(ctx context.Context, text string, limit int, libs []int64) (Suggestions, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Suggestions{}, errors.New("搜索词不能为空")
@@ -506,10 +522,10 @@ func (s *Store) SearchSuggest(ctx context.Context, text string, limit int) (Sugg
 	err := s.withTrgm(ctx, func(tx pgx.Tx) error {
 		// 条目：筛选维度全空（联想不看当前筛选，永远给全局最像的几个 ——
 		// 这是「联想」与「结果分面」的分工，见 docs/notes/search.md）
-		args := append(append([]any{}, SearchQuery{Text: text}.filters("")...), limit)
+		args := append(append(append([]any{}, SearchQuery{Text: text}.filters("")...), limit), libsArg(libs))
 		rows, err := tx.Query(ctx,
 			`select i.id, i.title, i.kind, i.year from media_items i
-			 where `+searchCondition+searchOrder+` limit $6`, args...)
+			 where `+searchConditionOf("$7")+searchOrder+` limit $6`, args...)
 		if err != nil {
 			return fmt.Errorf("联想作品失败: %w", err)
 		}

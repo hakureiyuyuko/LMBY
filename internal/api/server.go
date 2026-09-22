@@ -78,6 +78,14 @@ func newScanManager(cfg *config.Config, st *store.Store, log *slog.Logger) *scan
 }
 
 // 不接时相关界面只显示只读开关与说明，不显示叠加层占用。
+// viewerFor 组装当前请求的权限载体（库可见性 / 能否转码 / 能否看直播 / 并发上限）。
+//
+// **权限判定的唯一入口**：所有需要按用户过滤的 handler 都从这里拿 Viewer，
+// 不自己拼 —— 散落一处就会漏一处，而漏掉的那处就是越权。
+func (s *Server) viewerFor(ctx context.Context, r *http.Request) (store.Viewer, error) {
+	return s.store.ViewerFor(ctx, currentAuth(r).User)
+}
+
 func (s *Server) SetOverlay(o *overlay.Service) { s.overlay = o }
 
 // New 构造 Server。
@@ -168,6 +176,14 @@ func (s *Server) Handler() http.Handler {
 	// 只读库的刮削产物（overlay）：清空 + 看板统计
 	mux.Handle("DELETE /api/v1/libraries/{id}/overlay", s.requireAuth(s.handleClearLibraryOverlay))
 	mux.Handle("GET /api/v1/overlay", s.requireAuth(s.handleOverlayStats))
+
+	// 用户与权限（管理员）—— 见 docs/notes/users-permissions.md
+	mux.Handle("GET /api/v1/users", s.requireAdmin(s.handleListUsers))
+	mux.Handle("POST /api/v1/users", s.requireAdmin(s.handleCreateUser))
+	mux.Handle("PATCH /api/v1/users/{id}", s.requireAdmin(s.handleUpdateUser))
+	mux.Handle("PUT /api/v1/users/{id}/libraries", s.requireAdmin(s.handleSetUserLibraries))
+	mux.Handle("POST /api/v1/users/{id}/password", s.requireAdmin(s.handleSetUserPassword))
+	mux.Handle("DELETE /api/v1/users/{id}", s.requireAdmin(s.handleDeleteUser))
 	mux.Handle("POST /api/v1/libraries/{id}/scan", s.requireAuth(s.handleStartScan))
 	mux.Handle("DELETE /api/v1/libraries/{id}/scan", s.requireAuth(s.handleCancelScan))
 	mux.Handle("GET /api/v1/libraries/{id}/scan", s.requireAuth(s.handleScanStatus))

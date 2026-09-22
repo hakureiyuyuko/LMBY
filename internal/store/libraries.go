@@ -116,9 +116,13 @@ func (s *Store) GetLibrary(ctx context.Context, id int64) (*Library, error) {
 }
 
 // ListLibraries 读取全部媒体库（含根路径）。
-func (s *Store) ListLibraries(ctx context.Context) ([]Library, error) {
+// ListLibraries 列媒体库。libs 是权限可见库（nil/空 = 不过滤，管理员用）——
+// 这是「看不见的库不该出现在界面上」的第一道门。
+func (s *Store) ListLibraries(ctx context.Context, libs []int64) ([]Library, error) {
 	rows, err := s.pool.Query(ctx,
-		`select `+libraryColumns+` from libraries order by id`)
+		`select `+libraryColumns+` from libraries
+		 where `+libraryFilter("libraries.id", "$1")+`
+		 order by id`, libsArg(libs))
 	if err != nil {
 		return nil, fmt.Errorf("查询媒体库列表失败: %w", err)
 	}

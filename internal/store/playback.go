@@ -232,15 +232,17 @@ type ContinueWatching struct {
 //
 // 剧集在这里是「集」而不是「剧」：用户想接着看的是下一集，
 // 而不是回到剧集这一层再点两下（「下一集」由前端用剧集结构算）。
-func (s *Store) ListContinueWatching(ctx context.Context, userID int64, limit int) ([]ContinueWatching, error) {
+func (s *Store) ListContinueWatching(ctx context.Context, userID int64, limit int, libs []int64) ([]ContinueWatching, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	rows, err := s.pool.Query(ctx,
-		`select item_id from playback_progress
-		 where user_id = $1 and played = false and position_ticks > 0
-		 order by last_played_at desc nulls last, updated_at desc
-		 limit $2`, userID, limit)
+		`select p.item_id from playback_progress p
+		   join media_items i on i.id = p.item_id
+		 where p.user_id = $1 and p.played = false and p.position_ticks > 0
+		   and `+libraryFilter("i.library_id", "$3")+`
+		 order by p.last_played_at desc nulls last, p.updated_at desc
+		 limit $2`, userID, limit, libsArg(libs))
 	if err != nil {
 		return nil, fmt.Errorf("读取继续观看列表失败: %w", err)
 	}

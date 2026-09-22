@@ -28,6 +28,18 @@ func (s *Server) itemForRequest(w http.ResponseWriter, r *http.Request) (*store.
 		s.serverError(w, "读取条目失败", err)
 		return nil, false
 	}
+	// 权限：条目所在的库看不见 → **404**（不区分「不存在」与「不给你看」，
+	// 免得用状态码把别人的库探出来）。这里是所有条目级接口（详情/编辑/取图/播放）的
+	// 共同入口，所以权限只在这里判一次。
+	v, verr := s.viewerFor(r.Context(), r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return nil, false
+	}
+	if !v.CanSeeLibrary(item.LibraryID) {
+		writeError(w, http.StatusNotFound, "条目不存在")
+		return nil, false
+	}
 	return item, true
 }
 

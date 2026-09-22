@@ -847,6 +847,53 @@ const en: Record<string, string> = {
   '这里改的是「怎么用」（名字 / 分组 / 排序 / logo）与「启用状态」。改名与分组下次刷新订阅源时会按播放列表还原 —— 播放列表才是频道的来源；「启用状态」与「收藏」不会被刷新覆盖。':
     'What you change here is how a channel is used (name / group / order / logo) and whether it is enabled. Names and groups are restored from the playlist the next time the source refreshes — the playlist is the source of truth; enabled state and favorites are never overwritten.',
 
+  // ---------------------------------------------------------------- 用户与权限（Users）
+  '用户': 'Users',
+  '用户 {n}': 'Users ({n})',
+  '读取用户列表失败': 'Failed to load users',
+  '＋ 新建用户': '+ New user',
+  '用户名（登录用，不能带空格）': 'Username (for sign-in, no spaces)',
+  '口令（至少 8 位）': 'Password (8+ characters)',
+  '设为管理员': 'Make administrator',
+  '创建': 'Create',
+  '创建用户失败': 'Failed to create the user',
+  '用户名与口令都要填': 'Username and password are both required',
+  '已创建用户「{name}」。': 'Created the user “{name}”.',
+  '权限只有四项：管理员、能看到哪些媒体库、并发播放数（0 = 用全局上限）、以及能不能转码 / 看直播。改口令、禁用或收紧库范围后，对方的登录会立刻失效。':
+    'Permissions come in four parts: administrator, which libraries are visible, concurrent streams (0 = the global limit), and whether transcoding / Live TV is allowed. Changing a password, disabling an account or narrowing its libraries signs that person out immediately.',
+  '管理员': 'Administrator',
+  '已禁用': 'Disabled',
+  '{n} 个库': '{n} libraries',
+  '全部库': 'All libraries',
+  ' · 并发 {n}': ' · {n} streams',
+  ' · 禁止转码': ' · no transcoding',
+  ' · 无直播': ' · no Live TV',
+  ' · 这是你': ' · this is you',
+  '并发播放上限（0 = 全局）': 'Concurrent stream limit (0 = global)',
+  '已保存「{name}」。': 'Saved “{name}”.',
+  '不能改自己（防手一滑把自己锁在外面）': 'You cannot change this for yourself (avoids locking yourself out)',
+  '已更新。': 'Updated.',
+  '允许转码': 'Allow transcoding',
+  '允许直播': 'Allow Live TV',
+  '禁用这个账号': 'Disable this account',
+  '已禁用（这个人的登录会立刻失效）。': 'Disabled (their sign-in is invalidated right away).',
+  '已恢复。': 'Restored.',
+  '只给勾选的媒体库': 'Only the selected libraries',
+  '已改为按库限制：下面勾什么就给什么。': 'Switched to per-library access: only what you tick below is granted.',
+  '已改为全部库可见。': 'Switched back to all libraries visible.',
+  '保存可见库（{n} 个）': 'Save visible libraries ({n})',
+  '现在这个人能看到全部媒体库。勾上面这项才能按库限制。':
+    'This person can see every library right now. Tick the box above to restrict them by library.',
+  '已保存库授权（对方的登录会立刻失效，重新登录后生效）。':
+    'Library access saved (their sign-in is invalidated; it applies after signing in again).',
+  '重置口令（至少 8 位，重置即把他踢下线）': 'Reset password (8+ characters; signs them out)',
+  '口令已重置（旧登录已失效）。': 'Password reset (old sign-ins are invalid).',
+  '重置口令': 'Reset password',
+  '删除用户「{name}」？他的收藏、播放列表与观看进度都会一起删掉（媒体文件不受影响）。':
+    'Delete the user “{name}”? Their favorites, playlists and watch progress go away too (media files are untouched).',
+  '删除用户': 'Delete user',
+  '已删除。': 'Deleted.',
+
   // ---------------------------------------------------------------- 详情页
   '未刮削': 'Not scraped',
   '来自 nfo': 'From nfo',

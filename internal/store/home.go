@@ -42,7 +42,7 @@ type HomeSection struct {
 }
 
 // ListRecentItems 取最近更新/入库的顶层条目（电影 / 剧集），供轮播与「最近添加」用。
-func (s *Store) ListRecentItems(ctx context.Context, limit int) ([]Item, error) {
+func (s *Store) ListRecentItems(ctx context.Context, limit int, libs []int64) ([]Item, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -50,8 +50,9 @@ func (s *Store) ListRecentItems(ctx context.Context, limit int) ([]Item, error) 
 		`select `+itemListColumns+`
 		 from media_items
 		 where deleted_at is null and kind in ('movie', 'series')
+		   and `+libraryFilter("media_items.library_id", "$2")+`
 		 order by updated_at desc, id desc
-		 limit $1`, limit)
+		 limit $1`, limit, libsArg(libs))
 	if err != nil {
 		return nil, fmt.Errorf("查询最近更新失败: %w", err)
 	}
@@ -61,7 +62,7 @@ func (s *Store) ListRecentItems(ctx context.Context, limit int) ([]Item, error) 
 // ListTopRatedItems 取评分最高的顶层条目 —— 「还没有观看记录」时的兜底行。
 //
 // 没评分的排在后面（`nulls last`），否则一批没有评分的条目会盖住真正的高分片。
-func (s *Store) ListTopRatedItems(ctx context.Context, limit int) ([]Item, error) {
+func (s *Store) ListTopRatedItems(ctx context.Context, limit int, libs []int64) ([]Item, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -69,8 +70,9 @@ func (s *Store) ListTopRatedItems(ctx context.Context, limit int) ([]Item, error
 		`select `+itemListColumns+`
 		 from media_items
 		 where deleted_at is null and kind in ('movie', 'series')
+		   and `+libraryFilter("media_items.library_id", "$2")+`
 		 order by community_rating desc nulls last, year desc nulls last, id
-		 limit $1`, limit)
+		 limit $1`, limit, libsArg(libs))
 	if err != nil {
 		return nil, fmt.Errorf("查询高分条目失败: %w", err)
 	}
@@ -116,7 +118,9 @@ type Recommendation struct {
 //
 // 也就是「你看得越多的类型，越容易再推给你」。平手时按评分、年份、id 兜底，
 // 保证刷新与分页稳定（同一个库两次请求顺序一致）。
-func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (Recommendation, error) {
+// libs 是可见库（nil = 不过滤）：口味、历史、候选池**都**按它过滤 ——
+// 私密库的观看记录不该影响看得见的推荐，候选也不该从看不见的库里来。
+func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int, libs []int64) (Recommendation, error) {
 	var out Recommendation
 	if limit <= 0 || limit > 100 {
 		limit = 20
@@ -127,7 +131,8 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		`select count(distinct coalesce(i.series_id, i.id))::int
 		 from playback_progress pp
 		 join media_items i on i.id = pp.item_id
-		 where pp.user_id = $1 and i.deleted_at is null`, userID).Scan(&out.SourceWorks); err != nil {
+		 where pp.user_id = $1 and i.deleted_at is null
+		   and `+libraryFilter("i.library_id", "$4")+``, userID, libsArg(libs)).Scan(&out.SourceWorks); err != nil {
 		return out, fmt.Errorf("统计观看记录失败: %w", err)
 	}
 	if out.SourceWorks == 0 {
@@ -139,8 +144,9 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		 join media_items i on i.id = pp.item_id
 		 left join media_items s on s.id = i.series_id
 		 where pp.user_id = $1 and i.deleted_at is null
+		   and `+libraryFilter("i.library_id", "$4")+`
 		 order by pp.last_played_at desc nulls last, pp.updated_at desc
-		 limit 1`, userID).Scan(&out.SeedTitle); err != nil {
+		 limit 1`, userID, libsArg(libs)).Scan(&out.SeedTitle); err != nil {
 		return out, fmt.Errorf("查询最近观看失败: %w", err)
 	}
 
@@ -150,11 +156,12 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		 from (select genres from playback_progress pp
 		       join media_items i on i.id = pp.item_id
 		       where pp.user_id = $1 and i.deleted_at is null
+		         and `+libraryFilter("i.library_id", "$4")+`
 		       order by pp.last_played_at desc nulls last, pp.updated_at desc
 		       limit $2) w,
 		      jsonb_array_elements_text(w.genres) g
 		 group by g
-		 order by weight desc, g`, userID, tasteProfileLimit)
+		 order by weight desc, g`, userID, tasteProfileLimit, libsArg(libs))
 	if err != nil {
 		return out, fmt.Errorf("读取口味画像失败: %w", err)
 	}
@@ -173,6 +180,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		     from playback_progress pp
 		     join media_items i on i.id = pp.item_id
 		     where pp.user_id = $1 and i.deleted_at is null
+		       and `+libraryFilter("i.library_id", "$4")+`
 		 ),
 		 taste as (
 		     select g, count(*) as weight
@@ -190,6 +198,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		     from media_items c
 		     where c.deleted_at is null
 		       and c.kind in ('movie', 'series')
+		       and `+libraryFilter("c.library_id", "$4")+`
 		       -- 碰过的「作品」整体排除（正在追的剧、看完的电影都不再推荐）
 		       and coalesce(c.series_id, c.id) not in (select distinct work_id from watched)
 		 )
@@ -201,7 +210,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int) (
 		 where cand.score > 0
 		 order by cand.score desc, community_rating desc nulls last,
 		          year desc nulls last, id
-		 limit $2`, userID, limit, tasteProfileLimit)
+		 limit $2`, userID, limit, tasteProfileLimit, libsArg(libs))
 	if err != nil {
 		return out, fmt.Errorf("查询推荐失败: %w", err)
 	}

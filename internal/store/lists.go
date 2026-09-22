@@ -60,7 +60,8 @@ func (s *Store) FavoriteState(ctx context.Context, userID, itemID int64) (bool, 
 //
 // kind 为空表示不限类型；`deleted_at is null` 把已经扫不见的条目挡在外面
 // （文件被删掉之后收藏行还在，但用户不该看到一个点不开的条目）。
-func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, limit, offset int) ([]Item, int64, error) {
+// libs 是可见库（nil = 不过滤）：收藏里的条目也可能落在看不见的库里。
+func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, limit, offset int, libs []int64) ([]Item, int64, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -69,9 +70,11 @@ func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, li
 	}
 	kind = strings.TrimSpace(kind)
 
-	const cond = `f.user_id = $1
+	// 可见库条件与列表**共用**（count 也用它，否则「共 N 条」会和列出来的对不上）
+	cond := `f.user_id = $1
 		and media_items.deleted_at is null
-		and ($2::text = '' or media_items.kind = $2)`
+		and ($2::text = '' or media_items.kind = $2)
+		and ` + libraryFilter("media_items.library_id", "$5")
 
 	rows, err := s.pool.Query(ctx,
 		`select `+itemListColumns+`
@@ -79,7 +82,7 @@ func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, li
 		 join favorites f on f.item_id = media_items.id
 		 where `+cond+`
 		 order by f.created_at desc, media_items.id desc
-		 limit $3 offset $4`, userID, kind, limit, offset)
+		 limit $3 offset $4`, userID, kind, limit, offset, libsArg(libs))
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询收藏失败: %w", err)
 	}
@@ -92,7 +95,7 @@ func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, li
 	if err := s.pool.QueryRow(ctx,
 		`select count(*) from media_items
 		 join favorites f on f.item_id = media_items.id
-		 where `+cond, userID, kind).Scan(&total); err != nil {
+		 where `+cond, userID, kind, limit, offset, libsArg(libs)).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("统计收藏失败: %w", err)
 	}
 	return items, total, nil
@@ -108,11 +111,25 @@ func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, li
 // `GetPlaylistFor` / `UpdatePlaylist` 这类入口进 —— 每个接口各自判一次权限，
 // 迟早会漏一处，而漏一处就是越权。
 
-// Viewer 是「谁在看 / 谁在改」。
+// Viewer 是「谁在看 / 谁在改」—— **权限判定的唯一载体**。
+//
+// 字段分两类：
+//   - 列表归属：UserID / IsAdmin（这个文件里的 canSee/canEdit 用）；
+//   - 库可见性与能力：restrict 之后只允许看白名单里的库，以及能不能转码 / 看直播
+//     （见 permissions.go 的 ViewerFor 与 libraryFilter，读路径统一在 SQL 层过滤）。
 type Viewer struct {
 	UserID int64
-	// IsAdmin 决定能不能碰别人的合集（M7 之后可以按库授权再收紧）。
+	// IsAdmin 决定能不能碰别人的合集、以及能不能看到全部库。
 	IsAdmin bool
+
+	// libs：nil = 不限制（管理员 / 未开启按库限制）；空切片 = 什么都看不到。
+	libs []int64
+
+	// AllowTranscode / AllowLiveTV / MaxStreams：这个人能不能转码、能不能看直播、
+	// 同时能开几条播放会话（0 = 用全局上限）。
+	AllowTranscode bool
+	AllowLiveTV    bool
+	MaxStreams     int
 }
 
 // canSee 判断可见性：自己的列表，或者合集。

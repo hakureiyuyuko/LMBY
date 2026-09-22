@@ -45,7 +45,12 @@ func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 
-	items, total, err := s.store.ListFavorites(ctx, authCtx.User.ID, kind, limit, offset)
+	v, verr := s.viewerFor(ctx, r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	items, total, err := s.store.ListFavorites(ctx, authCtx.User.ID, kind, limit, offset, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取收藏失败", err)
 		return

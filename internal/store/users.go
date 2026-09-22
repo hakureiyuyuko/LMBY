@@ -25,19 +25,28 @@ type User struct {
 	IsAdmin              bool       `json:"isAdmin"`
 	IsDisabled           bool       `json:"isDisabled"`
 	MaxConcurrentStreams int32      `json:"maxConcurrentStreams"`
-	CreatedAt            time.Time  `json:"createdAt"`
-	LastLoginAt          *time.Time `json:"lastLoginAt,omitempty"`
+	// RestrictedLibraries：打开后按 user_libraries 白名单给库；关着＝全部库可见。
+	// 默认关（＝现在行为）：升级后老账号不会忽然看不见东西。
+	RestrictedLibraries bool `json:"restrictedLibraries"`
+	// AllowTranscode：关掉只能直出/转封装（保护 CPU）。默认开。
+	AllowTranscode bool `json:"allowTranscode"`
+	// AllowLiveTV：关掉看不到「直播」页。默认开。
+	AllowLiveTV  bool       `json:"allowLiveTV"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	LastLoginAt  *time.Time `json:"lastLoginAt,omitempty"`
 
 	PasswordHash string `json:"-"`
 }
 
 const userColumns = `id, username, display_name, password_hash, is_admin, is_disabled,
-	max_concurrent_streams, created_at, last_login_at`
+	max_concurrent_streams, restrict_libraries, allow_transcode, allow_livetv,
+	created_at, last_login_at`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.IsAdmin,
-		&u.IsDisabled, &u.MaxConcurrentStreams, &u.CreatedAt, &u.LastLoginAt)
+		&u.IsDisabled, &u.MaxConcurrentStreams, &u.RestrictedLibraries,
+		&u.AllowTranscode, &u.AllowLiveTV, &u.CreatedAt, &u.LastLoginAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -156,12 +165,12 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 
 	var out []User
 	for rows.Next() {
-		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.IsAdmin,
-			&u.IsDisabled, &u.MaxConcurrentStreams, &u.CreatedAt, &u.LastLoginAt); err != nil {
+		// 统一走 scanUser：列变了就不会出现「查询 12 列、扫描 9 个」这种错位
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, u)
+		out = append(out, *u)
 	}
 	return out, rows.Err()
 }

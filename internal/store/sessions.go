@@ -62,11 +62,11 @@ func (s *Store) GetSessionUser(ctx context.Context, id string) (*Session, *User,
 		return nil, nil, err
 	}
 
-	var u User
-	err = s.pool.QueryRow(ctx,
-		`select `+userColumns+` from users where id = $1 and not is_disabled`, sess.UserID).
-		Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.IsAdmin,
-			&u.IsDisabled, &u.MaxConcurrentStreams, &u.CreatedAt, &u.LastLoginAt)
+	// ⚠️ 用 scanUser 而不是手写 Scan：列一变（这里是加权限字段那次）手写的那份就会
+	// 静默错位成「12 列 vs 9 个目的地」——表现是**每个带 token 的请求都 401**
+	// （登录能过、之后全挂），排查起来很费劲。真踩到过。
+	u, err := scanUser(s.pool.QueryRow(ctx,
+		`select `+userColumns+` from users where id = $1 and not is_disabled`, sess.UserID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
@@ -74,7 +74,7 @@ func (s *Store) GetSessionUser(ctx context.Context, id string) (*Session, *User,
 		return nil, nil, fmt.Errorf("读取会话用户失败: %w", err)
 	}
 	sess.Current = true
-	return sess, &u, nil
+	return sess, u, nil
 }
 
 // TouchSessionIfStale 刷新会话活跃时间。
@@ -163,4 +163,21 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// CountUserSessions 数某个用户当前有几个有效会话（用户管理界面显示用）。
+func (s *Store) CountUserSessions(ctx context.Context, userID int64) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`select count(*)::int from sessions where user_id = $1 and expires_at > now()`, userID).Scan(&n)
+	return n, err
+}
+
+// DeleteUserSessions 吊销某个用户的**全部**会话。
+//
+// 用在「改口令 / 禁用 / 收紧库授权」之后：不吊销的话，旧 token 还带着旧的权限集合，
+// 权限改了等于没改（这是权限系统最容易漏的一处）。
+func (s *Store) DeleteUserSessions(ctx context.Context, userID int64) error {
+	_, err := s.pool.Exec(ctx, `delete from sessions where user_id = $1`, userID)
+	return err
 }

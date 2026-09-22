@@ -29,7 +29,13 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 
-	libs, err := s.store.ListLibraries(ctx)
+	// 权限：只列这个人看得见的库（看不见的库不下发，界面上也不该有它的名字）
+	v, err := s.viewerFor(ctx, r)
+	if err != nil {
+		s.serverError(w, "读取用户权限失败", err)
+		return
+	}
+	libs, err := s.store.ListLibraries(ctx, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取媒体库失败", err)
 		return
@@ -319,7 +325,7 @@ func (s *Server) handleOverlayStats(w http.ResponseWriter, r *http.Request) {
 	names := map[int64]string{}
 	nameCtx, cancelNames := contextWithTimeout(r, 5*time.Second)
 	defer cancelNames()
-	if libs, err := s.store.ListLibraries(nameCtx); err == nil {
+	if libs, err := s.store.ListLibraries(nameCtx, nil); err == nil {
 		for _, l := range libs {
 			names[l.ID] = l.Name
 		}

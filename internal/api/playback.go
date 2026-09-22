@@ -345,6 +345,17 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		profile = req.Profile.Normalize()
 	}
 
+	// 权限载体（库可见性 / 能否转码 / 能否看直播）：起播前统一取一次
+	v, verr := s.viewerFor(r.Context(), r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	if !v.CanSeeLibrary(item.LibraryID) {
+		writeError(w, http.StatusNotFound, "条目不存在")
+		return
+	}
+
 	files, err := s.store.ListPlayableFiles(r.Context(), item.ID)
 	if err != nil {
 		s.serverError(w, "读取条目文件失败", err)
@@ -410,6 +421,14 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		BurnSubtitle:       req.BurnSubtitle,
 		StartTicks:         startTicks,
 	})
+
+	// 权限：被限制为「不允许转码」的人遇到必须转码的片，直接说清楚 ——
+	// **不起 ffmpeg**（这正是这个开关的意义：保护 CPU，而不是转完再报错）。
+	if plan.Playable && plan.Mode == playback.ModeTranscode && !v.AllowTranscode {
+		writeError(w, http.StatusForbidden,
+			"这个文件必须转码才能播，而你的账号被限制为不允许转码 —— 可以让管理员开一下，或换浏览器能直接播的版本")
+		return
+	}
 
 	// 找到实际使用的文件行（决策只给了 id）。
 	file, hasFile := findPlayableFile(files, plan.FileID)
@@ -1226,7 +1245,12 @@ func (s *Server) handleContinueWatching(w http.ResponseWriter, r *http.Request) 
 	if limit == 0 {
 		limit = 20
 	}
-	list, err := s.store.ListContinueWatching(r.Context(), authCtx.User.ID, limit)
+	v, verr := s.viewerFor(r.Context(), r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	list, err := s.store.ListContinueWatching(r.Context(), authCtx.User.ID, limit, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取继续观看列表失败", err)
 		return

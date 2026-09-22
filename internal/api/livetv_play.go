@@ -244,6 +244,16 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "频道已停用，先在直播页把它启用")
 		return
 	}
+	// 权限：这个账号能不能看直播（直播源常是私人的，管理员可以关掉某个人）
+	v, verr := s.viewerFor(r.Context(), r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	if !v.AllowLiveTV {
+		writeError(w, http.StatusForbidden, "你的账号被限制为不允许观看直播")
+		return
+	}
 	if strings.TrimSpace(ch.URL) == "" {
 		writeError(w, http.StatusBadRequest, "这条频道没有播放地址")
 		return
@@ -266,6 +276,12 @@ func (s *Server) handleStartLivePlay(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "生成播放会话失败", errors.New("随机数不可用"))
 		return
 	}
+	if mode == liveModeTranscode && !v.AllowTranscode {
+		writeError(w, http.StatusForbidden,
+			"这个频道的编码浏览器解不开、需要转码，而你的账号被限制为不允许转码")
+		return
+	}
+
 	s.livePlays.add(&livePlaySession{
 		sid:       sid,
 		channelID: ch.ID,

@@ -179,6 +179,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	s.writeSessionUser(w, r, http.StatusOK, a.User)
 }
 
+// 说明：/me 的用户对象里带上 allowLiveTV / allowTranscode / restrictedLibraries
+// （见 writeSessionUser → sessionUser 视图），前端据此隐藏「直播」导航、
+// 在播放器里给出「不允许转码」的提示 —— 界面上不该出现点了就报 403 的入口。
+
 type updateProfileRequest struct {
 	DisplayName *string `json:"displayName"`
 }

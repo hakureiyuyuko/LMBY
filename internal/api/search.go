@@ -33,7 +33,7 @@ type searchFilter struct {
 // 关于「查询词可以为空」的规则：**只有当还给了别的筛选维度时才允许**。
 // 空词 + 无筛选 = 「返回全部条目」，那是列表接口的活，这里宁可报 400
 // 也不给一个会被误当搜索结果的响应。
-func parseSearchFilter(w http.ResponseWriter, r *http.Request) (searchFilter, bool) {
+func (s *Server) parseSearchFilter(w http.ResponseWriter, r *http.Request) (searchFilter, bool) {
 	var f searchFilter
 	q := r.URL.Query()
 
@@ -64,6 +64,15 @@ func parseSearchFilter(w http.ResponseWriter, r *http.Request) (searchFilter, bo
 		f.query.PersonID = &id
 	}
 
+	// 权限：把「这个人能看哪些库」塞进查询 —— 列表、总数、分面、联想全都会带上它。
+	// 放在这里而不是每个 handler 各写一遍：搜索这一块的所有入口都过这个函数。
+	v, err := s.viewerFor(r.Context(), r)
+	if err != nil {
+		s.serverError(w, "读取用户权限失败", err)
+		return f, false
+	}
+	f.query.LibraryIDs = v.LibraryIDs()
+
 	if f.text == "" && !f.query.HasFilter() {
 		writeError(w, http.StatusBadRequest, "缺少查询词 q（或者给一个筛选条件：libraryId / kind / genre / personId）")
 		return f, false
@@ -88,7 +97,7 @@ func searchFilterEcho(f store.SearchQuery) map[string]any {
 // 参数：q（可空，见 parseSearchFilter）、libraryId、kind、genre、personId、limit、offset。
 // 取舍：limit 上限 100 —— 搜索结果是给人翻的，不是用来导数据的。
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	f, ok := parseSearchFilter(w, r)
+	f, ok := s.parseSearchFilter(w, r)
 	if !ok {
 		return
 	}
@@ -135,7 +144,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // 参数与 handleSearch 完全一样（分面必须与结果用同一组筛选，否则数字对不上），
 // 只是不分页。响应里的 facets.total 就是同一组筛选下条目的命中总数。
 func (s *Server) handleSearchFacets(w http.ResponseWriter, r *http.Request) {
-	f, ok := parseSearchFilter(w, r)
+	f, ok := s.parseSearchFilter(w, r)
 	if !ok {
 		return
 	}
@@ -221,7 +230,13 @@ func (s *Server) handleSearchSuggest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 
-	sug, err := s.store.SearchSuggest(ctx, text, limit)
+	// 联想也要按可见库过滤（不然敲两个字就能探出私密库里的片名）
+	v, verr := s.viewerFor(ctx, r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	sug, err := s.store.SearchSuggest(ctx, text, limit, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "联想失败", err)
 		return

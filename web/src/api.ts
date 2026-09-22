@@ -10,6 +10,11 @@ export interface User {
   isDisabled: boolean;
   createdAt: string;
   lastLoginAt?: string;
+  // 权限开关（/me 直接下发，见 internal/api/auth.go）：界面上据此隐藏
+  // 「直播」入口、在播放器里给出「不允许转码」的提示 —— 别做点了就 403 的按钮。
+  allowLiveTV?: boolean;
+  allowTranscode?: boolean;
+  restrictedLibraries?: boolean;
 }
 
 export interface Preferences {
@@ -151,6 +156,39 @@ export const api = {
     request<{ ok: boolean; files: number; bytes: number }>(`/api/v1/libraries/${id}/overlay`, {
       method: 'DELETE',
     }),
+  // ---------------------------------------------------------------- 用户与权限（管理员）
+
+  /** 用户列表（管理员）。 */
+  users: () => request<{ users: UserView[] }>('/api/v1/users'),
+  createUser: (body: { username: string; password: string; displayName?: string; isAdmin?: boolean }) =>
+    request<{ user: UserView }>('/api/v1/users', { method: 'POST', ...json(body) }),
+  /** 改显示名 / 管理员 / 禁用 / 并发上限 / 转码 / 直播 / 按库限制开关。 */
+  updateUser: (
+    id: number,
+    body: Partial<{
+      displayName: string;
+      isAdmin: boolean;
+      isDisabled: boolean;
+      maxConcurrentStreams: number;
+      restrictedLibraries: boolean;
+      allowTranscode: boolean;
+      allowLiveTV: boolean;
+    }>,
+  ) => request<{ user: UserView }>(`/api/v1/users/${id}`, { method: 'PATCH', ...json(body) }),
+  /** 整份替换可见库（白名单语义）。 */
+  setUserLibraries: (id: number, libraryIds: number[]) =>
+    request<{ user: UserView }>(`/api/v1/users/${id}/libraries`, {
+      method: 'PUT',
+      ...json({ libraryIds }),
+    }),
+  /** 管理员重置口令（重置即吊销该用户全部会话）。 */
+  setUserPassword: (id: number, password: string) =>
+    request<{ ok: boolean }>(`/api/v1/users/${id}/password`, {
+      method: 'POST',
+      ...json({ password }),
+    }),
+  deleteUser: (id: number) => request<{ ok: boolean }>(`/api/v1/users/${id}`, { method: 'DELETE' }),
+
   /** 各库叠加层占用汇总（设置页看板）。 */
   overlayStats: () =>
     request<{
@@ -595,6 +633,22 @@ export interface LibraryPath {
   path: string;
   readonly: boolean;
   sortOrder: number;
+}
+
+export interface UserView {
+  id: number;
+  username: string;
+  displayName: string;
+  isAdmin: boolean;
+  isDisabled: boolean;
+  maxConcurrentStreams: number;
+  restrictedLibraries: boolean;
+  libraryIds: number[];
+  allowTranscode: boolean;
+  allowLiveTV: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  activeSessions: number;
 }
 
 export interface LibrarySummary {

@@ -26,10 +26,13 @@ export function Layout() {
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
             {t('首页')}
           </NavLink>
-          {/* 直播电视（M5）：普通用户也能用（频道列表 + 起播），源与探测只对管理员显示 */}
+          {/* 直播电视（M5）：普通用户也能用（频道列表 + 起播），源与探测只对管理员显示。
+              被管理员关掉「允许直播」的账号看不到这个入口 —— 界面上不做点了就 403 的东西。 */}
+          {(user?.allowLiveTV ?? true) && (
           <NavLink to="/livetv" className={({ isActive }) => (isActive ? 'active' : '')}>
             {t('直播')}
           </NavLink>
+          )}
           <NavLink to="/search" className={({ isActive }) => (isActive ? 'active' : '')}>
             {t('搜索')}
           </NavLink>

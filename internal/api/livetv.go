@@ -112,6 +112,18 @@ func (s *Server) handleListTVChannels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 
+	// 权限：被限制为「不允许直播」的账号连列表都不给（前端也会把入口藏起来，
+	// 这里只是兜底 —— 界面上不该出现点了就 403 的东西，但接口不能靠界面自觉）
+	v, verr := s.viewerFor(r.Context(), r)
+	if verr != nil {
+		s.serverError(w, "读取用户权限失败", verr)
+		return
+	}
+	if !v.AllowLiveTV {
+		writeError(w, http.StatusForbidden, "你的账号被限制为不允许观看直播")
+		return
+	}
+
 	q := r.URL.Query()
 	query := store.TVChannelQuery{
 		UserID:        a.User.ID,

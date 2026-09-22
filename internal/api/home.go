@@ -36,8 +36,13 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	authCtx := currentAuth(r)
 	ctx, cancel := contextWithTimeout(r, 25*time.Second)
 	defer cancel()
+	v, err := s.viewerFor(ctx, r)
+	if err != nil {
+		s.serverError(w, "读取用户权限失败", err)
+		return
+	}
 
-	hero, err := s.store.ListRecentItems(ctx, homeHeroLimit)
+	hero, err := s.store.ListRecentItems(ctx, homeHeroLimit, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取首页轮播失败", err)
 		return
@@ -47,7 +52,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		hero = []store.Item{}
 	}
 
-	continueList, err := s.store.ListContinueWatching(ctx, authCtx.User.ID, homeContinueLimit)
+	continueList, err := s.store.ListContinueWatching(ctx, authCtx.User.ID, homeContinueLimit, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取继续观看失败", err)
 		return
@@ -56,7 +61,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		continueList = []store.ContinueWatching{}
 	}
 
-	sections, err := s.homeSections(ctx, authCtx.User.ID)
+	sections, err := s.homeSections(ctx, authCtx.User.ID, v.LibraryIDs())
 	if err != nil {
 		s.serverError(w, "读取首页推荐失败", err)
 		return
@@ -74,12 +79,12 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 // 取舍：**有观看记录就出「为你推荐」，没有就退成「评分最高」** ——
 // 新装的实例首页不该是一片空白，而空着一行「为你推荐（暂无数据）」也没意义。
 // 「最近添加」永远都在（它不依赖账号状态）。
-func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSection, error) {
+func (s *Server) homeSections(ctx context.Context, userID int64, libs []int64) ([]store.HomeSection, error) {
 	sections := []store.HomeSection{}
 
 	// 收藏排在最前面（它是用户自己挑的，比算法推的更有分量），
 	// 但要放在「继续观看」后面：正在看的东西优先于「以后想看」的。
-	favorites, _, err := s.store.ListFavorites(ctx, userID, "", homeRowLimit, 0)
+	favorites, _, err := s.store.ListFavorites(ctx, userID, "", homeRowLimit, 0, libs)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +97,7 @@ func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSe
 		})
 	}
 
-	rec, err := s.store.RecommendForUser(ctx, userID, homeRowLimit)
+	rec, err := s.store.RecommendForUser(ctx, userID, homeRowLimit, libs)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +116,7 @@ func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSe
 		})
 
 	case rec.SourceWorks == 0:
-		top, err := s.store.ListTopRatedItems(ctx, homeRowLimit)
+		top, err := s.store.ListTopRatedItems(ctx, homeRowLimit, libs)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +133,7 @@ func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSe
 		s.log.Debug("首页推荐为空", "user", userID, "sourceWorks", rec.SourceWorks)
 	}
 
-	recent, err := s.store.ListRecentItems(ctx, homeRowLimit)
+	recent, err := s.store.ListRecentItems(ctx, homeRowLimit, libs)
 	if err != nil {
 		return nil, err
 	}

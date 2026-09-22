@@ -2452,3 +2452,15 @@ th {
   .tv-side { max-height: 46vh; order: 2; }
   .tv-pane { order: 1; }
 }
+
+/* ---- 用户与权限（设置 → 用户）-------------------------------------------------- */
+.user-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.user-row { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.user-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 12px; background: var(--bg-elev-2); color: var(--fg);
+  border: 0; cursor: pointer; font: inherit; text-align: left;
+}
+.user-head:hover { background: var(--bg-elev); }
+.user-name { font-weight: 600; }
+.user-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); }
