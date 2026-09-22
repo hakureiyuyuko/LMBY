@@ -1496,7 +1496,26 @@ th {
 .search-box {
   position: relative;
   flex: 1 1 260px;
-  min-width: 220px;
+  min-width: 0;
+}
+
+/* 网格/弹性子项默认 min-width:auto（= 内容的 min-content），中文长标题会把卡片顶宽，
+ * 于是一整行溢出——这两条是「手机上没有横向滚动」的关键修复，不是可选项。 */
+.search-card,
+.poster-card,
+.continue-card,
+.list-item-card {
+  min-width: 0;
+}
+
+.search-card-body,
+.poster-body {
+  min-width: 0;
+}
+
+.search-title,
+.poster-title {
+  overflow-wrap: anywhere;
 }
 
 .search-box .search-input {
@@ -2046,4 +2065,217 @@ th {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---------------------------------------------------------------- 响应式（M6）
+ *
+ * 目标很具体：**手机上没有横向滚动**，并且主要操作（导航、播放、收藏、搜索）都点得到。
+ * 三个断点：
+ *   ≤ 1024px  平板横屏：收窄留白与行卡片
+ *   ≤ 768px   平板竖屏 / 大手机：顶栏换两行（品牌+操作一行、导航自己一行横滑），
+ *             表格与键值表改成可横滑 / 单列
+ *   ≤ 480px   手机：海报更小、字号与控件再收一档
+ *
+ * 为什么导航用「横向滚动」而不是汉堡菜单：汉堡要多一份 JS 状态（开/关、点外关闭、
+ * 路由变化关闭、aria-expanded、焦点管理…），而横滑标签栏是手机上熟得不能再熟的交互。
+ * 右侧给了一层渐隐（mask）提示「后面还有」，滚动条本身藏掉。
+ *
+ * 注意：这里只改布局与尺寸，**不动主题变量**（配色是另一件事，改了会波及所有页面）。
+ */
+
+@media (max-width: 1024px) {
+  .content {
+    padding: 20px 14px 48px;
+  }
+
+  .content-wide {
+    max-width: 100%;
+  }
+
+  /* 导航开始能滑：不加 overflow 的话它会挤扁其它元素，最终撑出横向滚动条 */
+  .nav {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ⚠️ 光给 .nav 加 overflow 不够：flex 子项默认会被压缩，
+     中文标签会被压成「每字一行」的竖排（看着像坏了）。
+     要显式禁止收缩 + 禁止换行，让它们保持自然宽度、让容器去滑。 */
+  .nav a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .hero {
+    margin: -20px -14px 8px;
+    height: 36vh;
+    min-height: 260px;
+  }
+
+  .hero-body {
+    max-width: 560px;
+    padding: 24px 22px 20px;
+  }
+
+  .row-item,
+  .row-scroll .continue-card {
+    flex: 0 0 132px;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 顶栏换两行：第一行是品牌与操作，第二行整条给导航 */
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+
+  .brand {
+    font-size: 17px;
+  }
+
+  .brand small {
+    display: none;
+  }
+
+  .nav {
+    order: 10;
+    width: 100%;
+    margin-left: 0;
+    padding-bottom: 2px;
+    /* 右端渐隐：告诉用户「还能往右滑」 */
+    mask-image: linear-gradient(to right, #000 92%, transparent);
+  }
+
+  .content {
+    padding: 14px 12px 40px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .hero {
+    margin: -14px -12px 8px;
+    height: 32vh;
+    min-height: 220px;
+  }
+
+  .hero-body {
+    max-width: none;
+    padding: 18px 14px 14px;
+    gap: 8px;
+  }
+
+  .hero-nav {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .hero-arrow {
+    font-size: 16px;
+  }
+
+  .row-head {
+    flex-wrap: wrap;
+  }
+
+  /* 表单行（搜索框 + 按钮 + 清空）在窄屏必须能换行：
+     挤在一行时 搜索框的 min-width + 两个按钮 + 间距 会直接撑出横向滚动 */
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* 窄屏先藏画像 chips：副标题已经把「为什么推给你」说清楚了，不必挤两行 */
+  .row-taste {
+    display: none;
+  }
+
+  /* 表格（条目编辑、库列表）在窄屏改成可横滑，而不是把列挤成一条 */
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .search-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  .list-cards,
+  .people-list {
+    grid-template-columns: 1fr;
+  }
+
+  /* 分面标签独占一行：窄屏下胶囊换行更容易点 */
+  .facet-label {
+    flex-basis: 100%;
+  }
+
+  .kv dt {
+    padding-top: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .poster-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  }
+
+  .search-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    height: 34vh;
+    min-height: 200px;
+  }
+
+  .hero-title {
+    font-size: 24px;
+  }
+
+  /* 手机上少露两行简介，把按钮留在首屏 */
+  .hero-overview {
+    -webkit-line-clamp: 2;
+  }
+
+  .hero-genres,
+  .hero-resume .faint {
+    display: none;
+  }
+
+  .row-item,
+  .row-scroll .continue-card {
+    flex: 0 0 112px;
+  }
+
+  .btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .btn-sm {
+    padding: 4px 8px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .hero-actions .btn {
+    padding: 7px 14px;
+  }
 }
