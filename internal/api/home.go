@@ -77,6 +77,21 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSection, error) {
 	sections := []store.HomeSection{}
 
+	// 收藏排在最前面（它是用户自己挑的，比算法推的更有分量），
+	// 但要放在「继续观看」后面：正在看的东西优先于「以后想看」的。
+	favorites, _, err := s.store.ListFavorites(ctx, userID, "", homeRowLimit, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(favorites) > 0 {
+		sections = append(sections, store.HomeSection{
+			Key:      "favorites",
+			Title:    "我的收藏",
+			Subtitle: fmt.Sprintf("你收藏过的 %d 个条目", len(favorites)),
+			Items:    favorites,
+		})
+	}
+
 	rec, err := s.store.RecommendForUser(ctx, userID, homeRowLimit)
 	if err != nil {
 		return nil, err
@@ -91,6 +106,7 @@ func (s *Server) homeSections(ctx context.Context, userID int64) ([]store.HomeSe
 			Taste: rec.Taste,
 			Items: rec.Items,
 		})
+
 	case rec.SourceWorks == 0:
 		top, err := s.store.ListTopRatedItems(ctx, homeRowLimit)
 		if err != nil {

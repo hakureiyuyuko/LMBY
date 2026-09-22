@@ -4,6 +4,7 @@ import { api } from '../api';
 import { roleLabel } from '../people';
 import type {
   ChildSummary,
+  FavoriteState,
   Item,
   ItemDetail,
   ItemPerson,
@@ -72,6 +73,8 @@ export function Detail() {
   const [season, setSeason] = useState<number | null>(null);
   const [episodes, setEpisodes] = useState<ChildSummary | null>(null);
   const [version, setVersion] = useState<number | null>(null);
+  // 收藏状态（按账号）：单独一个接口，不混进条目本体（见 internal/api/lists.go 的说明）
+  const [fav, setFav] = useState<FavoriteState | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -108,6 +111,32 @@ export function Detail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 收藏状态：读失败就当作「没收藏」（按钮仍然可点，点了会以服务端为准）
+  useEffect(() => {
+    if (!Number.isFinite(itemId) || itemId <= 0) return;
+    let alive = true;
+    api
+      .favoriteState(itemId)
+      .then((res) => {
+        if (alive) setFav(res);
+      })
+      .catch(() => {
+        if (alive) setFav(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [itemId]);
+
+  /** 收藏 / 取消收藏：响应里带新状态与新的总数，直接拿来更新按钮，不再多查一次。 */
+  const toggleFavorite = useCallback(async () => {
+    try {
+      setFav(await api.setFavorite(itemId, !(fav?.favorite ?? false)));
+    } catch {
+      /* 失败就保持原样，下次刷新再说（不弹一个只有技术细节的错） */
+    }
+  }, [itemId, fav]);
 
   useEffect(() => {
     if (season == null) {
@@ -237,6 +266,18 @@ export function Detail() {
                 <Link className="btn" to={`/play/${it.id}?restart=1`}>
                   从头播放
                 </Link>
+              )}
+              <button
+                type="button"
+                className={`btn btn-fav${fav?.favorite ? ' on' : ''}`}
+                aria-pressed={fav?.favorite ?? false}
+                data-favorite={fav?.favorite ? 'on' : 'off'}
+                onClick={() => void toggleFavorite()}
+              >
+                ★ {fav?.favorite ? '已收藏' : '收藏'}
+              </button>
+              {(fav?.count ?? 0) > 0 && (
+                <span className="faint small">{fav?.count} 人收藏</span>
               )}
               {versions.length > 1 && (
                 <label className="field-inline">

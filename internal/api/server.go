@@ -160,6 +160,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
 
+	// ---- 收藏（按账号；「收藏数」是全站视角）----
+	mux.Handle("GET /api/v1/favorites", s.requireAuth(s.handleListFavorites))
+	mux.Handle("GET /api/v1/items/{id}/favorite", s.requireAuth(s.handleGetFavorite))
+	mux.Handle("POST /api/v1/items/{id}/favorite", s.requireAuth(s.handleSetFavorite))
+
 	// ---- 首页（轮播 + 继续观看 + 推荐行，M6）----
 	mux.Handle("GET /api/v1/home", s.requireAuth(s.handleHome))
 

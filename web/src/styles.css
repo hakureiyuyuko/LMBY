@@ -1948,3 +1948,14 @@ th {
 .row-taste .badge {
   font-size: 12px;
 }
+
+/* 收藏按钮：收藏状态用强调色（★ 亮起来），未收藏就是普通次要按钮 */
+.btn-fav {
+  color: var(--fg-muted);
+}
+
+.btn-fav.on {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}

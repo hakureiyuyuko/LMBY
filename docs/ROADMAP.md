@@ -645,7 +645,12 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
       每一维统计时关掉自己那一维的筛选）、**「人」这一档**（人名搜索 + 参演作品数，
       点人名 → `personId` 筛作品；人名接的是 0010 的演职员表，不联网、不占 TMDB 配额）；
       详见 `docs/notes/search.md`
-- [ ] 收藏、播放列表、合集（Collection）
+- [ ] 收藏、播放列表、合集（Collection）—— **收藏已完成**（迁移 0012：`favorites(user_id,item_id)`
+      主键幂等、不存计数器；接口 `GET /api/v1/favorites`、`GET|POST /api/v1/items/{id}/favorite`；
+      详情页爱心按钮 + 「N 人收藏」；首页多一行「我的收藏」。
+      验收 `verify-favorites.sh` 30/30（**含造临时账号验多用户隔离**）、
+      `favorites-ui-test.mjs` 18/18；设计与取舍见 `docs/notes/lists.md`）
+      　— 播放列表与合集仍在做（同一张表按 kind 区分、播放器里的「下一项」）
 - [ ] 设置页：库管理、扫描计划、转码/硬件、provider 与 TMDB Key、用户与权限、日志查看
       （「直播源」已随 M5 的直播页完成，**故意不放设置页**：它与频道列表是一件事，
       拆到两个页面反而要来回跳）

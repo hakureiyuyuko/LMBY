@@ -273,6 +273,28 @@ export const api = {
       { method: 'POST' },
     ),
 
+  // ---------------------------------------------------------------- 收藏
+  /** 我的收藏（按账号；可按类型过滤、可翻页）。 */
+  favorites: (params: { kind?: string; limit?: number; offset?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.kind) sp.set('kind', params.kind);
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return request<FavoritePage>(`/api/v1/favorites${qs ? `?${qs}` : ''}`);
+  },
+
+  /** 单条条目的收藏状态：我收藏了没 + 全站收藏数。 */
+  favoriteState: (itemId: number) =>
+    request<FavoriteState>(`/api/v1/items/${itemId}/favorite`),
+
+  /** 收藏 / 取消收藏（幂等）。响应里带新状态与新的总数，界面直接用，不必再查。 */
+  setFavorite: (itemId: number, favorite: boolean) =>
+    request<FavoriteState & { ok: boolean }>(`/api/v1/items/${itemId}/favorite`, {
+      method: 'POST',
+      ...json({ favorite }),
+    }),
+
   // ---------------------------------------------------------------- 首页
   /**
    * 首页一次取全：轮播 + 继续观看 + 推荐行。
@@ -680,6 +702,21 @@ export interface ProviderTestResult {
 }
 
 /** 首页的一行（标题 + 副标题 + 条目）。 */
+/** 收藏状态（单条条目）。 */
+export interface FavoriteState {
+  itemId: number;
+  favorite: boolean;
+  /** 全站收藏数（不是「我的」）。 */
+  count: number;
+}
+
+export interface FavoritePage {
+  items: Item[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 /** 口味画像的一档：流派 + 权重（在看过的作品里出现过几次）。 */
 export interface HomeTaste {
   genre: string;
