@@ -63,7 +63,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) ([]Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("拉取订阅源失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("拉取订阅源失败: HTTP %d", resp.StatusCode)
 	}
