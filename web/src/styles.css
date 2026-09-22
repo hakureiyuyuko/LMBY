@@ -2308,3 +2308,147 @@ th {
     right: 104px;
   }
 }
+
+/* ---- 直播页（M6 收尾：播放器优先 + 左侧换台栏）--------------------------------- */
+
+/* 左边换台栏 + 右边播放器；窄屏时上下叠（栏变成一条可滚动的列表） */
+.tv-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.tv-side {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-1);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
+}
+
+.tv-side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tv-list {
+  overflow-y: auto;
+  padding: 4px 0;
+  min-height: 0;
+}
+
+.tv-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.tv-group-head:hover { background: var(--bg-elev-2); }
+.tv-caret { color: var(--muted); font-size: 11px; width: 10px; }
+.tv-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tv-ch {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.tv-ch-main {
+  flex: 1;
+  min-width: 0; /* flex 子项默认 min-width:auto：长频道名会把星标挤出去 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 6px 22px;
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.tv-ch-main:hover { background: var(--bg-elev-2); }
+.tv-ch.is-playing .tv-ch-main { border-left-color: var(--accent); background: var(--bg-elev-2); font-weight: 600; }
+.tv-ch-logo { width: 22px; height: 22px; object-fit: contain; border-radius: 3px; flex: 0 0 auto; }
+.tv-ch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-ch-kind { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.tv-dot-bad { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+
+.tv-star {
+  flex: 0 0 auto;
+  background: none;
+  border: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tv-star.is-on { color: var(--warn); }
+
+.tv-ext {
+  border-top: 1px solid var(--border);
+  padding: 6px 10px 8px;
+  font-size: 12px;
+}
+
+.tv-ext summary { cursor: pointer; color: var(--muted); }
+.tv-ext a { color: var(--accent); }
+
+.tv-pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+.tv-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* 舞台上的提示层（没选频道 / 起播中 / 出错）—— 压在视频上面居中 */
+.tv-hint-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  text-align: center;
+  padding: 20px;
+}
+
+.tv-hint-err { color: #ffd9d9; }
+
+@media (max-width: 1024px) {
+  .tv-shell { grid-template-columns: 240px minmax(0, 1fr); }
+}
+
+@media (max-width: 768px) {
+  /* 手机 / 平板竖屏：换台栏放到播放器下面（先看画面，再换台） */
+  .tv-shell { grid-template-columns: minmax(0, 1fr); }
+  .tv-side { max-height: 46vh; order: 2; }
+  .tv-pane { order: 1; }
+}

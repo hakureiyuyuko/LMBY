@@ -392,10 +392,15 @@ async function main() {
       if (b) { b.click(); return true; }
       return false;
     })()`);
-    await sleep(400);
-    const dts = await evaluate(
-      `[...document.querySelectorAll('dt')].map((e) => e.textContent.trim()).filter(Boolean)`,
-    );
+    // ⚠️ 点完要多等一会儿等面板真的渲染出来：这个按钮刚点完 DOM 还是空的，
+    // 立刻去查 <dt> 会得到空数组 → 假失败（真踩到过，重跑一次又随机通过）
+    const panelReady = await waitFor('理由面板', async () =>
+      (await evaluate(`document.querySelectorAll('dt').length`)) > 0, 6000);
+    const dts = panelReady
+      ? await evaluate(
+          `[...document.querySelectorAll('dt')].map((e) => e.textContent.trim()).filter(Boolean)`,
+        )
+      : [];
     log(`   理由面板字段：${dts.join(' / ')}`);
     check('理由面板的字段标签是英文', true, dts.length > 0 && dts.every((x) => !/[\u4e00-\u9fff]/.test(x)));
     await shot('05-player-en');

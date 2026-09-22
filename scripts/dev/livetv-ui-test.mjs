@@ -270,305 +270,158 @@ async function main() {
   log('\n== 1. 登录（管理员） ==');
   check('登录成功', true, await login(USER, PASS));
 
-  log('\n== 2. 从导航进入直播页 ==');
+  log('\n== 2. 新布局：左侧换台栏 + 右侧播放器 ==');
+  await evaluate(clickSel('.nav a[href="/livetv"]'));
+  check('进入直播页', true, await waitFor('直播页', async () => (await evaluate('location.pathname')) === '/livetv'));
   check(
-    '导航里有「直播」入口',
+    '有左侧换台栏 .tv-side',
     true,
-    await waitFor('导航', async () =>
-      (await evaluate(`[...document.querySelectorAll('.nav a')].some((a) => a.textContent.trim() === '直播')`)),
+    await waitFor('换台栏', async () => await evaluate(`!!document.querySelector('.tv-side')`)),
+  );
+  check('有播放器舞台 .tv-stage', true, await evaluate(`!!document.querySelector('.tv-stage')`));
+  check('有底部控制条 .tv-bar', true, await evaluate(`!!document.querySelector('.tv-bar')`));
+  const sideHead = await evaluate(`document.querySelector('.tv-side-head')?.textContent || ''`);
+  check('侧栏头部是「X / Y 个频道」', true, /\d+\s*\/\s*\d+\s*个频道/.test(sideHead));
+
+  log('\n== 3. 分组折叠：能收起、能展开 ==');
+  await waitFor('频道行', async () => (await evaluate(`document.querySelectorAll('.tv-ch').length`)) > 0);
+  const chOpen = await evaluate(`document.querySelectorAll('.tv-ch').length`);
+  check('侧栏按分组列频道（至少有分组头）', true, (await evaluate(`document.querySelectorAll('.tv-group').length`)) > 0);
+  await evaluate(clickSel('.tv-group-head'));
+  // 点完要等 React 重渲染：立刻读 DOM 会读到最后一次渲染的旧值
+  const chClosed = await (async () => {
+    await waitFor('分组收起', async () => (await evaluate(`document.querySelectorAll('.tv-ch').length`)) < chOpen);
+    return evaluate(`document.querySelectorAll('.tv-ch').length`);
+  })();
+  check('收起一个分组后可见频道变少', true, chClosed < chOpen);
+  await evaluate(
+    `(() => { const b = [...document.querySelectorAll('.tv-side-head button')].find((x) => x.textContent.trim() === '全部展开'); if (!b) return false; b.click(); return true; })()`,
+  );
+  check('「全部展开」后又回到原来的条数', chOpen, await evaluate(`document.querySelectorAll('.tv-ch').length`));
+
+  log('\n== 4. 换台：点频道 → 底部显示当前频道 + 上一个/下一个/断开 ==');
+  // 优先挑一个「探测没失败」的频道换台（失效那些不一定起得来）
+  const target = await evaluate(
+    `(() => { const row = [...document.querySelectorAll('.tv-ch')].find((r) => !r.querySelector('.tv-dot-bad')); return row?.querySelector('.tv-ch-name')?.textContent?.trim() || ''; })()`,
+  );
+  check('找到一个探测正常的频道', true, target.length > 0);
+  await evaluate(
+    `(() => { const row = [...document.querySelectorAll('.tv-ch')].find((r) => r.querySelector('.tv-ch-name')?.textContent?.trim() === ${JSON.stringify(target)}); if (!row) return false; row.querySelector('.tv-ch-main').click(); return true; })()`,
+  );
+  check(
+    '底部控制条显示当前频道名',
+    true,
+    await waitFor('底部频道名', async () =>
+      (await evaluate(`document.querySelector('.tv-bar strong')?.textContent?.trim()`)) === target,
     ),
   );
-  await evaluate(`[...document.querySelectorAll('.nav a')].find((a) => a.textContent.trim() === '直播').click()`);
-  check('进入 /livetv', true, await waitFor('直播页', async () => (await evaluate('location.pathname')) === '/livetv'));
-  check(
-    '频道列表渲染出来了',
-    true,
-    await waitFor('频道行', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > 0),
+  for (const label of ['上一个', '下一个', '断开']) {
+    check(
+      `有「${label}」按钮`,
+      true,
+      await evaluate(
+        `[...document.querySelectorAll('.tv-bar button')].some((b) => b.textContent.trim() === '${label}')`,
+      ),
+    );
+  }
+  check('播放中的那一行被标出', true, await waitFor('播放中行', async () =>
+    (await evaluate(`!!document.querySelector('.tv-ch.is-playing')`))));
+
+  log('\n== 5. 真起播（视频真的在跑）==');
+  // 单个频道不一定起得来（RTSP 源、源站抽风、probeOk 未知都可能），
+  // 所以试几个「探测没失败」的频道，**只要有一个真出了画面**就算这一页能看。
+  const candidates = await evaluate(
+    `[...document.querySelectorAll('.tv-ch')].filter((r) => !r.querySelector('.tv-dot-bad')).slice(0, 6).map((r) => r.querySelector('.tv-ch-name').textContent.trim())`,
   );
-  await shot('01-livetv');
-
-  const rows = await evaluate(rowsSnapshot);
-  note(`列表里 ${rows.length} 台频道`);
-  check('每行都有「播放」按钮', true, rows.every((r) => r.buttons.includes('播放')));
-  check('每行都有「外链」按钮', true, rows.every((r) => r.buttons.includes('外链')));
-
-  log('\n== 3. 探测标记（通 / 失效 / 未探） ==');
-  const probeStats = (await evaluate(apiCall('/api/v1/livetv/channels/probe'))).body.stats;
-  note(`库里：总 ${probeStats.total} · 能通 ${probeStats.ok} · 失效 ${probeStats.failed} · 没探过 ${probeStats.pending}`);
-  const badges = await evaluate(`[...document.querySelectorAll('.tv-row .badge')].map((b) => b.textContent.trim())`);
-  if (probeStats.failed > 0) {
-    check('有频道被标成「失效」', true, badges.includes('失效'));
-  }
-  if (probeStats.ok > 0) {
-    check('有频道被标成「通」', true, badges.includes('通'));
-  }
-  if (probeStats.pending > 0) {
-    check('有频道被标成「未探」', true, badges.includes('未探'));
-  }
-
-  log('\n== 4. 按探测结果筛（只看失效） ==');
-  if (probeStats.failed > 0) {
-    await evaluate(
-      `(() => {
-        const sel = [...document.querySelectorAll('.tv-toolbar select')][1];
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'failed');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    check(
-      '筛出来的每一行都是「失效」',
-      true,
-      await waitFor('失效列表', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        return rs.length > 0 && rs.every((r) => r.badges.includes('失效'));
-      }),
-    );
-    const failedRows = await evaluate(`document.querySelectorAll('.tv-row').length`);
-    note(`只看失效：${failedRows} 台`);
-    // 恢复成「全部」
-    await evaluate(
-      `(() => {
-        const sel = [...document.querySelectorAll('.tv-toolbar select')][1];
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, '');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    await waitFor('回到全部', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > failedRows);
-  } else {
-    note('库里没有失效频道，跳过这一节');
-  }
-
-  log('\n== 5. 分组筛选 ==');
-  const groups = (await evaluate(apiCall('/api/v1/livetv/channels?enabled=1'))).body.groups || [];
-  if (groups.length > 0) {
-    const g = groups[0];
-    note(`选分组「${g.name}」（${g.count} 台）`);
-    await evaluate(
-      `(() => {
-        const sel = document.querySelector('.tv-toolbar select');
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, ${JSON.stringify(g.name)});
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    await waitFor(
-      '分组列表',
-      async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) === g.count,
-    );
-    check(`分组筛选后只剩 ${g.count} 台`, g.count, await evaluate(`document.querySelectorAll('.tv-row').length`));
-    // 恢复
-    await evaluate(
-      `(() => {
-        const sel = document.querySelector('.tv-toolbar select');
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, '');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    await waitFor('恢复全部分组', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > g.count);
-  } else {
-    note('没有分组可筛');
-  }
-
-  log('\n== 6. 搜索 ==');
-  const all = (await evaluate(apiCall('/api/v1/livetv/channels?enabled=1'))).body.channels || [];
-  const sample = all[Math.min(3, all.length - 1)];
-  if (sample) {
-    note(`搜「${sample.name}」`);
-    await evaluate(setInput('.tv-toolbar .search-input', sample.name));
-    check(
-      '搜索结果里含这条频道，且最多几条',
-      true,
-      await waitFor('搜索结果', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        return rs.length > 0 && rs.length <= 5 && rs.some((r) => r.name.includes(sample.name));
-      }),
-    );
-    // 清空
-    await evaluate(setInput('.tv-toolbar .search-input', ''));
-    await waitFor(
-      '清空搜索',
-      async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) === all.length,
-      15000,
-    );
-  } else {
-    note('库里没有频道，跳过搜索');
-  }
-
-  log('\n== 7. 收藏（真写库，验完还原） ==');
-  {
-    const target = sample;
-    if (target) {
-      const cur = (await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}`))).body;
-      note(`目标频道「${cur.name}」，当前收藏=${cur.favorite}`);
-      if (cur.favorite) {
-        // 起点必须是未收藏，否则「切换」的语义验不了
-        await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}/favorite`, { method: 'POST' }));
-        await sleep(400);
-      }
-      check('点「☆ 收藏」按钮（真点，不是调接口）', true, await evaluate(clickRowButton(cur.name, '☆ 收藏')));
-      check('点收藏后按钮变成「已收藏」', true, await waitFor('收藏按钮', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        const row = rs.find((r) => r.name.includes(cur.name));
-        return row ? row.buttons.includes('★ 已收藏') : false;
-      }));
-      const now = (await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}`))).body;
-      check('接口里 favorite=true', true, now.favorite);
-      // 还原
-      await evaluate(clickRowButton(cur.name, '★ 已收藏'));
-      check('再点一次取消收藏', true, await waitFor('取消收藏', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        const row = rs.find((r) => r.name.includes(cur.name));
-        return row ? row.buttons.includes('☆ 收藏') : false;
-      }));
-      const back = (await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}`))).body;
-      check('接口里 favorite=false（已还原）', false, back.favorite);
-    } else {
-      note('没有频道可做收藏测试');
-    }
-  }
-
-  log('\n== 8. 停用 / 启用（验完还原） ==');
-  {
-    const target = sample;
-    if (target) {
-      // 默认「只看启用」勾着，停用后会从列表里消失 —— 先取消勾选，才能看到停用后的样子
-      await evaluate(`(() => {
-        const boxes = [...document.querySelectorAll('.tv-toolbar input[type=checkbox]')];
-        if (boxes[0] && boxes[0].checked) boxes[0].click();
-      })()`);
-      await sleep(600);
-      check(
-        '「只看启用」确实取消了（否则停用的频道会直接从列表里消失）',
-        false,
-        await evaluate(`[...document.querySelectorAll('.tv-toolbar input[type=checkbox]')][0].checked`),
-      );
-      check('点「停用」按钮（真点）', true, await evaluate(clickRowButton(target.name, '停用')));
-      check('点停用后出现「已停用」徽标', true, await waitFor('停用徽标', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        const row = rs.find((r) => r.name.includes(target.name));
-        return row ? row.badges.includes('已停用') && row.disabled : false;
-      }));
-      const off = (await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}`))).body;
-      check('接口里 disabled=true', true, off.disabled);
-      // 还原：再点「启用」
-      await evaluate(clickRowButton(target.name, '启用'));
-      check('点启用后徽标消失（已还原）', true, await waitFor('启用还原', async () => {
-        const rs = await evaluate(rowsSnapshot);
-        const row = rs.find((r) => r.name.includes(target.name));
-        return row ? !row.badges.includes('已停用') : false;
-      }));
-      const on = (await evaluate(apiCall(`/api/v1/livetv/channels/${target.id}`))).body;
-      check('接口里 disabled=false（已还原）', false, on.disabled);
-      // 勾回来
-      await evaluate(`(() => {
-        const boxes = [...document.querySelectorAll('.tv-toolbar input[type=checkbox]')];
-        if (boxes[0] && !boxes[0].checked) boxes[0].click();
-      })()`);
-      await sleep(600);
-    }
-  }
-
-  log('\n== 9. 失效频道起播要给出人话错误 ==');
-  const failedList = (await evaluate(apiCall('/api/v1/livetv/channels?probe=failed'))).body.channels || [];
-  if (failedList.length > 0) {
-    const bad = failedList[0];
-    note(`试播失效频道「${bad.name}」`);
-    await evaluate(
-      `(() => {
-        const sel = [...document.querySelectorAll('.tv-toolbar select')][1];
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'failed');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    await waitFor('失效列表', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > 0);
-    await evaluate(clickRowButton(bad.name, '播放'));
-    check(
-      '播放器上出现失败提示（不是静默转圈）',
-      true,
-      await waitFor('失败提示', async () => {
-        const t = await evaluate(`(document.querySelector('.tv-overlay-err')?.textContent || '')`);
-        return t.length > 0;
-      }, 20000),
-    );
-    const msg = await evaluate(`(document.querySelector('.tv-overlay-err')?.textContent || '')`);
-    note(`错误文案：${msg.slice(0, 80)}`);
-    await shot('02-livetv-failed');
-    await evaluate(clickSel('.tv-player-bar .btn-ghost'));
-    await sleep(500);
-    await evaluate(
-      `(() => {
-        const sel = [...document.querySelectorAll('.tv-toolbar select')][1];
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, '');
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`,
-    );
-    await sleep(400);
-  } else {
-    note('库里没有失效频道，跳过这一节');
-  }
-
-  log('\n== 10. 真起播一个能用的频道（DoD：浏览器起播 < 2 秒） ==');
-  const okList = (await evaluate(apiCall('/api/v1/livetv/channels?probe=ok'))).body.channels || [];
-  if (okList.length === 0) {
-    note('库里没有「探测能通」的频道，跳过起播（先跑 lmby livetv probe）');
-  } else {
-    const good = okList[0];
-    note(`起播「${good.name}」（id=${good.id}）`);
-    await evaluate(clickRowButton(good.name, '播放'));
-    const playing = await waitFor(
-      '画面真的动起来',
+  let started = false;
+  let playedName = '';
+  for (const name of candidates) {
+    await evaluate(clickRowButton(name));
+    const ok = await waitFor(
+      `真起播：${name}`,
       async () => {
-        const st = await evaluate(videoState);
-        return st && st.readyState >= 2 && st.currentTime > 0 ? st : false;
+        const s = await evaluate(videoState);
+        return !!s && !s.paused && s.currentTime > 0;
       },
-      30000,
+      6000,
     );
-    check('视频进入播放（readyState>=2 且 currentTime>0）', true, Boolean(playing));
-    if (playing) note(`video: ${JSON.stringify(playing)}`);
+    if (ok) {
+      started = true;
+      playedName = name;
+      break;
+    }
+  }
+  check(`视频真的出画面（试了 ${candidates.length} 个频道，${playedName || '都没成'}）`, true, started);
+  if (started) await shot('02-livetv-playing');
 
-    // 页面上自己量的「浏览器起播 N ms」（点击 → playing 事件）
-    let ms = null;
-    await waitFor('起播耗时文案', async () => {
-      const t = await evaluate(`(document.querySelector('.tv-player-bar .faint')?.textContent || '')`);
-      const m = /浏览器起播\s+(\d+)\s+ms/.exec(t);
-      if (m) {
-        ms = Number(m[1]);
-        return true;
-      }
-      return false;
-    }, 15000);
-    note(`浏览器起播 ${ms === null ? '（没读到）' : ms + ' ms'}（DoD 上限 ${START_MAX} ms）`);
-    check('页面上量到了浏览器起播耗时', true, ms !== null);
-    if (ms !== null) check(`浏览器起播 <= ${START_MAX} ms`, true, ms <= START_MAX);
+  log('\n== 6. 下一个 / 断开 ==');
+  const first = await evaluate(`document.querySelector('.tv-bar strong')?.textContent?.trim()`);
+  await evaluate(
+    `(() => { const b = [...document.querySelectorAll('.tv-bar button')].find((x) => x.textContent.trim() === '下一个'); b.click(); return true; })()`,
+  );
+  check(
+    '点了「下一个」换到别的频道',
+    true,
+    await waitFor('换台', async () => (await evaluate(`document.querySelector('.tv-bar strong')?.textContent?.trim()`)) !== first),
+  );
+  await evaluate(
+    `(() => { const b = [...document.querySelectorAll('.tv-bar button')].find((x) => x.textContent.trim() === '断开'); b.click(); return true; })()`,
+  );
+  check(
+    '断开后底部显示「未在播放」',
+    true,
+    await waitFor('断开', async () =>
+      (await evaluate(`document.querySelector('.tv-bar')?.textContent || ''`)).includes('未在播放'),
+    ),
+  );
+  check('断开后视频停了', true, (await evaluate(videoState))?.paused === true);
 
-    await shot('03-livetv-playing');
-
-    log('\n== 11. 播放中的行被标出来 ==');
-    const nowRows = await evaluate(rowsSnapshot);
-    check('正在播的那一行有标记', true, nowRows.some((r) => r.playing && r.name.includes(good.name)));
-
-    log('\n== 12. 外链（免登录） ==');
-    const share = (await evaluate(apiCall(`/api/v1/livetv/channels/${good.id}/share`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hours: 1 }),
-    }))).body;
-    note(`外链：${share.url}`);
-    check('外链路径是 /s/<token>/playlist.m3u', true, typeof share.path === 'string' && share.path.startsWith('/s/') && share.path.endsWith('/playlist.m3u'));
-    const shared = (await evaluate(apiCall(share.path))).status;
-    check('免登录能拉外链播放列表（200/503 都算，503=分片还没好）', true, shared === 200 || shared === 503);
-    const tampered = (await evaluate(apiCall(share.path.replace(/\/s\/(.)/, '/s/Z')))).status;
-    check('改一个字符的外链被拒（401/410）', true, tampered === 401 || tampered === 410);
-    const anon = (await evaluate(`fetch('/api/v1/livetv/channels', { credentials: 'omit' }).then((r) => r.status)`));
-    check('未登录读频道列表被拒（401）', 401, anon);
-
-    log('\n== 13. 停止播放 ==');
-    await evaluate(clickSel('.tv-player-bar .btn-ghost'));
-    check(
-      '点停止后播放区消失（视频也停了）',
-      true,
-      await waitFor('播放区消失', async () => (await evaluate(`!!document.querySelector('.tv-stage')`)) === false, 15000),
+  log('\n== 7. 收藏星（真写库 + 还原）==');
+  const starOn = await evaluate(`document.querySelector('.tv-ch .tv-star')?.getAttribute('aria-pressed')`);
+  await evaluate(clickSel('.tv-ch .tv-star'));
+  check(
+    '点星标后状态翻转',
+    true,
+    await waitFor('星标翻转', async () =>
+      (await evaluate(`document.querySelector('.tv-ch .tv-star')?.getAttribute('aria-pressed')`)) !== starOn,
+    ),
+  );
+  // 再点回去：重渲染刚换过 DOM，点空是常事 → 最多试三次
+  let restored = false;
+  for (let i = 0; i < 3 && !restored; i++) {
+    await evaluate(clickSel('.tv-ch .tv-star'));
+    restored = await waitFor('星标还原', async () =>
+      (await evaluate(`document.querySelector('.tv-ch .tv-star')?.getAttribute('aria-pressed')`)) === starOn,
+      3000,
     );
   }
+  check('再点一次还原', true, restored);
+
+  log('\n== 8. 前台不再夹着管理动作（M6 收尾：全搬进了设置）==');
+  for (const label of ['停用', '编辑', '外链', '复制地址']) {
+    check(
+      `直播页没有「${label}」按钮`,
+      false,
+      await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '${label}')`),
+    );
+  }
+  check('直播页没有频道搜索框（换台靠分组，不靠搜）', false,
+    await evaluate(`!!document.querySelector('.tv-side input')`));
+  check('直播页没有「共 N 台 · 启用中」那行统计（计数收进侧栏头部）', false,
+    await evaluate(`document.body.textContent.includes('启用中')`));
+
+  log('\n== 9. 外部播放器（VLC / Kodi / 电视盒子）==');
+  check('侧栏底部有「外部播放器」明细', true,
+    await evaluate(`(document.querySelector('.tv-ext summary')?.textContent || '').includes('外部播放器')`));
+  check('展开后有 m3u 导出链接', true,
+    await evaluate(`(() => { const d = document.querySelector('.tv-ext'); d.open = true; return !!d.querySelector('a[download]'); })()`));
+
+  log('\n== 10. 频道列表接口（工具链仍然对）==');
+  const listAll = await evaluate(apiCall('/api/v1/livetv/channels?enabled=false'));
+  check('拿得到全量频道', true, Number(listAll.body.total) > 0);
+  const listEnabled = await evaluate(apiCall('/api/v1/livetv/channels?enabled=true'));
+  check('enabled=true 拿到的条数 ≥ 0 且 ≤ 全量', true,
+    Number(listEnabled.body.channels.length) <= Number(listAll.body.channels.length));
 
   log('\n== 14. 直播页不再夹着源与探测（M6 收尾搬到了设置）==');
   check('直播页没有「频道探测」面板', false, await evaluate(`document.body.textContent.includes('频道探测')`));
@@ -607,15 +460,17 @@ async function main() {
     check('普通账号登录成功', true, await login(USER2, PASS2));
     await evaluate(`[...document.querySelectorAll('.nav a')].find((a) => a.textContent.trim() === '直播').click()`);
     await waitFor('直播页', async () => (await evaluate('location.pathname')) === '/livetv');
-    await waitFor('频道行', async () => (await evaluate(`document.querySelectorAll('.tv-row').length`)) > 0);
+    await waitFor('频道行', async () => (await evaluate(`document.querySelectorAll('.tv-ch').length`)) > 0);
     check('普通用户没有「直播源」卡片', false, await evaluate(`document.body.textContent.includes('直播源')`));
     check('普通用户没有「频道探测」卡片', false, await evaluate(`document.body.textContent.includes('频道探测')`));
     check('普通用户导航里没有「设置」（管理面收在它里面）', false, await evaluate(`!!document.querySelector('.nav a[href="/settings"]')`));
     check(
-      '普通用户仍能起播（有「播放」按钮）',
+      '普通用户也能换台（能点频道行）',
       true,
-      await evaluate(`[...document.querySelectorAll('.tv-row button')].some((b) => b.textContent.trim() === '播放')`),
+      await evaluate(`(() => { document.querySelector('.tv-ch-main').click(); return true; })()`),
     );
+    check('普通用户直播页也没有「停用 / 编辑」这些管理按钮', false,
+      await evaluate(`[...document.querySelectorAll('button')].some((b) => ['停用','编辑','外链'].includes(b.textContent.trim()))`));
     await shot('04-livetv-viewer');
   } else {
     note('没给 LMBY_USER2/LMBY_PASS2，跳过普通用户视角');

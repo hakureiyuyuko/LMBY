@@ -820,6 +820,30 @@ const en: Record<string, string> = {
   '已清空「{name}」的叠加层。': 'Cleared the overlay of “{name}”.',
   '清空叠加层失败': 'Failed to clear the overlay',
 
+  // ---------------------------------------------------------------- 直播页新版布局（播放器优先）
+  '{shown} / {total} 个频道': '{shown} / {total} channels',
+  '全部收起': 'Collapse all',
+  '全部展开': 'Expand all',
+  '还没有能看的频道：去设置 → 直播源导入一份播放列表。':
+    'No watchable channels yet: import a playlist in Settings → Live sources.',
+  '还没有能看的频道。': 'No watchable channels yet.',
+  '外部播放器（VLC / Kodi / 电视盒子）': 'External players (VLC / Kodi / TV box)',
+  '导出 m3u（全部频道）': 'Export m3u (all channels)',
+  '当前频道地址：': 'Current channel URL: ',
+  '从左边选一个频道开始看': 'Pick a channel on the left to start watching',
+  '未在播放': 'Not playing',
+  '上一个': 'Previous',
+  '下一个': 'Next',
+  '断开': 'Disconnect',
+  '浏览器报错：这个流它放不了（可能是编码或传输问题）':
+    'The browser reported an error: it cannot play this stream (codec or transport issue)',
+  '频道管理': 'Channel management',
+  '共 {n} 台': '{n} channels',
+  '这里管直播源（导入 / 刷新 / 停用）、频道管理与失效源探测；看频道、起播与切台在「直播」页。':
+    'Live sources (import / refresh / disable), channel management and dead-source probing live here; watching and switching channels happens on the Live TV page.',
+  '这里改的是「怎么用」（名字 / 分组 / 排序 / logo）与「启用状态」。改名与分组下次刷新订阅源时会按播放列表还原 —— 播放列表才是频道的来源；「启用状态」与「收藏」不会被刷新覆盖。':
+    'What you change here is how a channel is used (name / group / order / logo) and whether it is enabled. Names and groups are restored from the playlist the next time the source refreshes — the playlist is the source of truth; enabled state and favorites are never overwritten.',
+
   // ---------------------------------------------------------------- 详情页
   '未刮削': 'Not scraped',
   '来自 nfo': 'From nfo',

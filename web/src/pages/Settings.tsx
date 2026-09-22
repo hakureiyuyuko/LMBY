@@ -4,6 +4,7 @@ import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { t, useI18n } from '../i18n';
 import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
+import { ChannelManager } from '../components/ChannelManager';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -110,9 +111,10 @@ export function SettingsLiveTV() {
   return (
     <>
       <p className="hint">
-        {t('这里管直播源（导入 / 刷新 / 停用）与失效源探测；看频道、起播与切台在「直播」页。')}
+        {t('这里管直播源（导入 / 刷新 / 停用）、频道管理与失效源探测；看频道、起播与切台在「直播」页。')}
       </p>
       <LiveSourcePanel onImported={() => {}} />
+      <ChannelManager />
       <LiveProbePanel onFinished={() => {}} />
     </>
   );
