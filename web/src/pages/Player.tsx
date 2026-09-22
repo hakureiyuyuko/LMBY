@@ -2,7 +2,7 @@ import Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
-import type { ItemPlaylist, PlaybackState } from '../api';
+import type { ItemPlaylist, PlaybackState, PlaylistNeighbors } from '../api';
 import {
   actionLabel,
   detectProfile,
@@ -194,6 +194,11 @@ export function Player() {
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const itemId = Number(params.id);
+  // 播放列表上下文（`?list=<id>`）：详情页/播放全部 带过来，用来给「上一项 / 下一项」。
+  // 不在列表里播（绝大多数情况）时它一直是 null，页面上不会多任何东西。
+  const listId = Number(search.get('list') ?? '');
+  const inList = Number.isFinite(listId) && listId > 0;
+  const [queue, setQueue] = useState<PlaylistNeighbors | null>(null);
   /** ?restart=1 = 从头播放（条目页的「从头播放」按钮）；只生效一次。 */
   const restartOnceRef = useRef(search.get('restart') === '1');
   /**
@@ -832,6 +837,32 @@ export function Player() {
   const canPlay = Boolean(state?.playable && state.playSessionId);
   const subtitleOn = subSel !== -1 && subReady;
 
+  // 列表上下文：换条目/换列表都重新问一次（只有三个数，代价可以忽略）。
+  // 拿不到就当作「不在列表里播」，不挡任何东西。
+  useEffect(() => {
+    if (!inList) {
+      setQueue(null);
+      return;
+    }
+    let alive = true;
+    api
+      .listNeighbors(listId, itemId)
+      .then((res) => {
+        if (alive) setQueue(res);
+      })
+      .catch(() => {
+        if (alive) setQueue(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [inList, listId, itemId]);
+
+  /** 切到列表里的另一项（URL 里带着 list，所以能一直连着看下去）。 */
+  function goTo(id: number) {
+    navigate(`/play/${id}?list=${listId}`);
+  }
+
   return (
     <div className="player" ref={stageRef}>
       <div className="player-topbar">
@@ -839,6 +870,33 @@ export function Player() {
           ← 返回
         </button>
         <span className="player-title">{state?.title || `条目 ${itemId}`}</span>
+        {queue && queue.index > 0 && (
+          <span className="badge" data-queue="1" title="这个条目在播放列表里的位置">
+            {queue.playlistName} {queue.index}/{queue.total}
+          </span>
+        )}
+        {queue && (
+          <span className="row" style={{ gap: 6 }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              data-queue-prev
+              disabled={!queue.prevId}
+              onClick={() => queue.prevId && goTo(queue.prevId)}
+            >
+              ⏮ 上一项
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              data-queue-next
+              disabled={!queue.nextId}
+              onClick={() => queue.nextId && goTo(queue.nextId)}
+            >
+              下一项 ⏭
+            </button>
+          </span>
+        )}
         {mode && (
           <span className="badge" title={mode.hint}>
             {mode.label}

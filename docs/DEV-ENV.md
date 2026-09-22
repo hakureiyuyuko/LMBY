@@ -234,6 +234,20 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-home.sh
 # 行卡片数与接口一致、行右滚、推荐依据、服务状态折叠面板、亮暗主题
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/home-ui-test.mjs
 
+# M6 收藏：真库 HTTP 验收（30 项）——幂等、列表倒序/过滤、首页那一行；
+# **会造一个临时账号**验多用户隔离（需要 lmby 命令与 /etc/lmby/pg-password），跑完删掉
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-favorites.sh
+
+# M6 收藏：界面验收（18 项）——详情页按钮 ↔ 首页「我的收藏」行的闭环（跑完还原）
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/favorites-ui-test.mjs
+
+# M6 播放列表/合集：真库 HTTP 验收（49 项）——建/改/删、条目保序与幂等、重排、
+# 邻居接口、合集可见性与 403/404 边界（同样会造临时账号）
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-lists.sh
+
+# M6 播放列表：界面验收（37 项）——建列表 → 详情页加入 → 调序 → 播放全部 → 下一项 → 移出 → 删除
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/lists-ui-test.mjs
+
 # M2 海报墙 / 剧集视图 / 批量 / 设置页：真库 HTTP 验收
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-browse.sh    # 40 项
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-settings.sh  # 38 项

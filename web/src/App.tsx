@@ -8,6 +8,8 @@ import { Detail } from './pages/Detail';
 import { Home } from './pages/Home';
 import { ItemEdit } from './pages/Item';
 import { Libraries } from './pages/Libraries';
+import { ListDetail } from './pages/ListDetail';
+import { Lists } from './pages/Lists';
 import { LiveTV } from './pages/LiveTV';
 import { Login } from './pages/Login';
 import { Match } from './pages/Match';
@@ -85,6 +87,8 @@ function AppRoutes() {
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
         <Route path="/libraries" element={<Libraries />} />
+        <Route path="/lists" element={<Lists />} />
+        <Route path="/list/:id" element={<ListDetail />} />
         {/* 直播电视（M5）：频道列表 + 就地播放 + 管理员看的源/探测面板 */}
         <Route path="/livetv" element={<LiveTV />} />
         {/* 海报墙入口：一个库时直接进那面墙，多个库时先挑 */}

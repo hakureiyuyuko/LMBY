@@ -1959,3 +1959,100 @@ th {
   border-color: color-mix(in srgb, var(--warn) 55%, transparent);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
+
+/* ---------------------------------------------------------------- 列表（播放列表 / 合集） */
+.list-group-title {
+  margin: 16px 0 8px;
+  font-size: 15px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.list-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.list-card {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+}
+
+.list-cover {
+  flex: 0 0 64px;
+  width: 64px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.list-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.list-cover-empty {
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.list-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.list-name {
+  font-weight: 600;
+}
+
+/* 详情页里的「加入列表」面板 */
+.list-picker {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+}
+
+.list-picker-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.list-picker-items li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 列表详情页的条目卡片（复用 search-card，下面多一条操作行） */
+.list-item-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.list-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

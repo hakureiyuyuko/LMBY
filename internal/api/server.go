@@ -165,6 +165,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/items/{id}/favorite", s.requireAuth(s.handleGetFavorite))
 	mux.Handle("POST /api/v1/items/{id}/favorite", s.requireAuth(s.handleSetFavorite))
 
+	// ---- 播放列表 / 合集 ----
+	mux.Handle("GET /api/v1/playlists", s.requireAuth(s.handleListPlaylists))
+	mux.Handle("POST /api/v1/playlists", s.requireAuth(s.handleCreatePlaylist))
+	mux.Handle("GET /api/v1/playlists/{id}", s.requireAuth(s.handleGetPlaylist))
+	mux.Handle("PATCH /api/v1/playlists/{id}", s.requireAuth(s.handleUpdatePlaylist))
+	mux.Handle("DELETE /api/v1/playlists/{id}", s.requireAuth(s.handleDeletePlaylist))
+	mux.Handle("GET /api/v1/playlists/{id}/items", s.requireAuth(s.handleListPlaylistItems))
+	mux.Handle("POST /api/v1/playlists/{id}/items", s.requireAuth(s.handleAddPlaylistItems))
+	mux.Handle("PUT /api/v1/playlists/{id}/items", s.requireAuth(s.handleReorderPlaylist))
+	mux.Handle("DELETE /api/v1/playlists/{id}/items/{itemId}", s.requireAuth(s.handleRemovePlaylistItem))
+	mux.Handle("GET /api/v1/playlists/{id}/neighbors", s.requireAuth(s.handlePlaylistNeighbors))
+
 	// ---- 首页（轮播 + 继续观看 + 推荐行，M6）----
 	mux.Handle("GET /api/v1/home", s.requireAuth(s.handleHome))
 

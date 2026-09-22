@@ -295,6 +295,58 @@ export const api = {
       ...json({ favorite }),
     }),
 
+  // ---------------------------------------------------------------- 播放列表 / 合集
+  /** 我的列表 + 所有合集（我的在前）。 */
+  lists: () => request<{ playlists: PlaylistSummary[] }>('/api/v1/playlists'),
+
+  /** 新建播放列表（kind='collection' 需要管理员）。 */
+  createList: (body: { name: string; kind?: string; overview?: string }) =>
+    request<{ playlist: PlaylistSummary }>('/api/v1/playlists', {
+      method: 'POST',
+      ...json(body),
+    }),
+
+  list: (id: number) => request<{ playlist: PlaylistSummary }>(`/api/v1/playlists/${id}`),
+
+  /** 改名 / 改说明：**没给的字段不会被改**（给空串是「清空说明」）。 */
+  updateList: (id: number, body: { name?: string; overview?: string }) =>
+    request<{ playlist: PlaylistSummary }>(`/api/v1/playlists/${id}`, {
+      method: 'PATCH',
+      ...json(body),
+    }),
+
+  deleteList: (id: number) =>
+    request<{ ok: boolean }>(`/api/v1/playlists/${id}`, { method: 'DELETE' }),
+
+  listItems: (id: number, params: { limit?: number; offset?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return request<PlaylistItemsPage>(`/api/v1/playlists/${id}/items${qs ? `?${qs}` : ''}`);
+  },
+
+  /** 批量加入（追加到末尾，幂等：重复加入不会报错也不会多一条）。 */
+  addToList: (id: number, itemIds: number[]) =>
+    request<{ ok: boolean; added: number; itemCount: number }>(`/api/v1/playlists/${id}/items`, {
+      method: 'POST',
+      ...json({ itemIds }),
+    }),
+
+  removeFromList: (id: number, itemId: number) =>
+    request<{ ok: boolean }>(`/api/v1/playlists/${id}/items/${itemId}`, { method: 'DELETE' }),
+
+  /** 按给定顺序重排（整串写一遍）。 */
+  reorderList: (id: number, itemIds: number[]) =>
+    request<{ ok: boolean }>(`/api/v1/playlists/${id}/items`, {
+      method: 'PUT',
+      ...json({ itemIds }),
+    }),
+
+  /** 某个条目在列表里的前后邻居与位次（播放器的「下一项」）。 */
+  listNeighbors: (id: number, itemId: number) =>
+    request<PlaylistNeighbors>(`/api/v1/playlists/${id}/neighbors?itemId=${itemId}`),
+
   // ---------------------------------------------------------------- 首页
   /**
    * 首页一次取全：轮播 + 继续观看 + 推荐行。
@@ -702,6 +754,44 @@ export interface ProviderTestResult {
 }
 
 /** 首页的一行（标题 + 副标题 + 条目）。 */
+/** 一个播放列表 / 合集（带界面要用的统计）。 */
+export interface PlaylistSummary {
+  id: number;
+  userId: number;
+  name: string;
+  /** playlist = 私人；collection = 合集（所有人可见）。 */
+  kind: 'playlist' | 'collection';
+  overview?: string;
+  itemCount: number;
+  /** 列表里第一条还在的条目（界面拿它当封面）。 */
+  coverItemId?: number | null;
+  ownerName?: string;
+  /** 是不是我建的。 */
+  mine: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlaylistItemsPage {
+  items: Item[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** 某个条目在列表里的位置与前后邻居（播放器用）。 */
+export interface PlaylistNeighbors {
+  playlistId: number;
+  playlistName: string;
+  playlistKind: string;
+  itemId: number;
+  /** 从 1 开始；0 表示这个条目不在列表里。 */
+  index: number;
+  total: number;
+  prevId?: number | null;
+  nextId?: number | null;
+}
+
 /** 收藏状态（单条条目）。 */
 export interface FavoriteState {
   itemId: number;

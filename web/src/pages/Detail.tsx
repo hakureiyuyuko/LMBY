@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../api';
+import { ApiError, api } from '../api';
 import { roleLabel } from '../people';
 import type {
   ChildSummary,
@@ -10,6 +10,7 @@ import type {
   ItemPerson,
   ItemPlaylist,
   PlaybackProgress,
+  PlaylistSummary,
 } from '../api';
 
 /**
@@ -75,6 +76,11 @@ export function Detail() {
   const [version, setVersion] = useState<number | null>(null);
   // 收藏状态（按账号）：单独一个接口，不混进条目本体（见 internal/api/lists.go 的说明）
   const [fav, setFav] = useState<FavoriteState | null>(null);
+  // 「加入列表」面板：只在真点开时才去拉列表（绝大多数访问不看这个面板）
+  const [listPanel, setListPanel] = useState(false);
+  const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
+  const [newListName, setNewListName] = useState('');
+  const [listMsg, setListMsg] = useState('');
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -137,6 +143,52 @@ export function Detail() {
       /* 失败就保持原样，下次刷新再说（不弹一个只有技术细节的错） */
     }
   }, [itemId, fav]);
+
+  const loadLists = useCallback(async () => {
+    try {
+      setLists((await api.lists()).playlists);
+    } catch {
+      setLists([]);
+    }
+  }, []);
+
+  /** 点「加入列表」才去拉列表；拉过就不再拉（除了加入之后要刷新计数）。 */
+  const openListPanel = useCallback(async () => {
+    setListPanel((open) => !open);
+    setListMsg('');
+    if (lists === null) await loadLists();
+  }, [lists, loadLists]);
+
+  /** 加入一个已有列表；响应里的 added 能区分「刚加进去」与「本来就在里面」。 */
+  const addTo = useCallback(
+    async (listId: number, name: string) => {
+      try {
+        const res = await api.addToList(listId, [itemId]);
+        setListMsg(res.added > 0 ? `已加入「${name}」` : `「${name}」里本来就有这个条目`);
+        await loadLists();
+      } catch (e) {
+        setListMsg(e instanceof ApiError ? e.message : '加入列表失败');
+      }
+    },
+    [itemId, loadLists],
+  );
+
+  /** 新建一个列表并立刻把当前条目加进去（新建完还得手动加一次是很傻的）。 */
+  const createAndAdd = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const name = newListName.trim();
+      if (!name) return;
+      try {
+        const created = await api.createList({ name });
+        setNewListName('');
+        await addTo(created.playlist.id, created.playlist.name);
+      } catch (e2) {
+        setListMsg(e2 instanceof ApiError ? e2.message : '新建列表失败');
+      }
+    },
+    [newListName, addTo],
+  );
 
   useEffect(() => {
     if (season == null) {
@@ -303,7 +355,61 @@ export function Detail() {
               <Link className="btn btn-ghost" to={`/library/${it.libraryId}`}>
                 回海报墙
               </Link>
+              <button
+                type="button"
+                className="btn"
+                data-add-to-list="toggle"
+                aria-expanded={listPanel}
+                onClick={() => void openListPanel()}
+              >
+                ＋ 加入列表
+              </button>
             </div>
+
+            {/* 加入列表的面板：列我的列表 + 合集；没列表时给「新建」这句就有用了 */}
+            {listPanel && (
+              <div className="list-picker" data-list-picker>
+                {listMsg && <p className="small">{listMsg}</p>}
+                {lists === null && <p className="muted small">正在读取列表…</p>}
+                {lists !== null && lists.length === 0 && (
+                  <p className="muted small">还没有列表，在下面新建一个。</p>
+                )}
+                {lists !== null && lists.length > 0 && (
+                  <ul className="list-picker-items">
+                    {lists.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          data-add-to={p.id}
+                          onClick={() => void addTo(p.id, p.name)}
+                        >
+                          加入「{p.name}」
+                        </button>
+                        <span className="faint small">
+                          {p.kind === 'collection' ? '合集' : '列表'} · {p.itemCount} 个条目
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <form
+                  className="row"
+                  style={{ marginTop: 8 }}
+                  onSubmit={(e) => void createAndAdd(e)}
+                >
+                  <input
+                    value={newListName}
+                    onChange={(e) => setNewListName(e.target.value)}
+                    placeholder="新建列表并加入"
+                    aria-label="新建列表名"
+                  />
+                  <button type="submit" className="btn btn-sm" disabled={!newListName.trim()}>
+                    新建并加入
+                  </button>
+                </form>
+              </div>
+            )}
             <p className="faint small" style={{ marginTop: 8 }}>
               状态 {stateLabels[it.matchState ?? ''] ?? it.matchState}
               {it.metadataSource ? ` · 元数据来源 ${it.metadataSource}` : ''}

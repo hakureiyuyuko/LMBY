@@ -27,6 +27,14 @@ export function Layout() {
           <NavLink to="/posters" className={({ isActive }) => (isActive || inBrowse ? 'active' : '')}>
             海报墙
           </NavLink>
+          <NavLink
+            to="/lists"
+            className={({ isActive }) =>
+              isActive || loc.pathname.startsWith('/list/') ? 'active' : ''
+            }
+          >
+            我的列表
+          </NavLink>
           <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
             库管理
           </NavLink>
