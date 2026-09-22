@@ -31,6 +31,11 @@ func (s *Store) ViewerFor(ctx context.Context, user *User) (Viewer, error) {
 }
 
 // LibraryIDs 返回可见库（nil = 不过滤）。给需要在 api 层额外判断的场合用。
+//
+// ⚠️ **不要**把它直接当 SQL 参数传给 store：切片为 nil 时 pgx 会绑成 NULL，
+// 而 `cardinality(NULL)` 是 NULL → `cardinality($n) = 0` 也是 NULL → 整个条件
+// 不成立、查询结果为空。搜索曾经就是这么坏的（管理员搜什么都 0 条）。
+// 要传给 SQL 一律用 SQLArgs()。
 func (v Viewer) LibraryIDs() []int64 { return v.libs }
 
 // CanSeeLibrary 判断某个库是否可见。
@@ -46,10 +51,28 @@ func (v Viewer) CanSeeLibrary(libraryID int64) bool {
 	return false
 }
 
-// SQLArgs 是给 libraryFilter 用的参数：nil → 空数组（= 不过滤）。
+// noVisibleLibraries 是「白名单开着、但一个库都没勾」在 SQL 层的哨兵。
+//
+// 为什么需要它：SQL 里「不过滤」与「什么都看不到」如果都用空数组表达，语义就撞了
+// —— `cardinality('{}') = 0` 会被 librayFilter 当成「不过滤」，于是「没勾任何库」
+// 的人反而看到全部。用一个**不存在的库 id** 当参数就能干净区分：
+// `cardinality = 1` 但 `= any(...)` 永远不匹配。
+const noVisibleLibraries int64 = -1
+
+// SQLArgs 把可见库整理成给 libraryFilter 用的参数（三态分明，SQL 友好）：
+//
+//	libs == nil  → {}     不过滤（管理员 / 没开按库限制）
+//	libs == []   → {-1}   什么都看不到（白名单开着但一个库都没勾）
+//	否则         → 原样
+//
+// 与 libsArg 的关系：libsArg 只管「别把 nil 变成 NULL」，这里额外表达「空白名单」
+// 这个语义。api 层所有「可见库要传给 SQL」的地方都应该用这个方法。
 func (v Viewer) SQLArgs() []int64 {
 	if v.libs == nil {
 		return []int64{}
+	}
+	if len(v.libs) == 0 {
+		return []int64{noVisibleLibraries}
 	}
 	return v.libs
 }
@@ -217,6 +240,13 @@ func (s *Store) FindLibraryByID(ctx context.Context, id int64) (*Library, error)
 
 // libsArg 把「可见库」参数规范化成 pgx 能直接绑定的形状：
 // nil / 空 → 空数组（SQL 里 cardinality = 0 表示不过滤）。
+//
+// 为什么每个调用点都要过它：**nil 切片会被 pgx 绑成 NULL**，而 `cardinality(NULL)`
+// 是 NULL → `cardinality($n::bigint[]) = 0` 也是 NULL → 整个 where 条件不成立、
+// 查询直接返回空。搜索路径曾经漏了这一步，结果「管理员搜什么都 0 条」。
+//
+// 「白名单开着但一个库都没勾」（什么都看不到）**不用空数组表达**，那会与
+// 「不过滤」撞车；那一种由 Viewer.SQLArgs() 用哨兵 -1 表达。
 func libsArg(libs []int64) []int64 {
 	if len(libs) == 0 {
 		return []int64{}

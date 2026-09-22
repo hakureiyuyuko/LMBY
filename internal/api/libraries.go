@@ -35,7 +35,7 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取用户权限失败", err)
 		return
 	}
-	libs, err := s.store.ListLibraries(ctx, v.LibraryIDs())
+	libs, err := s.store.ListLibraries(ctx, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取媒体库失败", err)
 		return

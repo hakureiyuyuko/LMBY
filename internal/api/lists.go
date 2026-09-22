@@ -50,7 +50,7 @@ func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取用户权限失败", verr)
 		return
 	}
-	items, total, err := s.store.ListFavorites(ctx, authCtx.User.ID, kind, limit, offset, v.LibraryIDs())
+	items, total, err := s.store.ListFavorites(ctx, authCtx.User.ID, kind, limit, offset, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取收藏失败", err)
 		return

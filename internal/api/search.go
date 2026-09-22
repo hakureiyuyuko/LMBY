@@ -71,7 +71,7 @@ func (s *Server) parseSearchFilter(w http.ResponseWriter, r *http.Request) (sear
 		s.serverError(w, "读取用户权限失败", err)
 		return f, false
 	}
-	f.query.LibraryIDs = v.LibraryIDs()
+	f.query.LibraryIDs = v.SQLArgs()
 
 	if f.text == "" && !f.query.HasFilter() {
 		writeError(w, http.StatusBadRequest, "缺少查询词 q（或者给一个筛选条件：libraryId / kind / genre / personId）")
@@ -236,7 +236,7 @@ func (s *Server) handleSearchSuggest(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取用户权限失败", verr)
 		return
 	}
-	sug, err := s.store.SearchSuggest(ctx, text, limit, v.LibraryIDs())
+	sug, err := s.store.SearchSuggest(ctx, text, limit, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "联想失败", err)
 		return

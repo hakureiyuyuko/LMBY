@@ -1250,7 +1250,7 @@ func (s *Server) handleContinueWatching(w http.ResponseWriter, r *http.Request) 
 		s.serverError(w, "读取用户权限失败", verr)
 		return
 	}
-	list, err := s.store.ListContinueWatching(r.Context(), authCtx.User.ID, limit, v.LibraryIDs())
+	list, err := s.store.ListContinueWatching(r.Context(), authCtx.User.ID, limit, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取继续观看列表失败", err)
 		return

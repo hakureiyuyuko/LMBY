@@ -42,7 +42,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hero, err := s.store.ListRecentItems(ctx, homeHeroLimit, v.LibraryIDs())
+	hero, err := s.store.ListRecentItems(ctx, homeHeroLimit, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取首页轮播失败", err)
 		return
@@ -52,7 +52,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		hero = []store.Item{}
 	}
 
-	continueList, err := s.store.ListContinueWatching(ctx, authCtx.User.ID, homeContinueLimit, v.LibraryIDs())
+	continueList, err := s.store.ListContinueWatching(ctx, authCtx.User.ID, homeContinueLimit, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取继续观看失败", err)
 		return
@@ -61,7 +61,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		continueList = []store.ContinueWatching{}
 	}
 
-	sections, err := s.homeSections(ctx, authCtx.User.ID, v.LibraryIDs())
+	sections, err := s.homeSections(ctx, authCtx.User.ID, v.SQLArgs())
 	if err != nil {
 		s.serverError(w, "读取首页推荐失败", err)
 		return

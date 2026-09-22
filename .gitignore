@@ -26,6 +26,7 @@
 # 验收脚本跑出来的产物（截图与报告本机看，不入库）
 /shots*/
 /*-ui-report.txt
+/*-report.txt
 
 # libass（特效字幕）的运行时文件：构建时从 libass-wasm 复制（web/scripts/copy-octopus.mjs），
 # 属生成物，不入库。

@@ -29,6 +29,10 @@ check() { # check <名字> <期望> <实际>
   if [[ "$2" == "$3" ]]; then pass=$((pass+1)); printf 'ok   %s\n' "$1"
   else fail=$((fail+1)); printf 'FAIL %s（期望 %s，实际 %s）\n' "$1" "$2" "$3"; fi
 }
+checkge() { # checkge <名字> <下限> <实际>（数值 >=）
+  if [[ "$3" =~ ^[0-9]+$ ]] && (( $3 >= $2 )); then pass=$((pass+1)); printf 'ok   %s（%s >= %s）\n' "$1" "$3" "$2"
+  else fail=$((fail+1)); printf 'FAIL %s（期望 >= %s，实际 %s）\n' "$1" "$2" "$3"; fi
+}
 login() { # login <jar> <user> <pass> → 成功输出 200
   local jar="$1"
   curl -s -o /dev/null -w '%{http_code}' -b "$jar" -c "$jar" -X POST "$BASE/api/v1/auth/login" \
@@ -116,8 +120,14 @@ else
   note "库里没有带流派的条目，跳过「为你推荐」那一段"
 fi
 
-QTITLE=$(json "$ADMIN_JAR" "$BASE/api/v1/libraries/$FIRST/items?limit=1" | jq -r '.items[0].title // empty')
-Q=$(jq -rn --arg t "${QTITLE:-a}" '$t|@uri')
+# 搜索词挑一条**可见库里的顶层条目**（movie / series）的标题。
+# 为什么不再只看状态码：曾经有个回归让**管理员搜什么都 0 条** —— 可见库参数是
+# nil 切片，被 pgx 绑成 NULL，而 `cardinality(NULL) = 0` 也是 NULL，where 恒不成立。
+# 那种情况下接口照样回 200 + 空结果，只断言状态码完全发现不了。
+QTITLE=$(json "$ADMIN_JAR" "$BASE/api/v1/libraries/$FIRST/items?limit=100" \
+  | jq -r '[.items[] | select((.title // "") | length >= 4)][0].title // empty')
+Q=$(jq -rn --arg t "${QTITLE:?库内挑不出可当搜索词的标题 —— 检查库里有没有条目}" '$t|@uri')
+note "搜索词取「$QTITLE」"
 for who in admin user; do
   jar=$ADMIN_JAR; [[ "$who" == user ]] && jar=$USER_JAR
   check "$who 首页 200" 200 "$(code "$jar" "$BASE/api/v1/home")"
@@ -128,6 +138,11 @@ for who in admin user; do
   check "$who 库列表 200" 200 "$(code "$jar" "$BASE/api/v1/libraries")"
   check "$who 库浏览 200" 200 "$(code "$jar" "$BASE/api/v1/libraries/$FIRST/browse")"
   check "$who 库内条目 200" 200 "$(code "$jar" "$BASE/api/v1/libraries/$FIRST/items?limit=5")"
+  # 命中数：词就是从**这座库里**取的，两种视角都必须搜得到
+  checkge "$who 搜索真有命中" 1 "$(json "$jar" "$BASE/api/v1/search?q=$Q" | jq -r '.total')"
+  checkge "$who 联想真有命中" 1 "$(json "$jar" "$BASE/api/v1/search/suggest?q=$Q" | jq -r '[.items[]?] | length')"
+  checkge "$who 首页有内容" 1 \
+    "$(json "$jar" "$BASE/api/v1/home" | jq -r '[(.hero|length),(.continue|length),([.sections[]?.items|length]|add//0)]|add')"
 done
 if [[ -n "$SEED_ITEM" ]]; then
   check "受限用户 条目详情 200" 200 "$(code "$USER_JAR" "$BASE/api/v1/items/$SEED_ITEM")"
@@ -143,6 +158,25 @@ check "受限用户首页出了「为你推荐」" 1 \
 if [[ "$(code "$USER_JAR" "$BASE/api/v1/home")" != "200" ]]; then
   note "日志里最后一条首页报错：$(journalctl -u lmby --since '-5 min' --no-pager 2>/dev/null | grep '读取首页' | tail -1)"
 fi
+
+echo
+echo "== 1.7 白名单开着、一个库都不勾 → 什么都看不到（哨兵语义） =="
+# 这一段钉一个**很容易写错、错了就是权限漏洞**的语义：
+# 「白名单开着但一个库都没勾」与「不限制」在 SQL 层不能都表达成空数组
+# （空数组的 cardinality 也是 0，会被当成「不过滤」，于是这人看到全部库）。
+# 实现上用哨兵 -1（不存在的库 id）区分；这里从外面把行为验一遍。
+json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID/libraries" PUT '{"libraryIds":[]}' >/dev/null
+check "清空白名单后旧 token 立即失效" 401 "$(code "$USER_JAR" "$BASE/api/v1/libraries")"
+check "重新登录" 200 "$(login "$USER_JAR" "$UNAME" "$UPASS")"
+check "库列表是空的" 0 "$(json "$USER_JAR" "$BASE/api/v1/libraries" | jq -r '.libraries | length')"
+check "首页什么都看不到" 0 \
+  "$(json "$USER_JAR" "$BASE/api/v1/home" | jq -r '[(.hero|length),(.continue|length),([.sections[]?.items|length]|add//0)]|add')"
+check "搜索什么都搜不到" 0 "$(json "$USER_JAR" "$BASE/api/v1/search?q=$Q" | jq -r '.total')"
+check "联想什么都不给" 0 "$(json "$USER_JAR" "$BASE/api/v1/search/suggest?q=$Q" | jq -r '[.items[]?]|length')"
+check "收藏是空的" 0 "$(json "$USER_JAR" "$BASE/api/v1/favorites" | jq -r '.total')"
+# 还回白名单：后面的用例还要在这个账号上继续跑
+json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID/libraries" PUT "{\"libraryIds\":[$FIRST]}" >/dev/null
+check "还回白名单后重新登录" 200 "$(login "$USER_JAR" "$UNAME" "$UPASS")"
 
 echo
 echo "== 2. 允许转码：关掉后必须转码的片直接 403，且不起 ffmpeg =="

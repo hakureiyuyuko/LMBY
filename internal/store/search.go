@@ -252,7 +252,7 @@ func (s *Store) SearchItems(ctx context.Context, q SearchQuery) ([]SearchHit, in
 			 from media_items i
 			 where `+searchConditionOf("$8")+searchOrder+`
 			 limit $6 offset $7`,
-			append(append(append([]any{}, args...), limit, offset), q.LibraryIDs)...)
+			append(append(append([]any{}, args...), limit, offset), libsArg(q.LibraryIDs))...)
 		if err != nil {
 			return fmt.Errorf("搜索条目失败: %w", err)
 		}
@@ -277,7 +277,7 @@ func (s *Store) SearchItems(ctx context.Context, q SearchQuery) ([]SearchHit, in
 
 		return tx.QueryRow(ctx,
 			`select count(*) from media_items i where `+searchConditionOf("$6"),
-			append(append([]any{}, args...), q.LibraryIDs)...).Scan(&total)
+			append(append([]any{}, args...), libsArg(q.LibraryIDs))...).Scan(&total)
 	})
 	if err != nil {
 		return nil, 0, err
@@ -340,7 +340,7 @@ func (s *Store) SearchFacets(ctx context.Context, q SearchQuery) (SearchFacets, 
 				searchConditionOf("$6") + ` group by 1 order by 2 desc, 1 limit 20`, &out.Genre, 0},
 		}
 		for _, t := range terms {
-			terms_args := append(append([]any{}, q.filters(t.dim)...), q.LibraryIDs)
+			terms_args := append(append([]any{}, q.filters(t.dim)...), libsArg(q.LibraryIDs))
 			rows, err := tx.Query(ctx, t.sql, terms_args...)
 			if err != nil {
 				return fmt.Errorf("统计 %s 分面失败: %w", t.dim, err)
@@ -377,7 +377,7 @@ func (s *Store) SearchFacets(ctx context.Context, q SearchQuery) (SearchFacets, 
 
 		// 总数：用完整的筛选（与 SearchItems 完全一致的那一段）
 		if err := tx.QueryRow(ctx,
-			`select count(*) from media_items i where `+searchConditionOf("$6"), append(q.filters(""), q.LibraryIDs)...).Scan(&out.Total); err != nil {
+			`select count(*) from media_items i where `+searchConditionOf("$6"), append(q.filters(""), libsArg(q.LibraryIDs))...).Scan(&out.Total); err != nil {
 			return fmt.Errorf("统计搜索结果失败: %w", err)
 		}
 		return nil
