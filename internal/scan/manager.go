@@ -38,7 +38,17 @@ type Manager struct {
 	subMu sync.Mutex
 	subs  map[int]chan scanner.Progress
 	next  int
+
+	// minFileSize 是「小于该字节数不当视频」的下限（0 = 用 scanner 的内置默认）。
+	// 由 main 从 config 的 [scan] min_file_size 注入。
+	minFileSize int64
 }
+
+// SetMinFileSize 设置文件大小下限（0 = 用 scanner 的内置默认）。
+//
+// 用 setter 而不是改构造函数：这只是一个旋钮，不想为它把 main/api 的
+// 构造链动一遍（跟 images.SetOverlay / scrape.SetOverlay 一个路子）。
+func (m *Manager) SetMinFileSize(n int64) { m.minFileSize = n }
 
 // NewManager 创建扫描管理器。
 func NewManager(st *store.Store, log *slog.Logger) *Manager {
@@ -116,6 +126,8 @@ func (m *Manager) run(ctx context.Context, lib store.Library, runID int64, trigg
 		ScanRunID:       runID,
 		Trigger:         trigger,
 		RefreshMetadata: refreshMetadata,
+		// 「小于该字节数不当视频」的下限由配置给（未配置时由 scanner 用内置默认）
+		MinFileSize: m.minFileSize,
 		OnProgress: func(p scanner.Progress) {
 			m.mu.Lock()
 			if r, ok := m.current[lib.ID]; ok {

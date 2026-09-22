@@ -69,7 +69,14 @@ type Server struct {
 	overlay *overlay.Service
 }
 
-// SetOverlay 接入「只读媒体库」的叠加层（写在数据目录里，不碰媒体目录）。
+// newScanManager 构造扫描管理器并注入 config 里的小旋钮。
+func newScanManager(cfg *config.Config, st *store.Store, log *slog.Logger) *scan.Manager {
+	m := scan.NewManager(st, log)
+	// 0 时留给 scanner 的内置默认（见 scanner.defaultMinFileSize）
+	m.SetMinFileSize(cfg.Scan.MinFileSize)
+	return m
+}
+
 // 不接时相关界面只显示只读开关与说明，不显示叠加层占用。
 func (s *Server) SetOverlay(o *overlay.Service) { s.overlay = o }
 
@@ -97,7 +104,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		meta:     meta,
 		started:  time.Now(),
 		limiter:  newLoginLimiter(8, 15*time.Minute),
-		scans:    scan.NewManager(st, log),
+		scans:    newScanManager(cfg, st, log),
 		streams:  streams,
 		plays:    newPlayRegistry(),
 		subs:     newSubtitleJobs(),

@@ -36,6 +36,8 @@ type Config struct {
 	SessionTTLHours int `toml:"session_ttl_hours"`
 
 	Database DatabaseConfig `toml:"database"`
+	// Scan 是扫描器的小旋钮（M6 补：之前写在代码常量里，换不出手）。
+	Scan     ScanConfig     `toml:"scan"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
@@ -200,6 +202,16 @@ type FFmpegConfig struct {
 }
 
 // Default 返回带默认值的配置。
+// ScanConfig 是扫描器的小旋钮。
+type ScanConfig struct {
+	// MinFileSize 是「小于该字节数的文件不当视频」的下限（0 = 用内置默认）。
+	//
+	// 它只该用来挡真垃圾（缩略图、被改成 .mp4 的文本、下载残片），
+	// **不是画质/时长过滤器** —— 实测有 28 秒的 1080p h264 短片只有 646 KB，
+	// 阈值开大了会把它们当成垃圾直接跳过（用户2026-09-22 真踩到：一个目录 63 个文件被跳）。
+	MinFileSize int64 `toml:"min_file_size"`
+}
+
 func Default() *Config {
 	return &Config{
 		Listen:          ":8099",

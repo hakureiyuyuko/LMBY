@@ -541,6 +541,12 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 （图片副本 + `meta.json` 元数据快照；算数据、不参与缓存淘汰，与 `images/` 分开是为了
 「别被缓存清理顺手删掉」）—— 见 `docs/notes/library-readonly.md`。
 
+扫描器的小旋钮走配置：`[scan] min_file_size`（字节，0 = 内置默认 **64 KiB**）。
+它**只用来挡真垃圾**（缩略图、被改成 .mp4 的文本、下载残片）——
+2026-09-22 真踩过：一个目录 63 个文件被跳过，因为旧默认 1 MiB 把
+**28 秒的 1080p h264 短片（646 KB）** 也当成了残片；现在问题描述里会写明
+「文件过小（N 字节 < 阈值 M）」，并直接告诉你改哪个配置项。
+
 ```
 GET /api/v1/items/{id}/images                      → 列出这个条目有哪些图（本地/回源、尺寸、URL）
 GET /api/v1/items/{id}/images/{kind}?w=&h=&format=&q=  → 输出图（kind: poster|fanart|logo|banner|thumb...）

@@ -86,8 +86,14 @@ type Options struct {
 }
 
 const (
-	// defaultMinFileSize 挡掉样片碎片与下载残片。
-	defaultMinFileSize = 1024 * 1024
+	// defaultMinFileSize 只用来挡真垃圾：缩略图、被改成 .mp4 的文本、下载残片。
+	//
+	// ⚠️ 它**不是画质/时长过滤器** —— 2026-09-22 用户真踩到：
+	// 一个「连载动画」目录里 63 个文件全部被跳过，因为它们是**28 秒的 1080p h264 短片**
+	// （ffprobe 确认是有效视频）而单文件只有 646 KB —— 旧默认 1 MiB 把正常片源当垃圾了。
+	// 所以默认压到 64 KiB：比它小的东西几乎不可能是视频，而再短的正常片段也不会这么小。
+	// 真要调：config.toml 的 `[scan] min_file_size = <字节>`（0 = 用这个默认值）。
+	defaultMinFileSize = 64 * 1024
 	// maxIssues 是单次扫描记录的问题数上限，防止畸形库把表写爆。
 	maxIssues = 2000
 )
@@ -435,7 +441,11 @@ func (w *walker) handleVideo(ctx context.Context, dir, path string, d fs.DirEntr
 	}
 	size, mtime := info.Size(), info.ModTime().UnixNano()
 	if size < w.opts.MinFileSize {
-		w.issue("info", path, fmt.Sprintf("文件过小（%d 字节），已跳过", size))
+		// 把「阈值」和「怎么改」写进问题描述：只说「文件过小」用户不知道是多小、
+		// 也不知道能不能调（这是真踩过的坑：正常短片被当垃圾跳了，界面上看不出原因）。
+		w.issue("info", path, fmt.Sprintf(
+			"文件过小（%d 字节 < 阈值 %d），已跳过 —— 阈值可在 config.toml 的 [scan] min_file_size 调整",
+			size, w.opts.MinFileSize))
 		return
 	}
 
