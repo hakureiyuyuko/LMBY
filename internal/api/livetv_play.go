@@ -298,12 +298,12 @@ func (s *Server) handleStopLivePlay(w http.ResponseWriter, r *http.Request) {
 // 为什么要「就地重拉」：hls.js 在窗口滚完、或标签页切回来时会重新拉播放列表，
 // 那时 ffmpeg 可能已经因为空闲被回收了。直接回 410 只会让用户看到「播放失败」，
 // 而这里重新拉一路，用户那侧只是卡一下。
-func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (*store.TVChannel, *stream.Session, bool) {
+func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (*stream.Session, bool) {
 	sid := r.PathValue("sid")
 	ps := s.livePlays.get(sid, time.Now())
 	if ps == nil {
 		writeError(w, http.StatusNotFound, "播放会话不存在或已过期，请重新起播")
-		return nil, nil, false
+		return nil, false
 	}
 	ctx, cancel := contextWithTimeout(r, liveStartTimeout+5*time.Second)
 	defer cancel()
@@ -311,11 +311,11 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 	ch, err := s.store.GetTVChannel(ctx, ps.userID, ps.channelID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "频道已被删除")
-		return nil, nil, false
+		return nil, false
 	}
 	if err != nil {
 		s.serverError(w, "读取频道失败", err)
-		return nil, nil, false
+		return nil, false
 	}
 
 	sess := s.streams.Get(ps.streamKey)
@@ -323,15 +323,15 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 		sess, err = s.ensureLiveSession(ctx, *ch)
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
-			return nil, nil, false
+			return nil, false
 		}
 	}
-	return ch, sess, true
+	return sess, true
 }
 
 // handleLivePlaylist 输出直播的滚动播放列表。
 func (s *Server) handleLivePlaylist(w http.ResponseWriter, r *http.Request) {
-	_, sess, ok := s.liveSessionForRequest(w, r)
+	sess, ok := s.liveSessionForRequest(w, r)
 	if !ok {
 		return
 	}
@@ -350,7 +350,7 @@ func (s *Server) handleLivePlaylist(w http.ResponseWriter, r *http.Request) {
 
 // handleLivePlaySegment 输出直播分片。
 func (s *Server) handleLivePlaySegment(w http.ResponseWriter, r *http.Request) {
-	_, sess, ok := s.liveSessionForRequest(w, r)
+	sess, ok := s.liveSessionForRequest(w, r)
 	if !ok {
 		return
 	}

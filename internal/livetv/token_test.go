@@ -3,6 +3,7 @@ package livetv
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestPlayTokenRejectsTamper(t *testing.T) {
 		"空 token": "",
 	}
 	for name, bad := range cases {
-		if _, err := ParsePlayToken(s, bad, now); err != ErrTokenInvalid {
+		if _, err := ParsePlayToken(s, bad, now); !errors.Is(err, ErrTokenInvalid) {
 			t.Errorf("%s：期望 ErrTokenInvalid，实际 %v", name, err)
 		}
 	}
@@ -63,7 +64,7 @@ func TestPlayTokenExpiry(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
 	tok := SignPlayToken(s, 7, now.Add(-time.Second))
-	if _, err := ParsePlayToken(s, tok, now); err != ErrTokenExpired {
+	if _, err := ParsePlayToken(s, tok, now); !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("过期 token：期望 ErrTokenExpired，实际 %v", err)
 	}
 
@@ -77,7 +78,7 @@ func TestPlayTokenExpiry(t *testing.T) {
 func TestPlayTokenWrongKeyRejected(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	tok := SignPlayToken(fakeSigner{key: "k1"}, 5, now.Add(time.Hour))
-	if _, err := ParsePlayToken(fakeSigner{key: "k2"}, tok, now); err != ErrTokenInvalid {
+	if _, err := ParsePlayToken(fakeSigner{key: "k2"}, tok, now); !errors.Is(err, ErrTokenInvalid) {
 		t.Errorf("换密钥后旧 token 必须失效，实际 %v", err)
 	}
 }
