@@ -35,11 +35,14 @@ lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir
 ```bash
 apt-get install -y ffmpeg vainfo intel-media-va-driver-non-free libvpl2 \
                    libmfx-gen1.2 libvpl-tools intel-gpu-tools \
-                   postgresql git curl build-essential jq unzip
+                   postgresql git curl build-essential jq unzip cifs-utils
 ```
 
 > 需要注意：Debian 13 的软件源默认只有 `main contrib`，装 Intel 的完整 iHD 驱动
 > 必须先补上 `non-free non-free-firmware`。
+
+`cifs-utils` 是给**媒体共享**用的（从零部署时实测过：少它 `mount /mnt/media` 会失败，
+而缺媒体库路径会让新实例一片空白 —— 症状是「服务起来了、库是空的」）。
 
 ## 自建 CI runner（GitHub Actions self-hosted）
 

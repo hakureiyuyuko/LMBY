@@ -72,11 +72,9 @@ func (s *Store) CreateLibrary(ctx context.Context, name, kind string, options ma
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
-	var lib Library
-	err = tx.QueryRow(ctx,
+	lib, err := scanLibrary(tx.QueryRow(ctx,
 		`insert into libraries (name, kind, options) values ($1, $2, $3)
-		 returning `+libraryColumns, name, kind, options).
-		Scan(&lib.ID, &lib.Name, &lib.Kind, &lib.Options, &lib.CreatedAt, &lib.UpdatedAt)
+		 returning `+libraryColumns, name, kind, options))
 	if err != nil {
 		return nil, fmt.Errorf("创建媒体库失败: %w", err)
 	}

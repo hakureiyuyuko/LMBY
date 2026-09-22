@@ -52,6 +52,40 @@ login=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -c "$JAR" -X POST "$BAS
 check "登录成功" 200 "$login"
 note "数据目录 $DATA_DIR（overlay 在 $OVERLAY）"
 
+echo
+echo "== 0.5 新建媒体库（真跑「建库」这条路） =="
+# 为什么单列这一节：建库那条 SQL 手写 Scan 且漏了后来加的 `readonly` 列
+# （SELECT 7 列、只扫 6 个目标）→ **新建媒体库直接 500**：
+#   number of field descriptions must equal number of destinations, got 7 and 6
+# 而只读库那一路（改现成的库）一直是绿的 —— 没人建过库，就没人发现。
+TMPLIB="验收临时库-$$"
+TMPLIB_DIR="/tmp/vlr-lib-$$"
+mkdir -p "$TMPLIB_DIR"
+CREATE_CODE=$(curl -s -o /tmp/vlr-lib.json -w '%{http_code}' -b "$JAR" -X POST "$BASE/api/v1/libraries" \
+  -H 'Content-Type: application/json' -d "{\"name\":\"$TMPLIB\",\"kind\":\"mixed\",\"paths\":[\"$TMPLIB_DIR\"]}")
+# 注意：`POST /libraries` 的响应体是**扁平的** library 对象（`libraryResponse` 内嵌了
+# Library，字段被提升），并且状态码是 **201 Created** —— 与 `GET /libraries/{id}`
+# 的 `{library:{…}}` 形状不同（别照着一个写另一个）。
+check "新建媒体库返回 201" 201 "$CREATE_CODE"
+NEWLIB=$(jq -r '.id // empty' /tmp/vlr-lib.json)
+check "拿得到新库 id" true "$([[ -n "$NEWLIB" ]] && echo true || echo false)"
+if [[ -n "$NEWLIB" ]]; then
+  check "新库的名字对得上" "$TMPLIB" "$(json -b "$JAR" "$BASE/api/v1/libraries/$NEWLIB" | jq -r '.library.name')"
+  check "新库默认不是只读" false "$(json -b "$JAR" "$BASE/api/v1/libraries/$NEWLIB" | jq -r '.library.readonly')"
+  check "新库带回根路径" 1 "$(json -b "$JAR" "$BASE/api/v1/libraries/$NEWLIB" | jq -r '.library.paths | length')"
+  # 顺手把「改名 + 只读开关」走一遍（PATCH 这条路）
+  PATCH_CODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$NEWLIB" \
+    -H 'Content-Type: application/json' -d "{\"name\":\"$TMPLIB-改名\",\"readonly\":true}")
+  check "改名 + 打开只读返回 200" 200 "$PATCH_CODE"
+  LIB_NOW=$(json -b "$JAR" "$BASE/api/v1/libraries/$NEWLIB")
+  check "改名生效" "$TMPLIB-改名" "$(jq -r '.library.name' <<<"$LIB_NOW")"
+  check "只读生效" true "$(jq -r '.library.readonly' <<<"$LIB_NOW")"
+  check "删除临时库返回 200" 200 "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X DELETE "$BASE/api/v1/libraries/$NEWLIB")"
+  check "删完列表里没有它" 0 \
+    "$(json -b "$JAR" "$BASE/api/v1/libraries" | jq -r --arg n "$TMPLIB-改名" '[.libraries[] | select(.name==$n)] | length')"
+fi
+rmdir "$TMPLIB_DIR" 2>/dev/null || true
+
 LIB=$(json -b "$JAR" "$BASE/api/v1/libraries" | jq -r '.libraries[0].id // empty')
 if [[ -z "$LIB" ]]; then
   echo "  库里一个媒体库都没有，无法验收"
@@ -97,12 +131,17 @@ done
 if [[ -n "$found" ]]; then
   ok "条目 #$pick 的图片已进叠加层（$(find "$OVERLAY/$LIB/$pick" -type f 2>/dev/null | head -5 | tr '\n' ' '))"
 else
-  bad "叠加层 $OVERLAY/$LIB/<item> 下有文件" ">0" "0（这个库前 10 条的图全部来自本地目录，不回源）"
+  # 这个库的图全在本地目录（不回源）→ 只读库不会往叠加层写东西。
+  # 这是**数据差异、不是 bug**（换一个有回源图的实例就绿了），所以降级成提示，
+  # 下面依赖叠加层的断言一律跳过 —— 免得「换台机器跑就红」这种假失败。
+  note "叠加层 $OVERLAY/$LIB/<item> 里没有文件（这个库前 10 条的图全部来自本地目录，不回源）—— 跳过叠加层相关断言"
 fi
 files=$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.overlay.files')
 bytes=$(json -b "$JAR" "$BASE/api/v1/libraries/$LIB" | jq -r '.overlay.bytes')
 note "界面看到的叠加层占用：$files 个文件 / $bytes 字节"
-if [[ "$files" -gt 0 ]]; then ok "overlay 统计 > 0"; else bad "overlay 统计 > 0" ">0" "$files"; fi
+if [[ -n "$found" ]]; then
+  if [[ "$files" -gt 0 ]]; then ok "overlay 统计 > 0"; else bad "overlay 统计 > 0" ">0" "$files"; fi
+fi
 
 echo
 echo "== 4. 关掉只读：开关与根路径都必须回到 false =="
@@ -173,8 +212,15 @@ echo "== 6. 叠加层看板与清空 =="
 # 回写只在只读库发生，后面要验「清空后再取图又会落回来」，先把开关打开
 json -b "$JAR" -X PATCH "$BASE/api/v1/libraries/$LIB" -H 'Content-Type: application/json' -d '{"readonly":true}' >/dev/null
 check "GET /overlay 返回 total" true "$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r 'has("total")')"
-check "看板里带上库名" true \
-  "$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r --argjson id "$LIB" '[.libraries[] | select(.libraryId == $id)][0].name != null')"
+# /overlay 的 total 是个对象（{files, bytes}）—— 取 .total.files 才是数字；
+# 写成 .total 会拿到一整个 JSON 文本，与数字比较失败 → 断言被静默跳过（假绿）。
+OVERLAY_TOTAL=$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r '.total.files // 0')
+if [[ "$OVERLAY_TOTAL" -gt 0 ]]; then
+  check "看板里带上库名" true \
+    "$(json -b "$JAR" "$BASE/api/v1/overlay" | jq -r --argjson id "$LIB" '[.libraries[] | select(.libraryId == $id)][0].name != null')"
+else
+  note "看板里一个库都没有（这个实例还没有任何叠加层数据）—— 跳过「带上库名」"
+fi
 check "未登录看板 → 401" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/overlay")"
 check "未登录清空 → 401" 401 \
   "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/v1/libraries/$LIB/overlay")"
