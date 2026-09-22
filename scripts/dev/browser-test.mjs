@@ -247,16 +247,25 @@ async function main() {
   );
   check('顶栏显示当前用户', true, (await evaluate(text('.topbar'))).includes('管理员'));
 
-  console.log('\n== 4. 概览页（健康面板） ==');
-  await waitFor('健康面板渲染完成', async () =>
-    (await evaluate(text('.card'))).includes('运行正常'),
+  console.log('\n== 4. 设置页（服务状态面板） ==');
+  // M6 起服务状态从「概览页底部」搬到了设置页 —— 它是出问题时才看的信息，不该占首页位置。
+  // 所以这里改成：去设置页验面板，回首页验它已经不在了。
+  await evaluate(click('.nav a[href="/settings"]'));
+  await waitFor('进入设置页', async () => (await evaluate('location.pathname')) === '/settings');
+  await waitFor('服务状态渲染完成', async () =>
+    (await evaluate(text('.content'))).includes('运行正常'),
   );
   const overview = await evaluate(text('.content'));
-  check('显示服务状态卡片', true, overview.includes('服务状态'));
+  check('设置页显示服务状态卡片', true, overview.includes('服务状态'));
   check('显示数据库与 ffmpeg 状态徽章', true, overview.includes('数据库') && overview.includes('ffmpeg'));
   check('列出硬件加速后端', true, overview.includes('vaapi'));
   check('提示「列出后端不等于真能用」', true, overview.includes('不等于'));
-  await screenshot('04-overview-dark');
+  await screenshot('04-settings-health-dark');
+
+  console.log('\n== 5. 首页是内容页（不再放服务状态） ==');
+  await evaluate(click('.nav a[href="/"]'));
+  await waitFor('回到首页', async () => (await evaluate('location.pathname')) === '/');
+  check('首页不再显示服务状态', false, (await evaluate(text('.content'))).includes('服务状态'));
 
   console.log('\n== 5. 个人中心 ==');
   await evaluate(click('.nav a[href="/account"]'));

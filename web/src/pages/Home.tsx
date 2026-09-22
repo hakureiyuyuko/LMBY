@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { ContinueWatchingEntry, Health, HomePayload, HomeTaste, Item } from '../api';
+import type { ContinueWatchingEntry, HomePayload, HomeTaste, Item } from '../api';
 import { formatClock } from '../capabilities';
 import { kindLabel } from '../media';
 
@@ -22,6 +22,9 @@ import { kindLabel } from '../media';
  *     退到海报再退到「隐掉图片留底色渐变」，任何库都不会出现破图；
  *   - 行里复用海报墙的卡片样式（`.poster-card` / `.poster-frame`），
  *     所以「卡片长什么样」全站只有一套定义。
+ *
+ * M6 调整：原本贴在页面底部的「服务状态」自检面板搬到了设置页 ——
+ * 它是「出问题时才看」的信息，不该占首页的位置（browser-test 也跟着改了）。
  */
 
 /** 轮播间隔：够看清简介，又不至于让人等得想起要拖动。 */
@@ -32,7 +35,6 @@ export function Home() {
   const [error, setError] = useState('');
   const [hero, setHero] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [health, setHealth] = useState<Health | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -46,14 +48,6 @@ export function Home() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // 自检面板（M0 起就在首页的那个）只需要事实，不轮询：看完刷新一下就好
-  useEffect(() => {
-    api
-      .health()
-      .then(setHealth)
-      .catch(() => setHealth(null));
-  }, []);
 
   const heroItems = data?.hero ?? [];
 
@@ -240,44 +234,6 @@ export function Home() {
           </p>
         </div>
       )}
-
-      <details className="card home-health">
-        <summary>服务状态</summary>
-        {!health && <p className="muted">正在读取…</p>}
-        {health && (
-          <>
-            <p style={{ marginTop: 10 }}>
-              <span className="badge">
-                <span className={health.status === 'ok' ? 'dot dot-ok' : 'dot dot-warn'} />
-                {health.status === 'ok' ? '运行正常' : health.status === 'degraded' ? '降级运行' : '异常'}
-              </span>{' '}
-              <span className="badge">
-                <span className={health.database.ok ? 'dot dot-ok' : 'dot dot-bad'} />
-                数据库{' '}
-                {health.database.ok ? `${health.database.latencyMs ?? 0} ms` : health.database.error}
-              </span>{' '}
-              <span className="badge">
-                <span className={health.ffmpeg.available ? 'dot dot-ok' : 'dot dot-bad'} />
-                ffmpeg {health.ffmpeg.available ? health.ffmpeg.version : '不可用'}
-              </span>
-            </p>
-            <dl className="kv">
-              <dt>版本</dt>
-              <dd>{health.version}</dd>
-              <dt>运行时长</dt>
-              <dd>{formatUptime(health.uptimeSeconds)}</dd>
-              <dt>ffmpeg 路径</dt>
-              <dd>{health.ffmpeg.path}</dd>
-              <dt>硬件加速后端</dt>
-              <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
-            </dl>
-            <p className="faint" style={{ marginBottom: 0 }}>
-              注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，
-              但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。
-            </p>
-          </>
-        )}
-      </details>
     </div>
   );
 }
@@ -368,13 +324,4 @@ function PosterCard({ item }: { item: Item }) {
       </div>
     </Link>
   );
-}
-
-function formatUptime(sec: number): string {
-  if (sec < 60) return `${sec} 秒`;
-  const m = Math.floor(sec / 60);
-  if (m < 60) return `${m} 分 ${sec % 60} 秒`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时 ${m % 60} 分`;
-  return `${Math.floor(h / 24)} 天 ${h % 24} 小时`;
 }

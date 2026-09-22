@@ -384,19 +384,18 @@ async function main() {
   check('详情页渲染出头部', true, await waitFor('详情页头部', async () =>
     await evaluate(`!!document.querySelector('.detail-hero-inner')`)));
 
-  log('\n== 9. 服务状态（折叠面板还在）==');
+  log('\n== 9. 首页不再放服务状态（M6 搬到了设置页）==');
   await send('Page.navigate', { url: `${BASE}/` });
   check('回到首页', true, await waitFor('首页', async () => (await evaluate('location.pathname')) === '/'));
   check('导航里有「首页」', true, await waitFor('导航', async () =>
     await evaluate(`[...document.querySelectorAll('.nav a')].some((a) => a.textContent.trim() === '首页')`)));
-  check('服务状态折叠面板存在', true, await waitFor('服务状态', async () =>
-    await evaluate(`!!document.querySelector('details.home-health')`)));
-  check('面板里有运行状态', true, await waitFor('运行状态', async () =>
-    await evaluate(`(document.querySelector('details.home-health')?.textContent || '').includes('运行正常')
-      || (document.querySelector('details.home-health')?.textContent || '').includes('降级')
-      || (document.querySelector('details.home-health')?.textContent || '').includes('异常')`)));
-  check('没有独占整页的服务状态卡片（首页是内容页）', true, await waitFor('内容行', async () =>
+  check('首页有内容行', true, await waitFor('内容行', async () =>
     await evaluate(`document.querySelectorAll('.row-block').length > 0`)));
+  check('首页不再有服务状态面板', false, await evaluate(`
+    !!document.querySelector('details.home-health')
+      || /服务状态/.test(document.querySelector('.content')?.textContent || '')`));
+  check('首页不再调 /healthz（搬到设置页了）', true, await waitFor('首页就绪', async () =>
+    await evaluate(`!!document.querySelector('.row-block')`)));
 
   log('\n== 10. 亮色主题 ==');
   await evaluate(clickSel('.theme-toggle'));

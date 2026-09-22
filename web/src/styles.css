@@ -1930,15 +1930,6 @@ th {
   scroll-snap-align: start;
 }
 
-.home-health {
-  margin-top: 28px;
-}
-
-.home-health summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
 .row-taste {
   display: inline-flex;
   gap: 4px;

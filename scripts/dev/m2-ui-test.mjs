@@ -333,6 +333,14 @@ async function main() {
     settingsText.includes('已配置') || settingsText.includes('未配置'));
   check('显示来源（数据库/配置文件）', true, settingsText.includes('来源'));
   check('有系统信息卡（含数据库字符集）', true, settingsText.includes('数据库字符集'));
+  // M6：服务状态从首页底部搬到了这里（它属于「出问题时才看」的信息）
+  check('有服务状态卡（运行状态徽章）', true,
+    settingsText.includes('服务状态')
+      && (settingsText.includes('运行正常') || settingsText.includes('降级运行') || settingsText.includes('异常')));
+  check('服务状态带数据库与 ffmpeg 徽章', true,
+    settingsText.includes('数据库') && settingsText.includes('ffmpeg'));
+  check('服务状态列出硬件加速后端与版本/运行时长', true,
+    /硬件加速后端[\s\S]*运行时长/.test(settingsText));
   const langValue = await evaluate(`document.querySelector('input[list="tmdb-languages"]')?.value || ''`);
   check('语言框带出当前值', true, langValue.length > 0);
 

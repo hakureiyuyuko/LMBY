@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
-import type { ProviderTestResult, SettingsPayload } from '../api';
+import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
  * 设置页（管理员）。
@@ -16,6 +16,16 @@ import type { ProviderTestResult, SettingsPayload } from '../api';
 
 const languageOptions = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'];
 
+/** 把秒换成「3 小时 12 分」这类人话（服务状态那一栏用）。 */
+function formatUptime(sec: number): string {
+  if (sec < 60) return `${sec} 秒`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m} 分 ${sec % 60} 秒`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时 ${m % 60} 分`;
+  return `${Math.floor(h / 24)} 天 ${h % 24} 小时`;
+}
+
 export function Settings() {
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
@@ -27,6 +37,8 @@ export function Settings() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  // 服务状态（M6 从首页底部移过来的）：/healthz 是公开端点，读不到就什么都不显示
+  const [health, setHealth] = useState<Health | null>(null);
   const [test, setTest] = useState<ProviderTestResult | null>(null);
   const [testing, setTesting] = useState(false);
 
@@ -45,6 +57,14 @@ export function Settings() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 服务状态（M6 从首页底部搬过来）：读不到就不显示，不挡设置页的其他内容
+  useEffect(() => {
+    api
+      .health()
+      .then(setHealth)
+      .catch(() => setHealth(null));
+  }, []);
 
   async function save() {
     setBusy(true);
@@ -210,6 +230,48 @@ export function Settings() {
                   : `连接失败：${test.error}`}
               </div>
             )}
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>服务状态</h2>
+        <p className="hint">
+          实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 ——
+          它属于「出问题时才看」的信息，不该占首页的位置。
+        </p>
+        {!health && <p className="muted">正在读取…</p>}
+        {health && (
+          <>
+            <p style={{ marginTop: 10 }}>
+              <span className="badge" data-health-status={health.status}>
+                <span className={health.status === 'ok' ? 'dot dot-ok' : 'dot dot-warn'} />
+                {health.status === 'ok' ? '运行正常' : health.status === 'degraded' ? '降级运行' : '异常'}
+              </span>{' '}
+              <span className="badge">
+                <span className={health.database.ok ? 'dot dot-ok' : 'dot dot-bad'} />
+                数据库{' '}
+                {health.database.ok ? `${health.database.latencyMs ?? 0} ms` : health.database.error}
+              </span>{' '}
+              <span className="badge">
+                <span className={health.ffmpeg.available ? 'dot dot-ok' : 'dot dot-bad'} />
+                ffmpeg {health.ffmpeg.available ? health.ffmpeg.version : '不可用'}
+              </span>
+            </p>
+            <dl className="kv">
+              <dt>版本</dt>
+              <dd>{health.version}</dd>
+              <dt>运行时长</dt>
+              <dd>{formatUptime(health.uptimeSeconds)}</dd>
+              <dt>ffmpeg 路径</dt>
+              <dd>{health.ffmpeg.path}</dd>
+              <dt>硬件加速后端</dt>
+              <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
+            </dl>
+            <p className="faint" style={{ marginBottom: 0 }}>
+              注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，
+              但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。
+            </p>
           </>
         )}
       </div>

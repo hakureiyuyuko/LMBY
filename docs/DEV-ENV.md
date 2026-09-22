@@ -231,7 +231,7 @@ BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-home.sh
 
 # M6 首页：界面验收（34 项，截图到 shots-home/）——轮播切张（圆点/箭头/自动）、背景图加载、
-# 行卡片数与接口一致、行右滚、推荐依据、服务状态折叠面板、亮暗主题
+# 行卡片数与接口一致、行右滚、推荐依据、首页不再放服务状态、亮暗主题
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/home-ui-test.mjs
 
 # M6 收藏：真库 HTTP 验收（30 项）——幂等、列表倒序/过滤、首页那一行；
