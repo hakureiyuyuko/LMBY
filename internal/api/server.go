@@ -160,6 +160,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
 
+	// ---- 首页（轮播 + 继续观看 + 推荐行，M6）----
+	mux.Handle("GET /api/v1/home", s.requireAuth(s.handleHome))
+
 	// ---- 搜索（标题 / 原始标题 / 人名，中文二元组）----
 	// 结果与分面分开：分面只在「词或筛选变了」时需要重算，翻页不必跟着算（见 internal/api/search.go）
 	mux.Handle("GET /api/v1/search", s.requireAuth(s.handleSearch))

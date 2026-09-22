@@ -218,17 +218,27 @@ LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-item-edit.sh
 # M2 搜索：切词/索引侧（15 项，直接对 PG 跑）
 bash scripts/dev/verify-search-sql.sh
 
-# M2 搜索：真库 HTTP 端到端（26 项，含错字容忍与「改完标题立即可搜」）
+# M2 搜索：真库 HTTP 端到端（69 项，含错字容忍、「改完标题立即可搜」、人名搜索、
+# 按人筛作品、即时联想与结果分面）
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-search.sh
 
-# M2 搜索：界面（22 项，无头 Chrome，截图到 shots-search/）
+# M2 搜索：界面（62 项，无头 Chrome，截图到 shots-search/）——联想下拉（防抖/键盘/与结果同序）、
+# 分面胶囊（数字 == 结果总计、点击筛筛选、× 取消）、人名联想与「人」这一档
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/search-ui-test.mjs
+
+# M6 首页（Netflix 风格）：真库 HTTP 验收（26 项）——三段形状与上限、轮播按 updated_at 倒序、
+# **自造一条观看记录**后验推荐（不含刚看过的、每条都命中画像、画像里多了它的流派）、跑完还原
+LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-home.sh
+
+# M6 首页：界面验收（34 项，截图到 shots-home/）——轮播切张（圆点/箭头/自动）、背景图加载、
+# 行卡片数与接口一致、行右滚、推荐依据、服务状态折叠面板、亮暗主题
+BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/home-ui-test.mjs
 
 # M2 海报墙 / 剧集视图 / 批量 / 设置页：真库 HTTP 验收
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-browse.sh    # 40 项
 LMBY_USER=devtest LMBY_PASS=xxx bash scripts/dev/verify-settings.sh  # 38 项
 
-# 同一批的界面验收（34 项，截图到 shots-m2/）；人工匹配的批量选择需要库里有待处理条目：
+# 同一批的界面验收（35 项，截图到 shots-m2/）；人工匹配的批量选择需要库里有待处理条目：
 bash scripts/dev/seed-review-item.sh                                  # 临时造一条 review
 BASE=http://<LMBY_DEV_IP>:8099 LMBY_USER=devtest LMBY_PASS=xxx node scripts/dev/m2-ui-test.mjs
 bash scripts/dev/seed-review-item.sh --restore                        # 用完还原

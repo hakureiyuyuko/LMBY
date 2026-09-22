@@ -1694,3 +1694,257 @@ th {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------- 首页（Netflix 风格） */
+/* 大屏轮播 + 横滑行。配色全部走主题变量，不引入任何「平台专用色」。 */
+
+.home {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 首页用更宽的容器（默认 .content 是 960px，轮播在 1366 屏上会显得局促） */
+.content-wide {
+  max-width: 1440px;
+}
+
+.hero {
+  position: relative;
+  /* 顶到容器边缘：抵消 .content 的 padding（28px 20px），做出「整块横幅」的感觉 */
+  margin: -28px -20px 8px;
+  min-height: 300px;
+  height: 42vh;
+  max-height: 520px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+.hero-media {
+  position: absolute;
+  inset: 0;
+  animation: hero-fade 600ms ease;
+}
+
+@keyframes hero-fade {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* 宽幅背景的主体通常偏上，往下切一点更少裁到脸 */
+  object-position: center 22%;
+  display: block;
+}
+
+/* 两层遮罩：下面往页面底色过渡（内容可读），左边压暗（放文字） */
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top, var(--bg) 2%, transparent 55%),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--bg) 88%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 45%, transparent) 45%,
+      transparent 75%
+    );
+}
+
+.hero-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 660px;
+  height: 100%;
+  padding: 40px 40px 30px;
+  justify-content: flex-end;
+}
+
+.hero-kind {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.hero-title {
+  margin: 0;
+  font-size: clamp(26px, 3.6vw, 46px);
+  line-height: 1.1;
+  font-weight: 800;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
+}
+
+.hero-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hero-overview {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hero-actions {
+  margin-top: 4px;
+}
+
+.hero-play {
+  font-size: 15px;
+  padding: 9px 22px;
+}
+
+.hero-resume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hero-progress {
+  flex: 0 0 160px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+
+.hero-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* 轮播控件贴在右下角（不挡海报主体） */
+.hero-nav {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 1px solid var(--border);
+}
+
+.hero-arrow {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.hero-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.hero-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border-strong);
+  cursor: pointer;
+}
+
+.hero-dot.on {
+  background: var(--accent);
+  transform: scale(1.15);
+}
+
+/* 横滑行 */
+.row-block {
+  margin-top: 24px;
+}
+
+.row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.row-head h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.row-arrow {
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.row-arrow:hover {
+  border-color: var(--border-strong);
+}
+
+.row-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+}
+
+.row-item {
+  flex: 0 0 150px;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+/* 「继续观看」在行里复用原来的卡片样式，只是宽度跟着行走 */
+.row-scroll .continue-card {
+  flex: 0 0 150px;
+  scroll-snap-align: start;
+}
+
+.home-health {
+  margin-top: 28px;
+}
+
+.home-health summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.row-taste {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.row-taste .badge {
+  font-size: 12px;
+}

@@ -273,6 +273,15 @@ export const api = {
       { method: 'POST' },
     ),
 
+  // ---------------------------------------------------------------- 首页
+  /**
+   * 首页一次取全：轮播 + 继续观看 + 推荐行。
+   *
+   * 为什么不拆成三四个请求：首页的首屏感觉直接由请求数决定，而且几行之间有先后关系
+   * （有没有观看记录，决定了出「为你推荐」还是「评分最高」）。
+   */
+  home: () => request<HomePayload>('/api/v1/home'),
+
   // ---------------------------------------------------------------- 搜索
   /**
    * 搜索条目。q 可以为空，但那时**必须**至少给一个筛选条件（库/类型/流派/人），
@@ -569,6 +578,9 @@ export interface Item {
   id: number;
   libraryId?: number;
   kind: string;
+  /** 顶层条目为 undefined；季/集的父项与所属剧集。 */
+  parentId?: number;
+  seriesId?: number;
   title: string;
   originalTitle?: string;
   year?: number;
@@ -576,14 +588,22 @@ export interface Item {
   episodeNumber?: number;
   episodeEnd?: number;
   overview?: string;
+  tagline?: string;
   runtimeTicks?: number;
   premiereDate?: string;
+  /** 社区评分（TMDB/nfo 来的，0~10）。 */
+  communityRating?: number;
+  /** 分级（PG-13 / TV-MA 之类）。 */
+  officialRating?: string;
   fileTech?: Record<string, unknown>;
   genres?: string[];
+  tags?: string[];
+  studios?: string[];
   matchState?: string;
   matchScore?: number;
   metadataSource?: string;
   scrapeError?: string;
+  updatedAt?: string;
 }
 
 /** 海报墙（只含顶层条目）。 */
@@ -657,6 +677,29 @@ export interface ProviderTestResult {
   samples?: { id: number; title: string; year: number }[];
   elapsed?: number;
   error?: string;
+}
+
+/** 首页的一行（标题 + 副标题 + 条目）。 */
+/** 口味画像的一档：流派 + 权重（在看过的作品里出现过几次）。 */
+export interface HomeTaste {
+  genre: string;
+  weight: number;
+}
+
+export interface HomeSection {
+  key: string;
+  title: string;
+  subtitle?: string;
+  /** 只有「为你推荐」有：口味画像。 */
+  taste?: HomeTaste[];
+  items: Item[];
+}
+
+export interface HomePayload {
+  /** 大屏轮播：最近更新/入库的几条（宽幅背景用）。 */
+  hero: Item[];
+  continue: ContinueWatchingEntry[];
+  sections: HomeSection[];
 }
 
 /** 搜索命中：条目本体 + 排序依据。 */

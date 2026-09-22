@@ -11,6 +11,8 @@ export function Layout() {
     loc.pathname.startsWith('/library/') ||
     loc.pathname.startsWith('/series/') ||
     loc.pathname.startsWith('/item/');
+  // 首页（Netflix 风格）要更宽的容器：轮播横幅在 960px 里显得局促
+  const isHome = loc.pathname === '/';
 
   return (
     <div className="shell">
@@ -36,7 +38,7 @@ export function Layout() {
             人工匹配
           </NavLink>
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
-            概览
+            首页
           </NavLink>
           <NavLink to="/account" className={({ isActive }) => (isActive ? 'active' : '')}>
             个人中心
@@ -62,7 +64,7 @@ export function Layout() {
         </button>
       </header>
 
-      <main className="content">
+      <main className={isHome ? 'content content-wide' : 'content'}>
         <Outlet />
       </main>
 
