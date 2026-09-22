@@ -61,7 +61,7 @@ func CopyAudioEncode() AudioEncode { return AudioEncode{Copy: true} }
 //     `-map 0:<视频序号>` 与滤镜输出同时存在会让同一个流被送两遍（会直接报错）。
 func hlsArgs(opts Options, spec Spec, outDir string) []string {
 	if spec.Live {
-		return liveHLSArgs(opts, spec, outDir)
+		return liveHLSArgs(spec, outDir)
 	}
 	window := opts.WindowSeconds
 	if spec.WindowSeconds > 0 {
@@ -172,6 +172,10 @@ func hlsArgs(opts Options, spec Spec, outDir string) []string {
 
 // liveHLSArgs 构造直播转封装的命令行。
 //
+// 刻意不接 Options：直播的分片时长不跟点播的全局设置走（点播默认 4 秒，
+// 而直播必须用 1 秒——分片时长就是起播延迟下限），窗口大小也同理。
+// 想让直播可配置时，应该加在 spec 上（与 LiveListSize 一致），而不是复用一个给点播调的旋钮。
+//
 // 与点播的差别（每一条都有原因）：
 //   - 没有 `-t`：直播没有终点，只靠 `hls_list_size` 滚滚向前；
 //   - `-hls_list_size N` + `delete_segments`：播放列表只留最近 N 个分片，
@@ -185,7 +189,7 @@ func hlsArgs(opts Options, spec Spec, outDir string) []string {
 //   - `0:v:0?` / `0:a:0?`：直播源的流序号不固定，而且可选（有的源没音轨）。
 //     带 `?` 表示「没有就不映射」，否则 ffmpeg 会直接报错退出；
 //   - 仅直播时音频默认转 AAC：IPTV 源大多是 MP2，浏览器放不了。
-func liveHLSArgs(opts Options, spec Spec, outDir string) []string {
+func liveHLSArgs(spec Spec, outDir string) []string {
 	listSize := spec.LiveListSize
 	if listSize < 3 || listSize > 30 {
 		listSize = 6

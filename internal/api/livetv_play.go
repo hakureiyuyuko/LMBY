@@ -298,12 +298,12 @@ func (s *Server) handleStopLivePlay(w http.ResponseWriter, r *http.Request) {
 // 为什么要「就地重拉」：hls.js 在窗口滚完、或标签页切回来时会重新拉播放列表，
 // 那时 ffmpeg 可能已经因为空闲被回收了。直接回 410 只会让用户看到「播放失败」，
 // 而这里重新拉一路，用户那侧只是卡一下。
-func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (*livePlaySession, *store.TVChannel, *stream.Session, bool) {
+func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (*store.TVChannel, *stream.Session, bool) {
 	sid := r.PathValue("sid")
 	ps := s.livePlays.get(sid, time.Now())
 	if ps == nil {
 		writeError(w, http.StatusNotFound, "播放会话不存在或已过期，请重新起播")
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	ctx, cancel := contextWithTimeout(r, liveStartTimeout+5*time.Second)
 	defer cancel()
@@ -311,11 +311,11 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 	ch, err := s.store.GetTVChannel(ctx, ps.userID, ps.channelID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "频道已被删除")
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	if err != nil {
 		s.serverError(w, "读取频道失败", err)
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 
 	sess := s.streams.Get(ps.streamKey)
@@ -323,15 +323,15 @@ func (s *Server) liveSessionForRequest(w http.ResponseWriter, r *http.Request) (
 		sess, err = s.ensureLiveSession(ctx, *ch)
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
-			return nil, nil, nil, false
+			return nil, nil, false
 		}
 	}
-	return ps, ch, sess, true
+	return ch, sess, true
 }
 
 // handleLivePlaylist 输出直播的滚动播放列表。
 func (s *Server) handleLivePlaylist(w http.ResponseWriter, r *http.Request) {
-	_, _, sess, ok := s.liveSessionForRequest(w, r)
+	_, sess, ok := s.liveSessionForRequest(w, r)
 	if !ok {
 		return
 	}
@@ -350,7 +350,7 @@ func (s *Server) handleLivePlaylist(w http.ResponseWriter, r *http.Request) {
 
 // handleLivePlaySegment 输出直播分片。
 func (s *Server) handleLivePlaySegment(w http.ResponseWriter, r *http.Request) {
-	_, _, sess, ok := s.liveSessionForRequest(w, r)
+	_, sess, ok := s.liveSessionForRequest(w, r)
 	if !ok {
 		return
 	}
@@ -485,11 +485,11 @@ func (s *Server) handleShareLiveChannel(w http.ResponseWriter, r *http.Request) 
 		"segmentSec": liveSegmentSeconds})
 }
 
-// sharedChannel 校验外链 token 并保证直播会话在跑。
-func (s *Server) sharedChannel(w http.ResponseWriter, r *http.Request) (*store.TVChannel, *stream.Session, bool) {
+// sharedChannel 校验外链 token 并保证直播会话在跑（频道信息只用于拼会话，不外传）。
+func (s *Server) sharedChannel(w http.ResponseWriter, r *http.Request) (*stream.Session, bool) {
 	if !s.hasSigner() {
 		writeError(w, http.StatusServiceUnavailable, "服务未装载签名密钥")
-		return nil, nil, false
+		return nil, false
 	}
 	token := r.PathValue("token")
 	channelID, err := livetv.ParsePlayToken(s.liveSigner, token, time.Now())
@@ -499,7 +499,7 @@ func (s *Server) sharedChannel(w http.ResponseWriter, r *http.Request) (*store.T
 			status = http.StatusGone
 		}
 		writeError(w, status, err.Error())
-		return nil, nil, false
+		return nil, false
 	}
 	ctx, cancel := contextWithTimeout(r, liveStartTimeout+5*time.Second)
 	defer cancel()
@@ -507,27 +507,27 @@ func (s *Server) sharedChannel(w http.ResponseWriter, r *http.Request) (*store.T
 	ch, err := s.store.GetTVChannel(ctx, 0, channelID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "频道不存在")
-		return nil, nil, false
+		return nil, false
 	}
 	if err != nil {
 		s.serverError(w, "读取频道失败", err)
-		return nil, nil, false
+		return nil, false
 	}
 	if ch.Disabled {
 		writeError(w, http.StatusForbidden, "频道已停用")
-		return nil, nil, false
+		return nil, false
 	}
 	sess, err := s.ensureLiveSession(ctx, *ch)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "拉流失败："+err.Error())
-		return nil, nil, false
+		return nil, false
 	}
-	return ch, sess, true
+	return sess, true
 }
 
 // handleSharedLivePlaylist 外链播放列表（外部播放器直接拉这个地址）。
 func (s *Server) handleSharedLivePlaylist(w http.ResponseWriter, r *http.Request) {
-	_, sess, ok := s.sharedChannel(w, r)
+	sess, ok := s.sharedChannel(w, r)
 	if !ok {
 		return
 	}
@@ -546,7 +546,7 @@ func (s *Server) handleSharedLivePlaylist(w http.ResponseWriter, r *http.Request
 
 // handleSharedLiveSegment 外链分片。
 func (s *Server) handleSharedLiveSegment(w http.ResponseWriter, r *http.Request) {
-	_, sess, ok := s.sharedChannel(w, r)
+	sess, ok := s.sharedChannel(w, r)
 	if !ok {
 		return
 	}

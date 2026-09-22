@@ -25,7 +25,6 @@ func TestLiveHLSArgs(t *testing.T) {
 		}
 		const outDir = "/var/lib/lmby/streams/live-ch1"
 		s := argsString(hlsArgs(opts, spec, outDir))
-
 		// 输入参数必须在 -i 之前
 		if strings.Index(s, "-rtsp_transport tcp") > strings.Index(s, "-i rtsp://") {
 			t.Fatalf("输入参数必须在 -i 之前：%s", s)
