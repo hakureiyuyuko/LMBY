@@ -6,7 +6,8 @@ import './styles.css';
 
 const root = document.getElementById('root');
 if (!root) {
-  throw new Error('找不到 #root 挂载点');
+  // 开发者错误：index.html 与前端构建不一致，不面向用户（故意不翻译）
+  throw new Error('mount point #root not found');
 }
 
 ReactDOM.createRoot(root).render(

@@ -101,7 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth(): AuthValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
-    throw new Error('useAuth 必须在 AuthProvider 内使用');
+    // 开发者错误：内部不变式被破坏，不面向用户（故意不翻译）
+    throw new Error('useAuth must be used inside an AuthProvider');
   }
   return ctx;
 }

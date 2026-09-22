@@ -1,5 +1,7 @@
 /** LMBY 后端接口客户端。 */
 
+import { t } from './i18n';
+
 export interface User {
   id: number;
   username: string;
@@ -80,7 +82,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
   } catch {
-    throw new ApiError(0, '无法连接到服务器，请检查网络或服务是否在运行');
+    throw new ApiError(0, t('无法连接到服务器，请检查网络或服务是否在运行'));
   }
 
   const text = await res.text();

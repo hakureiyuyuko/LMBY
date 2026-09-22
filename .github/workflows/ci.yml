@@ -71,6 +71,11 @@ jobs:
         run: npx tsc --noEmit
       - name: 构建
         run: npm run build
+      # i18n 覆盖率守卫：界面文案必须包 t(...)（中文当源键，漏包就是漏翻）。
+      # 管理面已全部翻完，所以预算钉在 0 —— 新增的界面文案没包 t() 会当场失败。
+      - name: i18n 覆盖率（必须为 0）
+        working-directory: .
+        run: node scripts/dev/i18n-coverage.mjs --max 0
 
   lint:
     runs-on: [self-hosted, lmby]

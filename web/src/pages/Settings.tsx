@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
+import { t, useI18n } from '../i18n';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -18,15 +19,16 @@ const languageOptions = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR'];
 
 /** 把秒换成「3 小时 12 分」这类人话（服务状态那一栏用）。 */
 function formatUptime(sec: number): string {
-  if (sec < 60) return `${sec} 秒`;
+  if (sec < 60) return t('{n} 秒', { n: sec });
   const m = Math.floor(sec / 60);
-  if (m < 60) return `${m} 分 ${sec % 60} 秒`;
+  if (m < 60) return t('{m} 分 {s} 秒', { m, s: sec % 60 });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时 ${m % 60} 分`;
-  return `${Math.floor(h / 24)} 天 ${h % 24} 小时`;
+  if (h < 24) return t('{h} 小时 {m} 分', { h, m: m % 60 });
+  return t('{d} 天 {h} 小时', { d: Math.floor(h / 24), h: h % 24 });
 }
 
 export function Settings() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
 
@@ -50,7 +52,7 @@ export function Settings() {
       setLanguage(d.tmdb.language);
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '读取设置失败');
+      setError(e instanceof ApiError ? e.message : t('读取设置失败'));
     }
   }, [isAdmin]);
 
@@ -81,18 +83,20 @@ export function Settings() {
       setReadToken('');
       setApiKey('');
       setNotice(
-        '已保存并立刻生效（不必重启）。' +
-          (res.clearedCache > 0 ? `换了语言，顺手清掉了 ${res.clearedCache} 条旧语言的元数据缓存。` : ''),
+        t('已保存并立刻生效（不必重启）。') +
+          (res.clearedCache > 0
+            ? t('换了语言，顺手清掉了 {n} 条旧语言的元数据缓存。', { n: res.clearedCache })
+            : ''),
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '保存失败');
+      setError(e instanceof ApiError ? e.message : t('保存失败'));
     } finally {
       setBusy(false);
     }
   }
 
   async function resetToConfig() {
-    if (!window.confirm('删掉数据库里的 TMDB 设置，恢复成 config.toml 里的值？')) return;
+    if (!window.confirm(t('删掉数据库里的 TMDB 设置，恢复成 config.toml 里的值？'))) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -101,9 +105,13 @@ export function Settings() {
       await load();
       setReadToken('');
       setApiKey('');
-      setNotice(res.tmdb.configured ? '已恢复为配置文件的值。' : '已恢复为配置文件的值（配置文件里没有凭据）。');
+      setNotice(
+        res.tmdb.configured
+          ? t('已恢复为配置文件的值。')
+          : t('已恢复为配置文件的值（配置文件里没有凭据）。'),
+      );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '恢复失败');
+      setError(e instanceof ApiError ? e.message : t('恢复失败'));
     } finally {
       setBusy(false);
     }
@@ -115,7 +123,7 @@ export function Settings() {
     try {
       setTest(await api.testProvider());
     } catch (e) {
-      setTest({ ok: false, query: '', error: e instanceof ApiError ? e.message : '测试失败' });
+      setTest({ ok: false, query: '', error: e instanceof ApiError ? e.message : t('测试失败') });
     } finally {
       setTesting(false);
     }
@@ -124,9 +132,9 @@ export function Settings() {
   if (!isAdmin) {
     return (
       <div className="card">
-        <h2>设置</h2>
+        <h2>{t('设置')}</h2>
         <p className="hint">
-          只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。
+          {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
         </p>
       </div>
     );
@@ -142,56 +150,62 @@ export function Settings() {
   return (
     <>
       <div className="card">
-        <h2>元数据源（TMDB）</h2>
+        <h2>{t('元数据源（TMDB）')}</h2>
         <p className="hint">
-          TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。
-          密钥**只写不回显**，保存后立刻生效、不必重启。数据库里的设置优先于 <code>config.toml</code>。
+          {t('TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。密钥只写不回显，保存后立刻生效、不必重启。数据库里的设置优先于 config.toml。')}
         </p>
 
-        {!data && !error && <p className="muted">正在读取…</p>}
+        {!data && !error && <p className="muted">{t('正在读取…')}</p>}
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert alert-ok">{notice}</div>}
 
         {tmdb && (
           <>
             <p className="small">
-              当前状态：{' '}
+              {t('当前状态：')}{' '}
               {tmdb.configured ? (
-                <span className="badge">已配置</span>
+                <span className="badge">{t('已配置')}</span>
               ) : (
-                <span className="badge">未配置</span>
+                <span className="badge">{t('未配置')}</span>
               )}{' '}
               <span className="muted">
-                来源 {tmdb.fromDb ? '数据库（本页保存的）' : 'config.toml / 环境变量'} · 密钥
-                {tmdb.encrypted ? '加密存储' : '明文存储（密钥文件不可用）'} · Read Token{' '}
-                {tmdb.hasReadToken ? '已设置' : '未设置'} · API Key {tmdb.hasApiKey ? '已设置' : '未设置'}
+                {t('来源 {from} · 密钥 {enc} · Read Token {rt} · API Key {ak}', {
+                  from: tmdb.fromDb ? t('数据库（本页保存的）') : t('config.toml / 环境变量'),
+                  enc: tmdb.encrypted ? t('加密存储') : t('明文存储（密钥文件不可用）'),
+                  rt: tmdb.hasReadToken ? t('已设置') : t('未设置'),
+                  ak: tmdb.hasApiKey ? t('已设置') : t('未设置'),
+                })}
               </span>
             </p>
 
             <label className="field">
-              <span>Read Access Token（v4）</span>
+              <span>{t('Read Access Token（v4）')}</span>
               <input
                 type="password"
                 value={readToken}
                 autoComplete="off"
-                placeholder={tmdb.hasReadToken ? '已设置 —— 要替换就输入新的（留空不改）' : '粘贴 eyJhbGciOi…'}
+                placeholder={
+                  tmdb.hasReadToken
+                    ? t('已设置 —— 要替换就输入新的（留空不改）')
+                    : t('粘贴 eyJhbGciOi…')
+                }
                 onChange={(e) => setReadToken(e.target.value)}
               />
             </label>
 
             <label className="field">
-              <span>API Key（v3）</span>
+              <span>{t('API Key（v3）')}</span>
               <input
                 type="password"
                 value={apiKey}
                 autoComplete="off"
-                placeholder={tmdb.hasApiKey ? '已设置 —— 要替换就输入新的（留空不改）' : '32 位十六进制'}
+                placeholder={tmdb.hasApiKey ? t('已设置 —— 要替换就输入新的（留空不改）') : t('32 位十六进制')}
                 onChange={(e) => setApiKey(e.target.value)}
               />
             </label>
 
             <label className="field">
-              <span>语言</span>
+              <span>{t('语言')}</span>
               <input
                 value={language}
                 list="tmdb-languages"
@@ -204,30 +218,38 @@ export function Settings() {
               </datalist>
             </label>
             <p className="faint small" style={{ marginTop: -8 }}>
-              语言影响标题/简介用哪种译名；改了会顺手清掉旧语言的缓存。
+              {t('语言影响标题/简介用哪种译名；改了会顺手清掉旧语言的缓存。')}
             </p>
 
             <div className="row">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
-                保存
+                {t('保存')}
               </button>
               <button type="button" className="btn" disabled={testing} onClick={() => void runTest()}>
-                {testing ? '测试中…' : '测试连接'}
+                {testing ? t('测试中…') : t('测试连接')}
               </button>
               <div className="spacer" />
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void resetToConfig()}>
-                恢复为配置文件的值
+                {t('恢复为配置文件的值')}
               </button>
             </div>
 
             {test && (
               <div className={test.ok ? 'alert alert-ok' : 'alert alert-error'}>
                 {test.ok
-                  ? `连通正常：搜「${test.query}」拿到 ${test.count} 条结果（${test.elapsed} ms）` +
+                  ? t('连通正常：搜「{q}」拿到 {n} 条结果（{ms} ms）', {
+                      q: test.query,
+                      n: test.count ?? 0,
+                      ms: test.elapsed ?? 0,
+                    }) +
                     (test.samples && test.samples.length > 0
-                      ? `，例如 ${test.samples.map((s) => `${s.title}${s.year ? ` (${s.year})` : ''}`).join('、')}`
+                      ? t('，例如 {samples}', {
+                          samples: test.samples
+                            .map((s) => `${s.title}${s.year ? ` (${s.year})` : ''}`)
+                            .join(', '),
+                        })
                       : '')
-                  : `连接失败：${test.error}`}
+                  : t('连接失败：{error}', { error: test.error ?? '' })}
               </div>
             )}
           </>
@@ -235,73 +257,77 @@ export function Settings() {
       </div>
 
       <div className="card">
-        <h2>服务状态</h2>
+        <h2>{t('服务状态')}</h2>
         <p className="hint">
-          实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 ——
-          它属于「出问题时才看」的信息，不该占首页的位置。
+          {t('实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 —— 它属于「出问题时才看」的信息，不该占首页的位置。')}
         </p>
-        {!health && <p className="muted">正在读取…</p>}
+        {!health && <p className="muted">{t('正在读取…')}</p>}
         {health && (
           <>
             <p style={{ marginTop: 10 }}>
               <span className="badge" data-health-status={health.status}>
                 <span className={health.status === 'ok' ? 'dot dot-ok' : 'dot dot-warn'} />
-                {health.status === 'ok' ? '运行正常' : health.status === 'degraded' ? '降级运行' : '异常'}
+                {health.status === 'ok'
+                  ? t('运行正常')
+                  : health.status === 'degraded'
+                    ? t('降级运行')
+                    : t('异常')}
               </span>{' '}
               <span className="badge">
                 <span className={health.database.ok ? 'dot dot-ok' : 'dot dot-bad'} />
-                数据库{' '}
+                {t('数据库')}{' '}
                 {health.database.ok ? `${health.database.latencyMs ?? 0} ms` : health.database.error}
               </span>{' '}
               <span className="badge">
                 <span className={health.ffmpeg.available ? 'dot dot-ok' : 'dot dot-bad'} />
-                ffmpeg {health.ffmpeg.available ? health.ffmpeg.version : '不可用'}
+                ffmpeg {health.ffmpeg.available ? health.ffmpeg.version : t('不可用')}
               </span>
             </p>
             <dl className="kv">
-              <dt>版本</dt>
+              <dt>{t('版本')}</dt>
               <dd>{health.version}</dd>
-              <dt>运行时长</dt>
+              <dt>{t('运行时长')}</dt>
               <dd>{formatUptime(health.uptimeSeconds)}</dd>
-              <dt>ffmpeg 路径</dt>
+              <dt>{t('ffmpeg 路径')}</dt>
               <dd>{health.ffmpeg.path}</dd>
-              <dt>硬件加速后端</dt>
+              <dt>{t('硬件加速后端')}</dt>
               <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
             </dl>
             <p className="faint" style={{ marginBottom: 0 }}>
-              注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，
-              但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。
+              {t('注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。')}
             </p>
           </>
         )}
       </div>
 
       <div className="card">
-        <h2>系统信息</h2>
-        {!system && <p className="muted">正在读取…</p>}
+        <h2>{t('系统信息')}</h2>
+        {!system && <p className="muted">{t('正在读取…')}</p>}
         {system && (
           <>
             {charsetBad && (
               <div className="alert alert-error">
-                数据库字符集不对：encoding={system.databaseEncoding}、lc_ctype={system.databaseCtype}。
-                中文搜索与模糊匹配会静默少结果。停掉服务后跑{' '}
-                <code>scripts/dev/fix-db-encoding.sh</code> 就地重建。
+                {t('数据库字符集不对：encoding={enc}、lc_ctype={ctype}。中文搜索与模糊匹配会静默少结果。停掉服务后跑 {script} 就地重建。', {
+                  enc: system.databaseEncoding,
+                  ctype: system.databaseCtype,
+                  script: 'scripts/dev/fix-db-encoding.sh',
+                })}
               </div>
             )}
             <dl className="kv">
-              <dt>数据库字符集</dt>
+              <dt>{t('数据库字符集')}</dt>
               <dd>
                 {system.databaseEncoding} / {system.databaseCtype}（collate {system.databaseCollate}）
               </dd>
-              <dt>数据库结构版本</dt>
+              <dt>{t('数据库结构版本')}</dt>
               <dd>{system.schemaVersion}</dd>
-              <dt>条目 / 文件 / 图片</dt>
+              <dt>{t('条目 / 文件 / 图片')}</dt>
               <dd>
                 {system.itemCount} / {system.fileCount} / {system.imageCount}
               </dd>
-              <dt>队里待跑的任务</dt>
+              <dt>{t('队里待跑的任务')}</dt>
               <dd>{system.taskPending}</dd>
-              <dt>服务器时间</dt>
+              <dt>{t('服务器时间')}</dt>
               <dd>{new Date(system.serverTime).toLocaleString()}</dd>
             </dl>
           </>

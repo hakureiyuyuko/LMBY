@@ -3,10 +3,12 @@ import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../api';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import { AuthShell } from '../components/AuthShell';
 
 /** 初始化向导：系统还没有任何账号时创建第一个管理员。 */
 export function Setup() {
+  const { t } = useI18n();
   const { runSetup } = useAuth();
   const navigate = useNavigate();
 
@@ -21,7 +23,7 @@ export function Setup() {
     e.preventDefault();
     setError('');
     if (password !== confirm) {
-      setError('两次输入的口令不一致');
+      setError(t('两次输入的口令不一致'));
       return;
     }
     setBusy(true);
@@ -29,7 +31,7 @@ export function Setup() {
       await runSetup(username.trim(), password, displayName.trim());
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '初始化失败，请重试');
+      setError(err instanceof ApiError ? err.message : t('初始化失败，请重试'));
     } finally {
       setBusy(false);
     }
@@ -37,14 +39,14 @@ export function Setup() {
 
   return (
     <AuthShell
-      title="初始化 LMBY"
-      subtitle="这是第一次启动。请创建管理员账号，口令至少 8 个字符。"
+      title={t('初始化 LMBY')}
+      subtitle={t('这是第一次启动。请创建管理员账号，口令至少 8 个字符。')}
     >
       <form onSubmit={onSubmit}>
         {error && <div className="alert alert-error">{error}</div>}
 
         <label className="field">
-          <span>用户名</span>
+          <span>{t('用户名')}</span>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -56,16 +58,16 @@ export function Setup() {
         </label>
 
         <label className="field">
-          <span>显示名（可留空）</span>
+          <span>{t('显示名（可留空）')}</span>
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="用于界面显示"
+            placeholder={t('用于界面显示')}
           />
         </label>
 
         <label className="field">
-          <span>口令</span>
+          <span>{t('口令')}</span>
           <input
             type="password"
             value={password}
@@ -76,7 +78,7 @@ export function Setup() {
         </label>
 
         <label className="field">
-          <span>确认口令</span>
+          <span>{t('确认口令')}</span>
           <input
             type="password"
             value={confirm}
@@ -87,7 +89,7 @@ export function Setup() {
         </label>
 
         <button type="submit" className="btn btn-primary" disabled={busy} style={{ width: '100%' }}>
-          {busy ? '正在创建…' : '创建并进入'}
+          {busy ? t('正在创建…') : t('创建并进入')}
         </button>
       </form>
     </AuthShell>

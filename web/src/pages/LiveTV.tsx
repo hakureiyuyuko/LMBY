@@ -4,6 +4,7 @@ import { ApiError, api } from '../api';
 import type { LivePlayback, TVChannel, TVGroup } from '../api';
 import { hasNativeHls } from '../capabilities';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import { LiveProbePanel, LiveSourcePanel } from '../components/LiveSources';
 
 /**
@@ -22,6 +23,7 @@ import { LiveProbePanel, LiveSourcePanel } from '../components/LiveSources';
  *   - 离开页面时要退掉订阅（否则服务端会为「没人在看」的频道白跑最多 45 秒）。
  */
 export function LiveTV() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
 
@@ -57,8 +59,8 @@ export function LiveTV() {
   const [draft, setDraft] = useState({ name: '', group: '', logo: '', sortOrder: 0 });
 
   useEffect(() => {
-    const t = window.setTimeout(() => setQ(qInput.trim()), 300);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setQ(qInput.trim()), 300);
+    return () => window.clearTimeout(timer);
   }, [qInput]);
 
   const load = useCallback(async () => {
@@ -70,7 +72,7 @@ export function LiveTV() {
       setEnabled(d.enabled);
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '读取频道失败');
+      setError(e instanceof ApiError ? e.message : t('读取频道失败'));
     } finally {
       setLoading(false);
     }
@@ -118,11 +120,11 @@ export function LiveTV() {
     if (hasNativeHls(v)) {
       v.src = info.playlistUrl;
       v.load();
-      void v.play().catch(() => setNotice('浏览器拦了自动播放，点一下播放键开始'));
+      void v.play().catch(() => setNotice(t('浏览器拦了自动播放，点一下播放键开始')));
       return;
     }
     if (!Hls.isSupported()) {
-      setPlayErr('这个浏览器既不支持原生 HLS，也不支持 MSE，放不了直播流');
+      setPlayErr(t('这个浏览器既不支持原生 HLS，也不支持 MSE，放不了直播流'));
       return;
     }
     const hls = new Hls({ enableWorker: true, maxBufferLength: 12 });
@@ -133,12 +135,12 @@ export function LiveTV() {
         hls.recoverMediaError();
         return;
       }
-      setPlayErr(`播放出错（${data.details}）`);
+      setPlayErr(t('播放出错（{detail}）', { detail: data.details }));
     });
     hls.loadSource(info.playlistUrl);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      void v.play().catch(() => setNotice('浏览器拦了自动播放，点一下播放键开始'));
+      void v.play().catch(() => setNotice(t('浏览器拦了自动播放，点一下播放键开始')));
     });
   }, []);
 
@@ -158,7 +160,7 @@ export function LiveTV() {
         setViewers(info.viewers);
         attach(info, t0);
       } catch (e) {
-        setPlayErr(e instanceof ApiError ? e.message : '起播失败');
+        setPlayErr(e instanceof ApiError ? e.message : t('起播失败'));
       } finally {
         setStarting(false);
       }
@@ -190,7 +192,7 @@ export function LiveTV() {
       const r = await api.toggleLiveFavorite(ch.id);
       setChannels((cs) => cs.map((c) => (c.id === ch.id ? { ...c, favorite: r.favorite } : c)));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '收藏失败');
+      setError(e instanceof ApiError ? e.message : t('收藏失败'));
     }
   }
 
@@ -198,9 +200,13 @@ export function LiveTV() {
     try {
       const c = await api.updateLiveChannel(ch.id, { disabled: !ch.disabled });
       setChannels((cs) => cs.map((x) => (x.id === c.id ? c : x)));
-      setNotice(c.disabled ? `已停用「${c.name}」（不再出现在「只看启用」里）` : `已启用「${c.name}」`);
+      setNotice(
+        c.disabled
+          ? t('已停用「{name}」（不再出现在「只看启用」里）', { name: c.name })
+          : t('已启用「{name}」', { name: c.name }),
+      );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '保存失败');
+      setError(e instanceof ApiError ? e.message : t('保存失败'));
     }
   }
 
@@ -219,30 +225,30 @@ export function LiveTV() {
         logo: draft.logo.trim(),
         sortOrder: Number(draft.sortOrder) || 0,
       });
-      setNotice(`已保存「${draft.name.trim() || editing.name}」`);
+      setNotice(t('已保存「{name}」', { name: draft.name.trim() || editing.name }));
       setEditing(null);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '保存失败');
+      setError(e instanceof ApiError ? e.message : t('保存失败'));
     }
   }
 
   async function share(ch: TVChannel) {
     try {
       const r = await api.shareLiveChannel(ch.id, 24);
-      setNotice(`外链（24 小时有效，无需登录）：${r.url}`);
+      setNotice(t('外链（24 小时有效，无需登录）：{url}', { url: r.url }));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '生成外链失败');
+      setError(e instanceof ApiError ? e.message : t('生成外链失败'));
     }
   }
 
   async function copyURL(ch: TVChannel) {
     try {
       await navigator.clipboard.writeText(ch.url);
-      setNotice(`已复制「${ch.name}」的地址`);
+      setNotice(t('已复制「{name}」的地址', { name: ch.name }));
     } catch {
       // 剪贴板权限被拒（无头浏览器/非 HTTPS）时退化成「显示出来自己复制」
-      setNotice(`「${ch.name}」的地址：${ch.url}`);
+      setNotice(t('「{name}」的地址：{url}', { name: ch.name, url: ch.url }));
     }
   }
 
@@ -251,11 +257,11 @@ export function LiveTV() {
   return (
     <>
       <div className="card">
-        <h2>直播电视</h2>
+        <h2>{t('直播电视')}</h2>
         <p className="hint">
           {isAdmin
-            ? '导入播放列表后就能在这里看电视。点频道就地起播；同一频道所有观众共享一路 ffmpeg（两个人看不会把源站拉两遍）。'
-            : '点频道就地起播；同一频道所有观众共享一路推流，切台不用离开页面。'}
+            ? t('导入播放列表后就能在这里看电视。点频道就地起播；同一频道所有观众共享一路 ffmpeg（两个人看不会把源站拉两遍）。')
+            : t('点频道就地起播；同一频道所有观众共享一路推流，切台不用离开页面。')}
         </p>
 
         {error && <div className="alert alert-error">{error}</div>}
@@ -264,12 +270,12 @@ export function LiveTV() {
         <div className="row tv-toolbar">
           <input
             className="search-input"
-            placeholder="搜频道名…"
+            placeholder={t('搜频道名…')}
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
           />
           <select value={group} onChange={(e) => setGroup(e.target.value)}>
-            <option value="">全部分组（{groups.length}）</option>
+            <option value="">{t('全部分组（{n}）', { n: groups.length })}</option>
             {groups.map((g) => (
               <option key={g.name} value={g.name}>
                 {g.name}（{g.count}）
@@ -277,28 +283,32 @@ export function LiveTV() {
             ))}
           </select>
           <select value={probeFilter} onChange={(e) => setProbeFilter(e.target.value)}>
-            <option value="">探测状态：全部</option>
-            <option value="failed">只看失效（上次探测不通）</option>
-            <option value="ok">只看能通</option>
-            <option value="pending">只看没探过的</option>
+            <option value="">{t('探测状态：全部')}</option>
+            <option value="failed">{t('只看失效（上次探测不通）')}</option>
+            <option value="ok">{t('只看能通')}</option>
+            <option value="pending">{t('只看没探过的')}</option>
           </select>
           <label className="field-inline">
             <input type="checkbox" checked={onlyEnabled} onChange={(e) => setOnlyEnabled(e.target.checked)} />
-            <span>只看启用</span>
+            <span>{t('只看启用')}</span>
           </label>
           <label className="field-inline">
             <input type="checkbox" checked={onlyFav} onChange={(e) => setOnlyFav(e.target.checked)} />
-            <span>只看收藏{favCount > 0 ? `（${favCount}）` : ''}</span>
+            <span>{favCount > 0 ? t('只看收藏（{n}）', { n: favCount }) : t('只看收藏')}</span>
           </label>
           <div className="spacer" />
           <a className="btn btn-sm" href={api.liveExportURL()} download>
-            导出 m3u
+            {t('导出 m3u')}
           </a>
         </div>
 
         <p className="faint small">
-          共 {total} 台 · 启用中 {enabled} · 这里显示 {channels.length} 台
-          {playing ? ` · 正在看：${playing.name}（${viewers} 个观众）` : ''}
+          {t('共 {total} 台 · 启用中 {enabled} · 这里显示 {shown} 台', {
+            total,
+            enabled,
+            shown: channels.length,
+          })}
+          {playing ? t(' · 正在看：{name}（{n} 个观众）', { name: playing.name, n: viewers }) : ''}
         </p>
       </div>
 
@@ -307,13 +317,13 @@ export function LiveTV() {
           <div className="tv-stage">
             {/* 直播不需要自研控制条：没有进度/音轨/字幕可调，原生控件自带音量与全屏 */}
             <video ref={videoRef} className="tv-video" controls playsInline />
-            {starting && <div className="tv-overlay">正在起播…</div>}
+            {starting && <div className="tv-overlay">{t('正在起播…')}</div>}
             {!starting && playErr && (
               <div className="tv-overlay tv-overlay-err">
                 <div>{playErr}</div>
                 {playing && (
                   <button type="button" className="btn btn-sm" onClick={() => void play(playing)}>
-                    重试
+                    {t('重试')}
                   </button>
                 )}
               </div>
@@ -324,16 +334,16 @@ export function LiveTV() {
             <span className="faint small">
               {playing?.kind}
               {playing?.group ? ` · ${playing.group}` : ''}
-              {browserMs !== null ? ` · 浏览器起播 ${browserMs} ms` : ''}
+              {browserMs !== null ? t(' · 浏览器起播 {ms} ms', { ms: browserMs }) : ''}
             </span>
             <div className="spacer" />
             {playing && (
               <button type="button" className="btn btn-sm" onClick={() => void play(playing)}>
-                重新载入
+                {t('重新载入')}
               </button>
             )}
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => void stop()}>
-              停止
+              {t('停止')}
             </button>
           </div>
         </div>
@@ -341,21 +351,20 @@ export function LiveTV() {
 
       {editing && (
         <div className="card">
-          <h2>编辑频道</h2>
+          <h2>{t('编辑频道')}</h2>
           <p className="hint">
-            这里改的是「怎么用」（名字 / 分组 / 排序 / logo）。**下次刷新订阅源时会按播放列表还原**
-            —— 播放列表才是频道的来源；「启用状态」与「收藏」不会被刷新覆盖。
+            {t('这里改的是「怎么用」（名字 / 分组 / 排序 / logo）。下次刷新订阅源时会按播放列表还原 —— 播放列表才是频道的来源；「启用状态」与「收藏」不会被刷新覆盖。')}
           </p>
           <label className="field">
-            <span>名称</span>
+            <span>{t('名称')}</span>
             <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </label>
           <label className="field">
-            <span>分组</span>
+            <span>{t('分组')}</span>
             <input value={draft.group} onChange={(e) => setDraft({ ...draft, group: e.target.value })} />
           </label>
           <label className="field">
-            <span>排序（同分组内，小的在前）</span>
+            <span>{t('排序（同分组内，小的在前）')}</span>
             <input
               type="number"
               value={draft.sortOrder}
@@ -363,29 +372,29 @@ export function LiveTV() {
             />
           </label>
           <label className="field">
-            <span>logo 地址</span>
+            <span>{t('logo 地址')}</span>
             <input value={draft.logo} onChange={(e) => setDraft({ ...draft, logo: e.target.value })} />
           </label>
           <div className="row">
             <button type="button" className="btn btn-primary" onClick={() => void saveEdit()}>
-              保存
+              {t('保存')}
             </button>
             <button type="button" className="btn" onClick={() => setEditing(null)}>
-              取消
+              {t('取消')}
             </button>
           </div>
         </div>
       )}
 
       <div className="card">
-        <h2>
-          频道{loading ? '' : `（${channels.length}）`}
-        </h2>
-        {loading && <p className="muted">正在读取…</p>}
+        <h2>{loading ? t('频道') : t('频道（{n}）', { n: channels.length })}</h2>
+        {loading && <p className="muted">{t('正在读取…')}</p>}
         {!loading && channels.length === 0 && (
           <p className="muted">
-            没有匹配的频道。
-            {isAdmin ? '去下面的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。' : '换个筛选条件试试。'}
+            {t('没有匹配的频道。')}
+            {isAdmin
+              ? t('去下面的「直播源」导入一份播放列表（粘贴 / 上传 / 订阅地址都行）。')
+              : t('换个筛选条件试试。')}
           </p>
         )}
         {!loading && channels.length > 0 && (
@@ -417,23 +426,27 @@ export function LiveTV() {
                   <span className="tv-name">
                     {ch.name}
                     {ch.favorite && <span className="tv-star"> ★</span>}
-                    {ch.disabled && <span className="badge">已停用</span>}
+                    {ch.disabled && <span className="badge">{t('已停用')}</span>}
                     {ch.probeOk === false && (
-                      <span className="badge badge-bad" title={ch.probe || '上次探测不通'}>
-                        失效
+                      <span className="badge badge-bad" title={ch.probe || t('上次探测不通')}>
+                        {t('失效')}
                       </span>
                     )}
                     {ch.probeOk === true && (
-                      <span className="badge badge-ok" title={ch.probe || '上次探测能通'}>
-                        通
+                      <span className="badge badge-ok" title={ch.probe || t('上次探测能通')}>
+                        {t('通')}
                       </span>
                     )}
-                    {ch.probeOk === undefined && <span className="badge" title="还没探测过">未探</span>}
+                    {ch.probeOk === undefined && (
+                      <span className="badge" title={t('还没探测过')}>
+                        {t('未探')}
+                      </span>
+                    )}
                   </span>
                   <span className="faint small">
-                    {ch.group || '未分组'} · {ch.kind}
-                    {ch.hasHeaders ? ' · 带请求头' : ''}
-                    {ch.probeAt ? ` · 上次探测 ${new Date(ch.probeAt).toLocaleString()}` : ''}
+                    {ch.group || t('未分组')} · {ch.kind}
+                    {ch.hasHeaders ? t(' · 带请求头') : ''}
+                    {ch.probeAt ? t(' · 上次探测 {when}', { when: new Date(ch.probeAt).toLocaleString() }) : ''}
                   </span>
                 </span>
                 <span className="tv-actions">
@@ -441,30 +454,35 @@ export function LiveTV() {
                     type="button"
                     className="btn btn-sm btn-primary"
                     disabled={starting || ch.disabled}
-                    title={ch.disabled ? '先启用这条频道' : '起播'}
+                    title={ch.disabled ? t('先启用这条频道') : t('起播')}
                     onClick={() => void play(ch)}
                   >
-                    播放
+                    {t('播放')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-sm"
-                    title={ch.favorite ? '取消收藏' : '收藏'}
+                    title={ch.favorite ? t('取消收藏') : t('收藏')}
                     onClick={() => void toggleFav(ch)}
                   >
-                    {ch.favorite ? '★ 已收藏' : '☆ 收藏'}
+                    {ch.favorite ? t('★ 已收藏') : t('☆ 收藏')}
                   </button>
                   <button type="button" className="btn btn-sm" onClick={() => void toggleDisabled(ch)}>
-                    {ch.disabled ? '启用' : '停用'}
+                    {ch.disabled ? t('启用') : t('停用')}
                   </button>
                   <button type="button" className="btn btn-sm" onClick={() => startEdit(ch)}>
-                    编辑
+                    {t('编辑')}
                   </button>
-                  <button type="button" className="btn btn-sm" onClick={() => void share(ch)} title="生成 24 小时有效的免登录链接">
-                    外链
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void share(ch)}
+                    title={t('生成 24 小时有效的免登录链接')}
+                  >
+                    {t('外链')}
                   </button>
                   <button type="button" className="btn btn-sm btn-ghost" onClick={() => void copyURL(ch)}>
-                    复制地址
+                    {t('复制地址')}
                   </button>
                 </span>
               </li>

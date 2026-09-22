@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
+import { t, useI18n } from '../i18n';
+import { kindLabel as itemKindLabel } from '../media';
 import type { FullItem, ItemDetail, ItemFieldInfo, ItemPlaylist, PlaybackProgress } from '../api';
 import { formatClock } from '../capabilities';
 
@@ -16,38 +18,43 @@ import { formatClock } from '../capabilities';
  * 这里解决「数据本身要修」。
  */
 
-const kindLabels: Record<string, string> = {
-  movie: '电影',
-  series: '剧集',
-  season: '季',
-  episode: '集',
-  extra: '花絮',
-};
+/** 匹配状态 → 人话。是**函数而不是常量表**：模块级常量会在 import 时把语言钉死。 */
+function itemStateLabel(state: string | undefined): string {
+  switch (state) {
+    case 'local':
+      return t('未刮削');
+    case 'nfo':
+      return t('来自 nfo');
+    case 'matched':
+      return t('已匹配');
+    case 'review':
+      return t('待确认');
+    case 'manual':
+      return t('已人工处理');
+    case 'failed':
+      return t('没找到');
+    default:
+      return state ?? '';
+  }
+}
 
-const stateLabels: Record<string, string> = {
-  local: '未刮削',
-  nfo: '来自 nfo',
-  matched: '已匹配',
-  review: '待确认',
-  manual: '已人工处理',
-  failed: '没找到',
-};
-
-/** 字段在界面上的标题与提示（键是后端的字段名）。 */
-const rowMeta: Record<string, { label: string; hint?: string }> = {
-  title: { label: '标题', hint: '列表与排序都用它；不能为空' },
-  originalTitle: { label: '原始标题', hint: '原名/译名，匹配打分器会拿它再搜一次' },
-  year: { label: '年份' },
-  premiereDate: { label: '首播日期', hint: 'YYYY-MM-DD' },
-  runtime: { label: '时长', hint: '分钟' },
-  rating: { label: '评分', hint: '0~10' },
-  officialRating: { label: '分级', hint: '如 PG-13 / TV-14' },
-  overview: { label: '简介' },
-  tagline: { label: '标语' },
-  genres: { label: '流派', hint: '逗号分隔' },
-  studios: { label: '制片公司', hint: '逗号分隔' },
-  providerIds: { label: '元数据 id', hint: '键=值，逗号分隔，如 tmdb=603' },
-};
+/** 字段在界面上的标题与提示（键是后端的字段名）。同样是函数：标签跟着语言走。 */
+function itemRowMeta(): Record<string, { label: string; hint?: string }> {
+  return {
+    title: { label: t('标题'), hint: t('列表与排序都用它；不能为空') },
+    originalTitle: { label: t('原始标题'), hint: t('原名/译名，匹配打分器会拿它再搜一次') },
+    year: { label: t('年份') },
+    premiereDate: { label: t('首播日期'), hint: 'YYYY-MM-DD' },
+    runtime: { label: t('时长'), hint: t('分钟') },
+    rating: { label: t('评分'), hint: '0~10' },
+    officialRating: { label: t('分级'), hint: t('如 PG-13 / TV-14') },
+    overview: { label: t('简介') },
+    tagline: { label: t('标语') },
+    genres: { label: t('流派'), hint: t('逗号分隔') },
+    studios: { label: t('制片公司'), hint: t('逗号分隔') },
+    providerIds: { label: t('元数据 id'), hint: t('键=值，逗号分隔，如 tmdb=603') },
+  };
+}
 
 /** 字段名 → 条目 JSON 里的键（多数同名，时长与评分在库里叫别的）。 */
 const itemKeys: Record<string, string> = {
@@ -56,6 +63,7 @@ const itemKeys: Record<string, string> = {
 };
 
 export function ItemEdit() {
+  const { t } = useI18n();
   const params = useParams();
   const navigate = useNavigate();
   const itemId = Number(params.id);
@@ -87,14 +95,14 @@ export function ItemEdit() {
 
   const load = useCallback(async () => {
     if (!Number.isFinite(itemId) || itemId <= 0) {
-      setError('条目 id 非法');
+      setError(t('条目 id 非法'));
       return;
     }
     try {
       applyDetail(await api.item(itemId));
       setError('');
     } catch (e) {
-      setError(messageOf(e, '读取条目失败'));
+      setError(messageOf(e, t('读取条目失败')));
     }
   }, [itemId, applyDetail]);
 
@@ -126,9 +134,9 @@ export function ItemEdit() {
     try {
       await api.setPlayed([itemId], next);
       setProgress((p) => (p ? { ...p, played: next } : p));
-      setNotice(next ? '已标记为看过' : '已标记为未看');
+      setNotice(next ? t('已标记为看过') : t('已标记为未看'));
     } catch (e) {
-      setError(messageOf(e, '标记失败'));
+      setError(messageOf(e, t('标记失败')));
     }
   }
 
@@ -156,7 +164,7 @@ export function ItemEdit() {
         fields[name] = parseValue(f, draft[name] ?? '');
       }
       if (Object.keys(fields).length === 0 && !locksDirty) {
-        setNotice('没有改动。');
+        setNotice(t('没有改动。'));
         return;
       }
 
@@ -166,12 +174,13 @@ export function ItemEdit() {
 
       applyDetail(await api.updateItem(itemId, body));
       setNotice(
-        `已保存（${Object.keys(fields).length} 个字段` +
-          (locksDirty ? `，锁定 ${locks.length} 个` : '') +
-          '）。锁住的字段重扫重刮都不会被覆盖。',
+        t('已保存（{fields} 个字段{locked}）。锁住的字段重扫重刮都不会被覆盖。', {
+          fields: Object.keys(fields).length,
+          locked: locksDirty ? t('，锁定 {n} 个', { n: locks.length }) : '',
+        }),
       );
     } catch (e) {
-      setError(messageOf(e, '保存失败'));
+      setError(messageOf(e, t('保存失败')));
     } finally {
       setBusy(false);
     }
@@ -180,18 +189,18 @@ export function ItemEdit() {
   async function unlockAll() {
     if (!detail) return;
     if (locks.length === 0) {
-      setNotice('本来就没有锁定任何字段。');
+      setNotice(t('本来就没有锁定任何字段。'));
       return;
     }
-    if (!window.confirm(`解锁全部 ${locks.length} 个字段？之后重扫/重刮会重新覆盖它们。`)) return;
+    if (!window.confirm(t('解锁全部 {n} 个字段？之后重扫/重刮会重新覆盖它们。', { n: locks.length }))) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       applyDetail(await api.updateItem(itemId, { lockedFields: [] }));
-      setNotice('已全部解锁。');
+      setNotice(t('已全部解锁。'));
     } catch (e) {
-      setError(messageOf(e, '解锁失败'));
+      setError(messageOf(e, t('解锁失败')));
     } finally {
       setBusy(false);
     }
@@ -201,8 +210,7 @@ export function ItemEdit() {
     if (!detail) return;
     if (
       !window.confirm(
-        '重新刮削：TMDB 的值会写进**未锁定**的字段（锁住的不动）。\n' +
-          '队列里没有别的活时几秒内跑完，之后点「刷新」看结果。继续？',
+        t('重新刮削：TMDB 的值会写进未锁定的字段（锁住的不动）。\n队列里没有别的活时几秒内跑完，之后点「刷新」看结果。继续？'),
       )
     ) {
       return;
@@ -213,10 +221,12 @@ export function ItemEdit() {
     try {
       const res = await api.rescrapeItem(itemId, true);
       setNotice(
-        (res.enqueued ? '已入队' : '队列里已经有这条的任务了') + '，跑完后点「刷新」看结果。',
+        res.enqueued
+          ? t('已入队，跑完后点「刷新」看结果。')
+          : t('队列里已经有这条的任务了，跑完后点「刷新」看结果。'),
       );
     } catch (e) {
-      setError(messageOf(e, '入队失败'));
+      setError(messageOf(e, t('入队失败')));
     } finally {
       setBusy(false);
     }
@@ -225,8 +235,12 @@ export function ItemEdit() {
   if (!detail) {
     return (
       <div className="card">
-        <h2>条目</h2>
-        {error ? <div className="alert alert-error">{error}</div> : <p className="muted">正在读取…</p>}
+        <h2>{t('条目')}</h2>
+        {error ? (
+          <div className="alert alert-error">{error}</div>
+        ) : (
+          <p className="muted">{t('正在读取…')}</p>
+        )}
       </div>
     );
   }
@@ -249,47 +263,52 @@ export function ItemEdit() {
             }}
           />
           <div className="item-head-body">
-            <h2>{it.title || '（无标题）'}</h2>
+            <h2>{it.title || t('（无标题）')}</h2>
             <p className="muted small">
-              {kindLabels[it.kind] ?? it.kind}
+              {itemKindLabel(it.kind)}
               {it.seasonNumber != null ? ` S${it.seasonNumber}` : ''}
               {it.episodeNumber != null ? `E${it.episodeNumber}` : ''}
-              {it.year ? ` · ${it.year}` : ''} · 条目 {it.id} · 状态{' '}
-              {stateLabels[it.matchState ?? ''] ?? it.matchState}
-              {it.metadataSource ? ` · 元数据来源 ${it.metadataSource}` : ''}
-              {it.matchScore != null ? ` · 匹配分 ${it.matchScore.toFixed(3)}` : ''}
+              {it.year ? ` · ${it.year}` : ''}
+              {t(' · 条目 {id} · 状态 {state}', {
+                id: it.id,
+                state: itemStateLabel(it.matchState),
+              })}
+              {it.metadataSource ? ` · ${t('元数据来源 {src}', { src: it.metadataSource })}` : ''}
+              {it.matchScore != null ? t(' · 匹配分 {score}', { score: it.matchScore.toFixed(3) }) : ''}
             </p>
-            {it.scrapeError && <p className="muted small">机器给的结论：{it.scrapeError}</p>}
+            {it.scrapeError && (
+              <p className="muted small">{t('机器给的结论：{msg}', { msg: it.scrapeError })}</p>
+            )}
             {locks.length > 0 && (
               <p className="small">
-                <strong>已锁定 {locks.length} 个字段</strong>
-                <span className="muted">（重扫与重刮都不会覆盖它们）</span>
+                <strong>{t('已锁定 {n} 个字段', { n: locks.length })}</strong>
+                <span className="muted">{t('（重扫与重刮都不会覆盖它们）')}</span>
               </p>
             )}
             <div className="row" style={{ marginTop: 10 }}>
               <Link className="btn" to={`/item/${it.id}`}>
-                返回详情页
+                {t('返回详情页')}
               </Link>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
-                保存
+                {t('保存')}
               </button>
               <button type="button" className="btn" disabled={busy} onClick={() => void unlockAll()}>
-                全部解锁
+                {t('全部解锁')}
               </button>
               {detail.scrapeConfigured && (
                 <button type="button" className="btn" disabled={busy} onClick={() => void rescrape()}>
-                  重新刮削这条
+                  {t('重新刮削这条')}
                 </button>
               )}
               <button type="button" className="btn" disabled={busy} onClick={() => void load()}>
-                刷新
+                {t('刷新')}
               </button>
               <div className="spacer" />
               <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>
-                返回
+                {t('返回')}
               </button>
               <Link className="btn btn-ghost" to="/match">
-                人工匹配
+                {t('人工匹配')}
               </Link>
             </div>
           </div>
@@ -300,29 +319,33 @@ export function ItemEdit() {
       </div>
 
       <div className="card">
-        <h2>播放</h2>
+        <h2>{t('播放')}</h2>
         <p className="hint">
-          服务端会在开播前做一次播放决策：能直出就直出（原文件 + HTTP Range，最省资源），
-          否则就只换容器（转封装，视频不重新编码），两者都不行才需要转码 —— 具体选了哪条、
-          为什么，播放器里点「为什么这么播」看得到。
+          {t('服务端会在开播前做一次播放决策：能直出就直出（原文件 + HTTP Range，最省资源），否则就只换容器（转封装，视频不重新编码），两者都不行才需要转码 —— 具体选了哪条、为什么，播放器里点「为什么这么播」看得到。')}
         </p>
         {file && (
           <p className="muted small">
-            文件 {file.containerKind || file.container || '未知'} · 视频{' '}
-            {file.video?.[0]
-              ? `${file.video[0].codec} ${file.video[0].width}×${file.video[0].height}`
-              : '（无）'}{' '}
-            · 音频 {file.audio?.[0] ? `${file.audio[0].codec} ${file.audio[0].channels}ch` : '（无）'}
-            {(file.subtitles?.length ?? 0) > 0 ? ` · ${file.subtitles.length} 条字幕` : ''}
+            {t('文件 {container} · 视频 {video} · 音频 {audio}', {
+              container: file.containerKind || file.container || t('未知'),
+              video: file.video?.[0]
+                ? `${file.video[0].codec} ${file.video[0].width}×${file.video[0].height}`
+                : t('（无）'),
+              audio: file.audio?.[0]
+                ? `${file.audio[0].codec} ${file.audio[0].channels}ch`
+                : t('（无）'),
+            })}
+            {(file.subtitles?.length ?? 0) > 0 ? t(' · {n} 条字幕', { n: file.subtitles.length }) : ''}
           </p>
         )}
         <div className="row" style={{ marginTop: 8 }}>
           <Link className="btn btn-primary" to={`/play/${it.id}`}>
-            {resumeSeconds > 0 ? `继续播放（${formatClock(resumeSeconds)}）` : '播放'}
+            {resumeSeconds > 0
+              ? t('继续播放（{time}）', { time: formatClock(resumeSeconds) })
+              : t('播放')}
           </Link>
           {resumeSeconds > 0 && (
             <Link className="btn" to={`/play/${it.id}?restart=1`}>
-              从头播放
+              {t('从头播放')}
             </Link>
           )}
           <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -331,42 +354,40 @@ export function ItemEdit() {
               checked={Boolean(progress?.played)}
               onChange={(e) => void togglePlayed(e.target.checked)}
             />
-            标记为已看
+            {t('标记为已看')}
           </label>
           {progress && progress.playCount > 0 && (
-            <span className="faint small">已看过 {progress.playCount} 次</span>
+            <span className="faint small">{t('已看过 {n} 次', { n: progress.playCount })}</span>
           )}
         </div>
       </div>
 
       <div className="card">
-        <h2>字段</h2>
+        <h2>{t('字段')}</h2>
         <p className="hint">
-          改完点上面的「保存」。勾上<strong>锁定</strong>的字段，重新扫描（nfo 重读）与重新刮削（TMDB）
-          都不会覆盖它 —— 这是「人工改过的数据不被机器冲掉」的唯一保证。没锁的字段会被自动流程补上。
-          留空表示清空（与自动刮削的「空值不覆盖」相反，人工编辑写什么就是什么）。
+          {t('改完点上面的「保存」。勾上「锁定」的字段，重新扫描（nfo 重读）与重新刮削（TMDB）都不会覆盖它 —— 这是「人工改过的数据不被机器冲掉」的唯一保证。没锁的字段会被自动流程补上。留空表示清空（与自动刮削的「空值不覆盖」相反，人工编辑写什么就是什么）。')}
         </p>
         <table className="edit-table">
           <thead>
             <tr>
-              <th style={{ width: 140 }}>字段</th>
-              <th>值</th>
-              <th style={{ width: 96 }}>锁定</th>
+              <th style={{ width: 140 }}>{t('字段')}</th>
+              <th>{t('值')}</th>
+              <th style={{ width: 96 }}>{t('锁定')}</th>
             </tr>
           </thead>
           <tbody>
             {detail.fields.map((f) => {
-              const meta = rowMeta[f.name] ?? { label: f.name };
+              const meta = itemRowMeta()[f.name] ?? { label: f.name };
               const changed = dirty.includes(f.name);
               const isLocked = locked.has(f.name);
               return (
                 <tr key={f.name} className={isLocked ? 'row-locked' : undefined}>
                   <td>
                     {meta.label}
-                    {f.unit === 'minutes' && <span className="faint small">（分钟）</span>}
+                    {f.unit === 'minutes' && <span className="faint small">{t('（分钟）')}</span>}
                     {changed && (
                       <span className="badge" style={{ marginLeft: 6 }}>
-                        已改
+                        {t('已改')}
                       </span>
                     )}
                   </td>
@@ -396,7 +417,7 @@ export function ItemEdit() {
                         checked={isLocked}
                         onChange={() => toggleLock(f.name)}
                       />
-                      <span className="faint small">{isLocked ? '已锁' : '未锁'}</span>
+                      <span className="faint small">{isLocked ? t('已锁') : t('未锁')}</span>
                     </label>
                   </td>
                 </tr>
@@ -445,40 +466,40 @@ function formatValue(f: ItemFieldInfo, v: unknown): string {
 
 /** 把输入框里的文本解析成接口要的值（解析不了就抛错，由保存流程显示）。 */
 function parseValue(f: ItemFieldInfo, text: string): unknown {
-  const label = rowMeta[f.name]?.label ?? f.name;
-  const t = text.trim();
+  const label = itemRowMeta()[f.name]?.label ?? f.name;
+  const s = text.trim();
   switch (f.kind) {
     case 'int':
-      if (t === '') return null;
-      if (!/^-?\d+$/.test(t)) throw new Error(`${label} 需要整数（清空就留空）`);
-      return Number(t);
+      if (s === '') return null;
+      if (!/^-?\d+$/.test(s)) throw new Error(t('{label} 需要整数（清空就留空）', { label }));
+      return Number(s);
     case 'float':
-      if (t === '') return null;
-      if (!Number.isFinite(Number(t))) throw new Error(`${label} 需要数字（清空就留空）`);
-      return Number(t);
+      if (s === '') return null;
+      if (!Number.isFinite(Number(s))) throw new Error(t('{label} 需要数字（清空就留空）', { label }));
+      return Number(s);
     case 'list':
-      return t === ''
+      return s === ''
         ? []
-        : t
+        : s
             .split(/[,，]/)
-            .map((s) => s.trim())
+            .map((x) => x.trim())
             .filter(Boolean);
     case 'map': {
-      if (t === '') return {};
+      if (s === '') return {};
       const out: Record<string, string> = {};
-      for (const part of t.split(/[,，]/)) {
+      for (const part of s.split(/[,，]/)) {
         const p = part.trim();
         if (!p) continue;
         const i = p.indexOf('=');
-        if (i <= 0) throw new Error(`${label} 要写成键=值（如 tmdb=603），收到「${p}」`);
+        if (i <= 0) throw new Error(t('{label} 要写成键=值（如 tmdb=603），收到「{got}」', { label, got: p }));
         out[p.slice(0, i).trim()] = p.slice(i + 1).trim();
       }
       return out;
     }
     case 'date':
-      if (t === '') return null;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw new Error(`${label} 要写成 YYYY-MM-DD`);
-      return t;
+      if (s === '') return null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error(t('{label} 要写成 YYYY-MM-DD', { label }));
+      return s;
     default:
       // 文本：原样送（含空格与换行），空串就是清空
       return text;

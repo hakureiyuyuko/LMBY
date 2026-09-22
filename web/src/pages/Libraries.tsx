@@ -1,24 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, api } from '../api';
+import { t, useI18n } from '../i18n';
+import { kindLabel as itemKindLabel } from '../media';
 import type { Item, LibrarySummary, ScanIssue, ScanProgress } from '../api';
 
-const kindLabels: Record<string, string> = {
-  movie: '电影',
-  series: '剧集',
-  season: '季',
-  episode: '集',
-  extra: '花絮',
-};
-
-const libraryKindOptions = [
-  { value: 'movie', label: '电影' },
-  { value: 'tv', label: '剧集' },
-  { value: 'homevideo', label: '家庭视频' },
-  { value: 'mixed', label: '混合（推荐）' },
-];
+/** 媒体库类型（movie / tv / homevideo / mixed）→ 界面标签。
+ * 写成**函数而不是常量表**：标签要在渲染时取当前语言，
+ * 模块级常量会在 import 时就把语言钉死（切语言后不跟着变）。 */
+function libraryKindOptions(): { value: string; label: string }[] {
+  return [
+    { value: 'movie', label: t('电影') },
+    { value: 'tv', label: t('剧集') },
+    { value: 'homevideo', label: t('家庭视频') },
+    { value: 'mixed', label: t('混合（推荐）') },
+  ];
+}
 
 export function Libraries() {
+  const { t } = useI18n();
   const [libraries, setLibraries] = useState<LibrarySummary[] | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -33,7 +33,7 @@ export function Libraries() {
         setSelected(res.libraries[0].id);
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '读取媒体库失败');
+      setError(e instanceof ApiError ? e.message : t('读取媒体库失败'));
     }
   }, [selected]);
 
@@ -70,7 +70,7 @@ export function Libraries() {
       await api.startScan(id);
       setError('');
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '启动扫描失败');
+      setError(e instanceof ApiError ? e.message : t('启动扫描失败'));
     }
   }
 
@@ -78,12 +78,16 @@ export function Libraries() {
     try {
       await api.cancelScan(id);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '取消扫描失败');
+      setError(e instanceof ApiError ? e.message : t('取消扫描失败'));
     }
   }
 
   async function remove(id: number, name: string) {
-    if (!window.confirm(`确定删除媒体库「${name}」？其条目与文件记录会一并删除（磁盘文件不受影响）。`)) {
+    if (
+      !window.confirm(
+        t('确定删除媒体库「{name}」？其条目与文件记录会一并删除（磁盘文件不受影响）。', { name }),
+      )
+    ) {
       return;
     }
     try {
@@ -91,7 +95,7 @@ export function Libraries() {
       setSelected(null);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '删除失败');
+      setError(e instanceof ApiError ? e.message : t('删除失败'));
     }
   }
 
@@ -100,14 +104,14 @@ export function Libraries() {
       <CreateLibraryCard onCreated={(lib) => { setSelected(lib.id); void load(); }} />
 
       <div className="card">
-        <h2>媒体库</h2>
+        <h2>{t('媒体库')}</h2>
         <p className="hint">
-          扫描只读取文件系统与本地 nfo，不会修改你的文件；图片只登记路径，不入库。
+          {t('扫描只读取文件系统与本地 nfo，不会修改你的文件；图片只登记路径，不入库。')}
         </p>
         {error && <div className="alert alert-error">{error}</div>}
-        {!libraries && <p className="muted">正在读取…</p>}
+        {!libraries && <p className="muted">{t('正在读取…')}</p>}
         {libraries && libraries.length === 0 && (
-          <p className="muted">还没有媒体库。用上面的表单添加一个根路径即可。</p>
+          <p className="muted">{t('还没有媒体库。用上面的表单添加一个根路径即可。')}</p>
         )}
 
         {libraries?.map((lib) => {
@@ -131,20 +135,20 @@ export function Libraries() {
                 >
                   {lib.name}
                 </strong>
-                <span className="badge">{kindLabel(lib.kind)}</span>
+                <span className="badge">{libraryKindLabel(lib.kind)}</span>
                 {Object.entries(lib.counts).map(([k, n]) => (
                   <span className="badge" key={k}>
-                    {kindLabels[k] ?? k} {n}
+                    {itemKindLabel(k)} {n}
                   </span>
                 ))}
-                <span className="badge">图片 {lib.imageCount}</span>
+                <span className="badge">{t('图片 {n}', { n: lib.imageCount })}</span>
                 <div className="spacer" />
                 <Link className="btn btn-sm" to={`/library/${lib.id}`}>
-                  海报墙
+                  {t('海报墙')}
                 </Link>
                 {running ? (
                   <button type="button" className="btn btn-sm" onClick={() => void cancelScan(lib.id)}>
-                    取消扫描
+                    {t('取消扫描')}
                   </button>
                 ) : (
                   <button
@@ -152,7 +156,7 @@ export function Libraries() {
                     className="btn btn-sm btn-primary"
                     onClick={() => void startScan(lib.id)}
                   >
-                    扫描
+                    {t('扫描')}
                   </button>
                 )}
                 <button
@@ -160,7 +164,7 @@ export function Libraries() {
                   className="btn btn-sm btn-danger"
                   onClick={() => void remove(lib.id, lib.name)}
                 >
-                  删除
+                  {t('删除')}
                 </button>
               </div>
 
@@ -171,11 +175,16 @@ export function Libraries() {
               {running && (
                 <div style={{ marginTop: 8 }}>
                   <div className="faint">
-                    扫描中：视频 {p?.videos ?? 0} · 新增 {p?.newFiles ?? 0} · 条目 {p?.itemsNew ?? 0} · 图片{' '}
-                    {p?.images ?? 0} · {((p?.elapsedMs ?? 0) / 1000).toFixed(0)} 秒
+                    {t('扫描中：视频 {videos} · 新增 {added} · 条目 {items} · 图片 {images} · {sec} 秒', {
+                      videos: p?.videos ?? 0,
+                      added: p?.newFiles ?? 0,
+                      items: p?.itemsNew ?? 0,
+                      images: p?.images ?? 0,
+                      sec: ((p?.elapsedMs ?? 0) / 1000).toFixed(0),
+                    })}
                   </div>
                   <div className="faint" style={{ wordBreak: 'break-all' }}>
-                    {p?.currentPath ? shorten(p.currentPath) : '正在遍历目录…'}
+                    {p?.currentPath ? shorten(p.currentPath) : t('正在遍历目录…')}
                   </div>
                 </div>
               )}
@@ -192,6 +201,7 @@ export function Libraries() {
 // ---------------------------------------------------------------- 新建
 
 function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [kind, setKind] = useState('mixed');
   const [paths, setPaths] = useState('');
@@ -205,7 +215,7 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
       .map((p) => p.trim())
       .filter(Boolean);
     if (!name.trim() || list.length === 0) {
-      setError('请填写名称与至少一个根路径');
+      setError(t('请填写名称与至少一个根路径'));
       return;
     }
     setBusy(true);
@@ -215,7 +225,7 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
       setPaths('');
       onCreated(lib);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '创建失败');
+      setError(e instanceof ApiError ? e.message : t('创建失败'));
     } finally {
       setBusy(false);
     }
@@ -223,20 +233,23 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
 
   return (
     <div className="card">
-      <h2>添加媒体库</h2>
+      <h2>{t('添加媒体库')}</h2>
       <p className="hint">
-        根路径是服务器上的绝对路径。多个路径可以指向不同磁盘；目录约定与 Emby 一致，
-        现有库可以零改名接管。
+        {t('根路径是服务器上的绝对路径。多个路径可以指向不同磁盘；目录约定与 Emby 一致，现有库可以零改名接管。')}
       </p>
       {error && <div className="alert alert-error">{error}</div>}
       <label className="field">
-        <span>名称</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：电影 / 剧集" />
+        <span>{t('名称')}</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t('例如：电影 / 剧集')}
+        />
       </label>
       <label className="field">
-        <span>类型</span>
+        <span>{t('类型')}</span>
         <select value={kind} onChange={(e) => setKind(e.target.value)}>
-          {libraryKindOptions.map((o) => (
+          {libraryKindOptions().map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -244,7 +257,7 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
         </select>
       </label>
       <label className="field">
-        <span>根路径（每行一个）</span>
+        <span>{t('根路径（每行一个）')}</span>
         <textarea
           value={paths}
           onChange={(e) => setPaths(e.target.value)}
@@ -263,7 +276,7 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
         />
       </label>
       <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>
-        {busy ? '创建中…' : '创建媒体库'}
+        {busy ? t('创建中…') : t('创建媒体库')}
       </button>
     </div>
   );
@@ -272,6 +285,7 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
 // ---------------------------------------------------------------- 详情
 
 function LibraryDetailCard({ libraryId }: { libraryId: number }) {
+  const { t, lang } = useI18n();
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof api.library>> | null>(null);
   const [items, setItems] = useState<Item[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -322,43 +336,54 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
   return (
     <>
       <div className="card">
-        <h2>{detail.library.name} · 扫描记录</h2>
+        <h2>
+          {detail.library.name} · {t('扫描记录')}
+        </h2>
         {lastScan ? (
           <dl className="kv">
-            <dt>状态</dt>
+            <dt>{t('状态')}</dt>
             <dd>{stateLabel(lastScan.state)}</dd>
-            <dt>触发方式</dt>
-            <dd>{lastScan.trigger === 'manual' ? '手动' : lastScan.trigger}</dd>
-            <dt>开始时间</dt>
-            <dd>{new Date(lastScan.startedAt).toLocaleString('zh-CN', { hour12: false })}</dd>
-            <dt>耗时</dt>
-            <dd>{((lastScan.stats?.elapsedMs ?? 0) / 1000).toFixed(1)} 秒</dd>
-            <dt>扫描结果</dt>
+            <dt>{t('触发方式')}</dt>
+            <dd>{lastScan.trigger === 'manual' ? t('手动') : lastScan.trigger}</dd>
+            <dt>{t('开始时间')}</dt>
+            <dd>{new Date(lastScan.startedAt).toLocaleString(lang, { hour12: false })}</dd>
+            <dt>{t('耗时')}</dt>
+            <dd>{t('{n} 秒', { n: ((lastScan.stats?.elapsedMs ?? 0) / 1000).toFixed(1) })}</dd>
+            <dt>{t('扫描结果')}</dt>
             <dd>
-              视频 {lastScan.stats?.videos ?? 0} · 新增 {lastScan.stats?.newFiles ?? 0} · 变化{' '}
-              {lastScan.stats?.changedFiles ?? 0} · 移动 {lastScan.stats?.movedFiles ?? 0} · 删除{' '}
-              {lastScan.stats?.deletedFiles ?? 0} · 未变 {lastScan.stats?.unchanged ?? 0}
+              {t('视频 {videos} · 新增 {added} · 变化 {changed} · 移动 {moved} · 删除 {deleted} · 未变 {unchanged}', {
+                videos: lastScan.stats?.videos ?? 0,
+                added: lastScan.stats?.newFiles ?? 0,
+                changed: lastScan.stats?.changedFiles ?? 0,
+                moved: lastScan.stats?.movedFiles ?? 0,
+                deleted: lastScan.stats?.deletedFiles ?? 0,
+                unchanged: lastScan.stats?.unchanged ?? 0,
+              })}
             </dd>
-            <dt>新建条目</dt>
+            <dt>{t('新建条目')}</dt>
             <dd>
-              剧集 {lastScan.stats?.seriesNew ?? 0} · 季 {lastScan.stats?.seasonsNew ?? 0} · 集{' '}
-              {lastScan.stats?.episodesNew ?? 0} · 电影 {lastScan.stats?.moviesNew ?? 0}
+              {t('剧集 {series} · 季 {seasons} · 集 {episodes} · 电影 {movies}', {
+                series: lastScan.stats?.seriesNew ?? 0,
+                seasons: lastScan.stats?.seasonsNew ?? 0,
+                episodes: lastScan.stats?.episodesNew ?? 0,
+                movies: lastScan.stats?.moviesNew ?? 0,
+              })}
             </dd>
-            <dt>读取 nfo</dt>
+            <dt>{t('读取 nfo')}</dt>
             <dd>{lastScan.stats?.nfoRead ?? 0}</dd>
-            <dt>图片 / 问题</dt>
+            <dt>{t('图片 / 问题')}</dt>
             <dd>
               {lastScan.stats?.images ?? 0} / {lastScan.stats?.issues ?? 0}
             </dd>
             {lastScan.error && (
               <>
-                <dt>错误</dt>
+                <dt>{t('错误')}</dt>
                 <dd style={{ color: 'var(--danger)' }}>{lastScan.error}</dd>
               </>
             )}
           </dl>
         ) : (
-          <p className="muted">还没有扫描记录。</p>
+          <p className="muted">{t('还没有扫描记录。')}</p>
         )}
       </div>
 
@@ -369,16 +394,16 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
       <ProbeCard libraryId={libraryId} probe={detail.probe} onChange={loadDetail} />
 
       <div className="card">
-        <h2>条目（{total}）</h2>
-        <p className="hint">扫描入库的原始条目。matching 与海报墙属于 M2 / M5。</p>
+        <h2>{t('条目（{n}）', { n: total })}</h2>
+        <p className="hint">{t('扫描入库的原始条目。matching 与海报墙属于 M2 / M5。')}</p>
         <div className="row" style={{ marginBottom: 12 }}>
           {[
-            { v: '', l: '全部' },
-            { v: 'series', l: '剧集' },
-            { v: 'season', l: '季' },
-            { v: 'episode', l: '集' },
-            { v: 'movie', l: '电影' },
-            { v: 'extra', l: '花絮' },
+            { v: '', l: t('全部') },
+            { v: 'series', l: t('剧集') },
+            { v: 'season', l: t('季') },
+            { v: 'episode', l: t('集') },
+            { v: 'movie', l: t('电影') },
+            { v: 'extra', l: t('花絮') },
           ].map((o) => (
             <button
               key={o.v}
@@ -394,29 +419,29 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
           ))}
         </div>
 
-        {!items && <p className="muted">正在读取…</p>}
-        {items && items.length === 0 && <p className="muted">没有条目。</p>}
+        {!items && <p className="muted">{t('正在读取…')}</p>}
+        {items && items.length === 0 && <p className="muted">{t('没有条目。')}</p>}
         {items && items.length > 0 && (
           <>
             <table>
               <thead>
                 <tr>
-                  <th>类型</th>
-                  <th>标题</th>
-                  <th>年</th>
-                  <th>季/集</th>
-                  <th>文件名标记</th>
+                  <th>{t('类型')}</th>
+                  <th>{t('标题')}</th>
+                  <th>{t('年')}</th>
+                  <th>{t('季/集')}</th>
+                  <th>{t('文件名标记')}</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((it) => (
                   <tr key={it.id}>
-                    <td className="faint">{kindLabels[it.kind] ?? it.kind}</td>
+                    <td className="faint">{itemKindLabel(it.kind)}</td>
                     <td>
                       {it.title ? (
                         <Link to={`/items/${it.id}`}>{it.title}</Link>
                       ) : (
-                        <span className="faint">（无标题，待刮削）</span>
+                        <span className="faint">{t('（无标题，待刮削）')}</span>
                       )}
                     </td>
                     <td className="faint">{it.year ?? ''}</td>
@@ -438,10 +463,10 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
                 disabled={page === 0}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
               >
-                上一页
+                {t('上一页')}
               </button>
               <span className="faint">
-                第 {page + 1} / {Math.max(1, Math.ceil(total / pageSize))} 页
+                {t('第 {a} / {b} 页', { a: page + 1, b: Math.max(1, Math.ceil(total / pageSize)) })}
               </span>
               <button
                 type="button"
@@ -449,7 +474,7 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
                 disabled={(page + 1) * pageSize >= total}
                 onClick={() => setPage((p) => p + 1)}
               >
-                下一页
+                {t('下一页')}
               </button>
             </div>
           </>
@@ -466,6 +491,7 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
  * 用户刚看完扫描结果，紧接着就会做这件事。
  */
 function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () => void }) {
+  const { t } = useI18n();
   const [data, setData] = useState<{ configured: boolean; scrape: import('../api').ScrapeProgress } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -490,7 +516,7 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
       await load();
       onChange();
     } catch (e) {
-      setMessage(e instanceof ApiError ? e.message : '操作失败');
+      setMessage(e instanceof ApiError ? e.message : t('操作失败'));
     } finally {
       setBusy(false);
     }
@@ -501,27 +527,26 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
 
   return (
     <div className="card">
-      <h2>元数据刮削</h2>
+      <h2>{t('元数据刮削')}</h2>
       <p className="hint">
-        有本地 nfo 的条目<strong>不会</strong>被刮削（nfo 是当初人工整理的，默认最权威）；
-        只有没 nfo 的才会去 TMDB 找，找不到或拿不准的进「人工匹配」。
+        {t('有本地 nfo 的条目默认不会被刮削（nfo 是当初人工整理的，最权威）；只有没 nfo 的才会去 TMDB 找，找不到或拿不准的进「人工匹配」。')}
       </p>
       {message && <div className="alert">{message}</div>}
 
       {data && !data.configured && (
         <div className="alert alert-error">
-          还没配 TMDB 凭据：去「设置」页填一个 Read Access Token（或 API Key）就能开始刮削。
+          {t('还没配 TMDB 凭据：去「设置」页填一个 Read Access Token（或 API Key）就能开始刮削。')}
         </div>
       )}
 
       {p && (
         <div className="row" style={{ marginBottom: 12 }}>
-          <span className="badge">来自 nfo {p.nfo}</span>
-          <span className="badge">已匹配 {p.matched}</span>
-          <span className="badge">待确认 {p.review}</span>
-          <span className="badge">没找到 {p.failed}</span>
-          <span className="badge">已人工 {p.manual}</span>
-          <span className="badge">未刮削 {p.local}</span>
+          <span className="badge">{t('来自 nfo {n}', { n: p.nfo })}</span>
+          <span className="badge">{t('已匹配 {n}', { n: p.matched })}</span>
+          <span className="badge">{t('待确认 {n}', { n: p.review })}</span>
+          <span className="badge">{t('没找到 {n}', { n: p.failed })}</span>
+          <span className="badge">{t('已人工 {n}', { n: p.manual })}</span>
+          <span className="badge">{t('未刮削 {n}', { n: p.local })}</span>
         </div>
       )}
 
@@ -533,11 +558,11 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
           onClick={() =>
             void run(async () => {
               const res = await api.enqueueScrapes(libraryId, {});
-              return `已入队 ${res.enqueued} 条（已有 nfo/已匹配的会自动跳过）`;
+              return t('已入队 {n} 条（已有 nfo/已匹配的会自动跳过）', { n: res.enqueued });
             })
           }
         >
-          一键刮削（{todo} 条待处理）
+          {t('一键刮削（{n} 条待处理）', { n: todo })}
         </button>
         <button
           type="button"
@@ -546,19 +571,18 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
           onClick={() => {
             if (
               !window.confirm(
-                '强制重刮会把 TMDB 的值写进所有条目的**未锁定**字段（包括有 nfo 的）。\n' +
-                  '锁住的字段与人工改过的字段不会被动。确定继续？',
+                t('强制重刮会把 TMDB 的值写进所有条目的未锁定字段（包括有 nfo 的）。\n锁住的字段与人工改过的字段不会被动。确定继续？'),
               )
             ) {
               return;
             }
             void run(async () => {
               const res = await api.enqueueScrapes(libraryId, { force: true });
-              return `已强制入队 ${res.enqueued} 条`;
+              return t('已强制入队 {n} 条', { n: res.enqueued });
             });
           }}
         >
-          强制重刮全部
+          {t('强制重刮全部')}
         </button>
         <button
           type="button"
@@ -567,18 +591,21 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
           onClick={() =>
             void run(async () => {
               const res = await api.resetFailedScrapes(libraryId);
-              return `已重置 ${res.reset} 条失败记录，并重新入队 ${res.enqueued} 条`;
+              return t('已重置 {reset} 条失败记录，并重新入队 {enqueued} 条', {
+                reset: res.reset,
+                enqueued: res.enqueued,
+              });
             })
           }
         >
-          重置失败的
+          {t('重置失败的')}
         </button>
-        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void run(async () => '已刷新')}>
-          刷新
+        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void run(async () => t('已刷新'))}>
+          {t('刷新')}
         </button>
         <div className="spacer" />
         <Link className="btn btn-sm" to="/match">
-          去人工匹配
+          {t('去人工匹配')}
         </Link>
       </div>
     </div>
@@ -594,6 +621,7 @@ function ProbeCard({
   probe: import('../api').ProbeProgress;
   onChange: () => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const total = probe.ok + probe.pending + probe.failed;
@@ -606,7 +634,7 @@ function ProbeCard({
       setMessage(await fn());
       onChange();
     } catch (e) {
-      setMessage(e instanceof ApiError ? e.message : '操作失败');
+      setMessage(e instanceof ApiError ? e.message : t('操作失败'));
     } finally {
       setBusy(false);
     }
@@ -614,17 +642,16 @@ function ProbeCard({
 
   return (
     <div className="card">
-      <h2>流信息探测</h2>
+      <h2>{t('流信息探测')}</h2>
       <p className="hint">
-        ffprobe 读取每个文件的容器/编码/位深/HDR/音轨/字幕/章节信息，写入数据库。
-        扫描结束后会自动排队，这里可以手动补跑。
+        {t('ffprobe 读取每个文件的容器/编码/位深/HDR/音轨/字幕/章节信息，写入数据库。\n扫描结束后会自动排队，这里可以手动补跑。')}
       </p>
       {message && <div className="alert">{message}</div>}
 
       <div className="row" style={{ marginBottom: 10 }}>
-        <span className="badge">已完成 {probe.ok}</span>
-        <span className="badge">待探测 {probe.pending}</span>
-        <span className="badge">失败 {probe.failed}</span>
+        <span className="badge">{t('已完成 {n}', { n: probe.ok })}</span>
+        <span className="badge">{t('待探测 {n}', { n: probe.pending })}</span>
+        <span className="badge">{t('失败 {n}', { n: probe.failed })}</span>
         <span className="faint">{percent}%</span>
       </div>
 
@@ -655,11 +682,11 @@ function ProbeCard({
           onClick={() =>
             void run(async () => {
               const res = await api.enqueueProbes(libraryId);
-              return `已入队 ${res.enqueued} 个探测任务`;
+              return t('已入队 {n} 个探测任务', { n: res.enqueued });
             })
           }
         >
-          把待探测的文件入队
+          {t('把待探测的文件入队')}
         </button>
         <button
           type="button"
@@ -668,29 +695,34 @@ function ProbeCard({
           onClick={() =>
             void run(async () => {
               const res = await api.resetFailedProbes(libraryId);
-              return `已重置 ${res.reset} 个失败的探测，重新入队 ${res.enqueued} 个`;
+              return t('已重置 {reset} 个失败的探测，重新入队 {enqueued} 个', {
+                reset: res.reset,
+                enqueued: res.enqueued,
+              });
             })
           }
         >
-          重置失败的探测
+          {t('重置失败的探测')}
         </button>
       </div>
     </div>
   );
 }
 
-function IssuesCard({ issues }: { issues: ScanIssue[] }) {  const [expanded, setExpanded] = useState(false);
+function IssuesCard({ issues }: { issues: ScanIssue[] }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const shown = expanded ? issues : issues.slice(0, 5);
   return (
     <div className="card">
-      <h2>扫描问题（{issues.length}）</h2>
-      <p className="hint">不致命但值得看一眼：文件过小、识别不了、nfo 解析失败等。</p>
+      <h2>{t('扫描问题（{n}）', { n: issues.length })}</h2>
+      <p className="hint">{t('不致命但值得看一眼：文件过小、识别不了、nfo 解析失败等。')}</p>
       <table>
         <thead>
           <tr>
-            <th>级别</th>
-            <th>路径</th>
-            <th>说明</th>
+            <th>{t('级别')}</th>
+            <th>{t('路径')}</th>
+            <th>{t('说明')}</th>
           </tr>
         </thead>
         <tbody>
@@ -707,7 +739,7 @@ function IssuesCard({ issues }: { issues: ScanIssue[] }) {  const [expanded, set
       </table>
       {issues.length > 5 && (
         <button type="button" className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `展开全部 ${issues.length} 条`}
+          {expanded ? t('收起') : t('展开全部 {n} 条', { n: issues.length })}
         </button>
       )}
     </div>
@@ -716,20 +748,20 @@ function IssuesCard({ issues }: { issues: ScanIssue[] }) {  const [expanded, set
 
 // ---------------------------------------------------------------- 工具
 
-function kindLabel(kind: string): string {
-  return libraryKindOptions.find((o) => o.value === kind)?.label ?? kind;
+function libraryKindLabel(kind: string): string {
+  return libraryKindOptions().find((o) => o.value === kind)?.label ?? kind;
 }
 
 function stateLabel(state: string): string {
   switch (state) {
     case 'running':
-      return '进行中';
+      return t('进行中');
     case 'done':
-      return '已完成';
+      return t('已完成');
     case 'failed':
-      return '失败';
+      return t('失败');
     case 'canceled':
-      return '已取消';
+      return t('已取消');
     default:
       return state;
   }

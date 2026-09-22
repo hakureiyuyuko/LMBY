@@ -158,7 +158,7 @@ export function SearchBox(props: SearchBoxProps) {
         value={value}
         autoFocus={autoFocus}
         placeholder={placeholder ?? t('片名、原名或演员名，如「言叶之庭」「宫崎骏」「Matrix」')}
-        aria-label="搜索"
+        aria-label={t('搜索')}
         autoComplete="off"
         onChange={(e) => {
           touched.current = true;

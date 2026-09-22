@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import type { PlaySessionInfo, TranscodeSessionStat } from '../api';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import { formatClock } from '../capabilities';
 
 /**
@@ -15,6 +16,7 @@ import { formatClock } from '../capabilities';
  * 每 3 秒自动刷新；管理员还能一刀掐掉某一路（客户端已经不管、进程还在烧 CPU 时用）。
  */
 export function Sessions() {
+  const { t } = useI18n();
   const { user } = useAuth();
   const [sessions, setSessions] = useState<PlaySessionInfo[]>([]);
   const [streams, setStreams] = useState<TranscodeSessionStat[]>([]);
@@ -29,7 +31,7 @@ export function Sessions() {
       setStreams(r.transcodeSessions ?? []);
       setError('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : '读取会话失败');
+      setError(e instanceof Error ? e.message : t('读取会话失败'));
     } finally {
       setLoaded(true);
     }
@@ -47,7 +49,7 @@ export function Sessions() {
       await api.stopTranscodeSession(key);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '终止失败');
+      setError(e instanceof Error ? e.message : t('终止失败'));
     } finally {
       setBusy('');
     }
@@ -58,22 +60,22 @@ export function Sessions() {
       {error && <div className="alert alert-error">{error}</div>}
 
       <div className="card">
-        <h2>播放会话</h2>
+        <h2>{t('播放会话')}</h2>
         <p className="hint">
-          当前正在播放的会话。直出与转封装/转码都会出现在这里；转码那一路的实时状态见下表。
+          {t('当前正在播放的会话。直出与转封装/转码都会出现在这里；转码那一路的实时状态见下表。')}
         </p>
         {sessions.length === 0 ? (
-          <p className="faint">{loaded ? '当前没有人在播放。' : '正在读取…'}</p>
+          <p className="faint">{loaded ? t('当前没有人在播放。') : t('正在读取…')}</p>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>条目</th>
-                <th>方式</th>
-                <th>文件</th>
-                <th>起播</th>
-                <th>时长</th>
-                <th>空闲</th>
+                <th>{t('条目')}</th>
+                <th>{t('方式')}</th>
+                <th>{t('文件')}</th>
+                <th>{t('起始位置')}</th>
+                <th>{t('时长')}</th>
+                <th>{t('空闲')}</th>
               </tr>
             </thead>
             <tbody>
@@ -95,51 +97,50 @@ export function Sessions() {
       </div>
 
       <div className="card">
-        <h2>转码 / 转封装会话</h2>
+        <h2>{t('转码 / 转封装会话')}</h2>
         <p className="hint">
-          每一路 ffmpeg 的实时状态。速度低于 1x 就跟不上播放（画面会卡）；显示「节流中」是
-          好事 —— 说明它已经跑在客户端前面，正歇着等，避免白烧 CPU。
+          {t('每一路 ffmpeg 的实时状态。速度低于 1x 就跟不上播放（画面会卡）；显示「节流中」是好事 —— 说明它已经跑在客户端前面，正歇着等，避免白烧 CPU。')}
         </p>
         {streams.length === 0 ? (
-          <p className="faint">{loaded ? '当前没有转码/转封装进程。' : '正在读取…'}</p>
+          <p className="faint">{loaded ? t('当前没有转码/转封装进程。') : t('正在读取…')}</p>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>状态</th>
-                <th>速度</th>
+                <th>{t('状态')}</th>
+                <th>{t('速度')}</th>
                 <th>fps</th>
-                <th>码率</th>
-                <th>分片</th>
-                <th>已生成</th>
-                <th>客户端</th>
-                <th>领先</th>
+                <th>{t('码率')}</th>
+                <th>{t('分片')}</th>
+                <th>{t('已生成')}</th>
+                <th>{t('客户端')}</th>
+                <th>{t('领先')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {streams.map((t) => (
-                <tr key={t.key}>
+              {streams.map((st) => (
+                <tr key={st.key}>
                   <td>
-                    {t.state}
-                    {t.throttled ? '（节流中）' : ''}
+                    {st.state}
+                    {st.throttled ? t('（节流中）') : ''}
                   </td>
-                  <td>{t.speed ? `${t.speed.toFixed(2)}x` : '—'}</td>
-                  <td>{t.fps ? t.fps.toFixed(0) : '—'}</td>
-                  <td>{t.bitrate && t.bitrate !== 'N/A' ? t.bitrate : '—'}</td>
-                  <td>{t.segments}</td>
-                  <td>{formatClock(t.generatedSeconds)}</td>
-                  <td>{formatClock(t.clientSeconds)}</td>
-                  <td>{formatClock(Math.max(0, t.aheadSeconds))}</td>
+                  <td>{st.speed ? `${st.speed.toFixed(2)}x` : '—'}</td>
+                  <td>{st.fps ? st.fps.toFixed(0) : '—'}</td>
+                  <td>{st.bitrate && st.bitrate !== 'N/A' ? st.bitrate : '—'}</td>
+                  <td>{st.segments}</td>
+                  <td>{formatClock(st.generatedSeconds)}</td>
+                  <td>{formatClock(st.clientSeconds)}</td>
+                  <td>{formatClock(Math.max(0, st.aheadSeconds))}</td>
                   <td>
                     {user?.isAdmin && (
                       <button
                         type="button"
                         className="btn btn-sm btn-ghost"
-                        disabled={busy === t.key}
-                        onClick={() => void kill(t.key)}
+                        disabled={busy === st.key}
+                        onClick={() => void kill(st.key)}
                       >
-                        终止
+                        {t('终止')}
                       </button>
                     )}
                   </td>
@@ -148,14 +149,16 @@ export function Sessions() {
             </tbody>
           </table>
         )}
-        {streams.some((t) => t.log) && (
+        {streams.some((st) => st.log) && (
           <details>
-            <summary className="hint">ffmpeg 日志尾巴（排查「为什么卡/为什么起不来」）</summary>
-            {streams.map((t) =>
-              t.log ? (
-                <div key={t.key}>
-                  <div className="faint">{t.key}</div>
-                  <pre className="player-log">{t.log}</pre>
+            <summary className="hint">
+              {t('ffmpeg 日志尾巴（排查「为什么卡/为什么起不来」）')}
+            </summary>
+            {streams.map((st) =>
+              st.log ? (
+                <div key={st.key}>
+                  <div className="faint">{st.key}</div>
+                  <pre className="player-log">{st.log}</pre>
                 </div>
               ) : null,
             )}

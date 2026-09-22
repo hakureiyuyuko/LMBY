@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
-import { useI18n } from '../i18n';
+import { t, useI18n } from '../i18n';
+import { kindLabel } from '../media';
 import type { BrowsePage, LibrarySummary } from '../api';
 
 /**
@@ -13,15 +14,23 @@ import type { BrowsePage, LibrarySummary } from '../api';
  * 点卡片：剧集 → 剧集视图（季/集），电影 → 条目页。
  */
 
-const kindTabs = [
-  { v: '', l: '全部' },
-  { v: 'movie', l: '电影' },
-  { v: 'series', l: '剧集' },
-];const sortOptions = [
-  { v: 'title', l: '按标题' },
-  { v: 'year', l: '按年份' },
-  { v: 'added', l: '最近添加' },
-];
+/** 类型标签页（写成函数：标签要跟着语言走）。 */
+function kindTabs(): { v: string; l: string }[] {
+  return [
+    { v: '', l: t('全部') },
+    { v: 'movie', l: t('电影') },
+    { v: 'series', l: t('剧集') },
+  ];
+}
+
+/** 排序选项。 */
+function sortOptions(): { v: string; l: string }[] {
+  return [
+    { v: 'title', l: t('按标题') },
+    { v: 'year', l: t('按年份') },
+    { v: 'added', l: t('最近添加') },
+  ];
+}
 
 const PAGE_SIZE = 60;
 
@@ -107,7 +116,7 @@ export function Browse() {
       {libs.length > 1 && (
         <div className="card">
           <div className="row">
-            <strong className="small">媒体库</strong>
+            <strong className="small">{t('媒体库')}</strong>
             <div className="tabs" style={{ marginBottom: 0 }}>
               {libs.map((l) => (
                 <Link
@@ -131,7 +140,7 @@ export function Browse() {
         <div className="row">
           <h2 style={{ margin: 0 }}>{library?.name ?? t('海报墙')}</h2>
           <div className="tabs" style={{ marginBottom: 0, marginLeft: 12 }}>
-            {kindTabs.map((tab) => (
+            {kindTabs().map((tab) => (
               <button
                 key={tab.v}
                 type="button"
@@ -144,9 +153,9 @@ export function Browse() {
           </div>
           <div className="spacer" />
           <label className="field field-inline">
-            <span>排序</span>
+            <span>{t('排序')}</span>
             <select value={sort} onChange={(e) => setParams(buildParams(kind, e.target.value))}>
-              {sortOptions.map((o) => (
+              {sortOptions().map((o) => (
                 <option key={o.v} value={o.v}>
                   {o.l}
                 </option>
@@ -203,13 +212,13 @@ export function Browse() {
                 </span>
                 <div className="poster-body">
                   <div className="poster-title" title={it.title}>
-                    {it.title || '（无标题）'}
+                    {it.title || t('（无标题）')}
                   </div>
                   <div className="muted small">
                     {it.year ?? ''}
                     {it.seasonNumber != null ? ` S${it.seasonNumber}` : ''}
                     {it.episodeNumber != null ? `E${it.episodeNumber}` : ''}
-                    {it.kind === 'series' ? ' 剧集' : ''}
+                    {it.kind === 'series' ? ` ${kindLabel(it.kind)}` : ''}
                   </div>
                 </div>
               </Link>
@@ -224,7 +233,7 @@ export function Browse() {
                 disabled={page === 0}
                 onClick={() => setParams(buildParams(kind, sort, page - 1))}
               >
-                上一页
+                {t('上一页')}
               </button>
               <span className="faint">
                 第 {page + 1} / {totalPages} 页
@@ -235,7 +244,7 @@ export function Browse() {
                 disabled={(page + 1) * PAGE_SIZE >= data.total}
                 onClick={() => setParams(buildParams(kind, sort, page + 1))}
               >
-                下一页
+                {t('下一页')}
               </button>
             </div>
           )}

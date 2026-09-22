@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
+import { t } from './i18n';
 import { Account } from './pages/Account';
 import { Browse } from './pages/Browse';
 import { Detail } from './pages/Detail';
@@ -60,7 +61,7 @@ function AppRoutes() {
   const { status, meta } = useAuth();
 
   if (status === 'loading') {
-    return <div className="splash">正在加载 LMBY…</div>;
+    return <div className="splash">{t('正在加载 LMBY…')}</div>;
   }
 
   const setupRequired = meta?.setupRequired ?? false;
@@ -122,10 +123,10 @@ function SeriesRedirect() {
 function NotFound() {
   return (
     <div className="card">
-      <h2>页面不存在</h2>
-      <p className="hint">这个地址在 LMBY 里没有对应页面。</p>
+      <h2>{t('页面不存在')}</h2>
+      <p className="hint">{t('这个地址在 LMBY 里没有对应页面。')}</p>
       <Link className="btn" to="/">
-        返回概览
+        {t('返回概览')}
       </Link>
     </div>
   );

@@ -20,7 +20,7 @@ export function Layout() {
     <div className="shell">
       <header className="topbar">
         <div className="brand">
-          LMBY <small>Light 的 Emby</small>
+          LMBY <small>{t('Light 的 Emby')}</small>
         </div>
         <nav className="nav">
           <NavLink to="/search" className={({ isActive }) => (isActive ? 'active' : '')}>
