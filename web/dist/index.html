@@ -3,43 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LMBY · 前端未构建</title>
+    <meta name="color-scheme" content="dark light" />
+    <title>LMBY</title>
+    <script>
+      // 关键：在首屏绘制之前就把主题定下来，避免暗色用户看到一帧白屏（FOUC）。
+      // 优先级：用户上次显式选择 > 系统偏好。
+      (function () {
+        try {
+          var saved = localStorage.getItem('lmby-theme');
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Uyw3rNSa.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CdlwomXa.css">
   </head>
-  <!--
-    这是**占位页**，不是真正的界面。
-
-    为什么它必须在版本库里：Go 侧用 `go:embed dist` 把前端打进单二进制，
-    embed 至少要匹配到一个文件，否则干净检出时 `go build` 直接失败。
-
-    真正的构建产物（dist/index.html + dist/assets/*）不入库 —— 带哈希的文件名
-    每次构建都变，入库只会制造噪音。构建方式：`cd web && npm ci && npm run build`；
-    Docker 与 CI 里这一步是自动的。
-
-    入库前请跑 `task web:restore-placeholder`（= git checkout -- web/dist/index.html），
-    把这份占位页恢复回来；否则会把个人构建产物提交上去，而它引用的 assets 并不在库里，
-    结果就是「界面白屏 / 少了几个入口」这种没有任何报错的故障。
-  -->
-  <body
-    style="
-      margin: 0;
-      padding: 48px;
-      background: #0e1116;
-      color: #e6edf3;
-      font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif;
-      line-height: 1.7;
-    "
-  >
-    <h1 style="margin-top: 0">LMBY 前端未构建</h1>
-    <p>当前二进制里装的是占位页 —— 说明编译它之前没有跑前端构建。</p>
-    <p>
-      构建真正的界面：
-      <code style="background: #1c2230; padding: 2px 6px; border-radius: 4px"
-        >cd web &amp;&amp; npm ci &amp;&amp; npm run build</code
-      >
-      ，然后重新编译 Go 二进制（<code style="background: #1c2230; padding: 2px 6px; border-radius: 4px"
-        >go build ./cmd/lmby</code
-      >）。
-    </p>
-    <p>用 Docker / CI 构建时这一步是自动的，不会看到这个页面。</p>
+  <body>
+    <div id="root"></div>
   </body>
 </html>

@@ -547,6 +547,12 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 **28 秒的 1080p h264 短片（646 KB）** 也当成了残片；现在问题描述里会写明
 「文件过小（N 字节 < 阈值 M）」，并直接告诉你改哪个配置项。
 
+> ⚠️ **部署前必须重新构建前端**：`web/dist/index.html` 在仓库里是**占位页**（提交前要还原），
+> 而它是 `go:embed` 进二进制的 —— 只改 Go、打包时忘了 `cd web && npm run build`，
+> 线上就会变成「前端未构建」的空白页（2026-09-22 真踩到）。
+> 现在容器的 `/root/deploy-lmby.sh` 第一件事就查这件事：
+> `/opt/lmby/web/dist/index.html` 不引用 `/assets/` 就**拒绝部署**。
+
 ```
 GET /api/v1/items/{id}/images                      → 列出这个条目有哪些图（本地/回源、尺寸、URL）
 GET /api/v1/items/{id}/images/{kind}?w=&h=&format=&q=  → 输出图（kind: poster|fanart|logo|banner|thumb...）
