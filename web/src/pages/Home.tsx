@@ -287,7 +287,7 @@ export function Home() {
         <div className="card">
           <h2>{t('欢迎使用 LMBY')}</h2>
           <p className="muted">
-            {t('媒体库里还没有内容。先去')} <Link to="/libraries">{t('库管理')}</Link>{' '}
+            {t('媒体库里还没有内容。先去')} <Link to="/settings/libraries">{t('库管理')}</Link>{' '}
             {t('添加一个媒体库并扫描，条目的海报、简介与演职员会从同目录的 nfo 读进来（本地优先，不联网）。')}
           </p>
         </div>

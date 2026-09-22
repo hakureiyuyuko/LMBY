@@ -206,9 +206,16 @@ async function main() {
   check('登录成功', true, await waitFor('首页', async () => (await evaluate('location.pathname')) === '/'));
 
   log('\n== 2. 海报墙（从媒体库页进入）==');
-  await evaluate(clickSel('.nav a[href="/libraries"]'));
-  check('进入媒体库页', true, await waitFor('媒体库页', async () =>
-    (await evaluate('location.pathname')) === '/libraries'));
+  // 库管理 / 人工匹配 / 会话监控 = 设置的三个子页签（M6 收尾）
+  // ⚠️ 必须等页签元素真的渲染出来再点：导航后立刻点会静默落空（假失败，真踩到过）
+  await evaluate(clickSel('.nav a[href="/settings"]'));
+  check('进入设置页', true, await waitFor('设置页', async () =>
+    (await evaluate('location.pathname')) === '/settings'));
+  check('设置页有管理面页签', true, await waitFor('管理面页签', async () =>
+    (await evaluate(`!!document.querySelector('[data-settings-tabs] a[href="/settings/libraries"]')`)) === true));
+  await evaluate(clickSel('[data-settings-tabs] a[href="/settings/libraries"]'));
+  check('进入库管理页', true, await waitFor('库管理页', async () =>
+    (await evaluate('location.pathname')) === '/settings/libraries'));
   check('媒体库卡片上有「海报墙」入口', true, await waitFor('海报墙链接', async () =>
     (await evaluate(`!!document.querySelector('.btn[href^="/library/"]')`)) === true));
   await evaluate(clickSel('.btn[href^="/library/"]'));
@@ -292,9 +299,13 @@ async function main() {
   }
 
   log('\n== 4. 人工匹配：批量选择界面 ==');
-  await evaluate(clickSel('.nav a[href="/match"]'));
+  // 刚才在条目编辑页（/items/{id}），那里没有设置页签 —— 先回设置
+  await evaluate(clickSel('.nav a[href="/settings"]'));
+  await waitFor('人工匹配页签', async () =>
+    (await evaluate(`!!document.querySelector('[data-settings-tabs] a[href="/settings/match"]')`)) === true);
+  await evaluate(clickSel('[data-settings-tabs] a[href="/settings/match"]'));
   check('进入人工匹配', true, await waitFor('匹配页', async () =>
-    (await evaluate('location.pathname')) === '/match'));
+    (await evaluate('location.pathname')) === '/settings/match'));
   const hasItems = await waitFor('候选卡片', async () =>
     (await evaluate(`document.querySelectorAll('.match-cell').length`)) > 0, 12000);
   if (!hasItems) {

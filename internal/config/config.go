@@ -157,6 +157,15 @@ func (c *Config) ImagesCacheDir() string {
 	return filepath.Join(c.DataDir, "images")
 }
 
+// OverlayDir 返回「只读媒体库」的叠加层目录（数据目录下）。
+//
+// 它存的是只读库的刮削产物（每库一块：元数据快照 + 图片）——
+// 算数据而不是缓存，所以不跟图片缓存放在一起（那个会按上限清理），
+// 也不放在媒体目录里（只读挂载上根本写不进去）。
+func (c *Config) OverlayDir() string {
+	return filepath.Join(c.DataDir, "overlay")
+}
+
 // TMDBConfig 是 TMDB 刮削源配置。
 //
 // 两个凭据任选其一即可：ReadToken（v4，Bearer）优先；

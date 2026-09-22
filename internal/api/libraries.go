@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scanner"
 	"github.com/hakureiyuyuko/lmby/internal/store"
@@ -156,10 +157,17 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 只读库：顺带把叠加层的占用报给界面（它就是这个库「刮削产物的落地岛」）
+	overlayStats := overlay.Stats{}
+	if s.overlay != nil {
+		overlayStats, _ = s.overlay.Stats(lib.ID)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"library":  libraryResponse{Library: *lib, Counts: counts, ImageCount: images, ScanRunning: running},
 		"lastScan": lastRun,
 		"issues":   issues,
+		"overlay":  overlayStats,
 		"progress": progressOrNil(progress, running),
 		"probe":    probeProgress,
 	})
@@ -167,6 +175,9 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 
 type updateLibraryRequest struct {
 	Name *string `json:"name"`
+	// ReadOnly：网盘 / 只读挂载的库打开它 —— LMBY 就不再往库目录里写，
+	// 刮削产物（元数据快照 + 图片）落进数据目录的 overlay 层。
+	ReadOnly *bool `json:"readonly"`
 }
 
 // scanRequest 是触发扫描时的可选请求体。
@@ -174,7 +185,7 @@ type scanRequest struct {
 	RefreshMetadata bool `json:"refreshMetadata"`
 }
 
-// handleUpdateLibrary 目前只支持改名。
+// handleUpdateLibrary 支持改名与「只读」开关（两者可以一起改）。
 func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -184,21 +195,31 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Name == nil {
+	if req.Name == nil && req.ReadOnly == nil {
 		writeError(w, http.StatusBadRequest, "没有需要更新的字段")
-		return
-	}
-	name := strings.TrimSpace(*req.Name)
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "名称不能为空")
 		return
 	}
 	ctx, cancel := contextWithTimeout(r, 10*time.Second)
 	defer cancel()
 
-	if err := s.store.UpdateLibrary(ctx, id, name); err != nil {
-		s.notFoundOrError(w, err)
-		return
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "名称不能为空")
+			return
+		}
+		if err := s.store.UpdateLibrary(ctx, id, name); err != nil {
+			s.notFoundOrError(w, err)
+			return
+		}
+	}
+	if req.ReadOnly != nil {
+		if err := s.store.SetLibraryReadOnly(ctx, id, *req.ReadOnly); err != nil {
+			s.notFoundOrError(w, err)
+			return
+		}
+		readOnly := *req.ReadOnly
+		s.log.Info("媒体库只读开关已更新", "libraryId", id, "readonly", readOnly)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

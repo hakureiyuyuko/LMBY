@@ -23,6 +23,13 @@ export function Layout() {
           LMBY <small>{t('Light 的 Emby')}</small>
         </div>
         <nav className="nav">
+          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
+            {t('首页')}
+          </NavLink>
+          {/* 直播电视（M5）：普通用户也能用（频道列表 + 起播），源与探测只对管理员显示 */}
+          <NavLink to="/livetv" className={({ isActive }) => (isActive ? 'active' : '')}>
+            {t('直播')}
+          </NavLink>
           <NavLink to="/search" className={({ isActive }) => (isActive ? 'active' : '')}>
             {t('搜索')}
           </NavLink>
@@ -37,31 +44,16 @@ export function Layout() {
           >
             {t('我的列表')}
           </NavLink>
-          <NavLink to="/libraries" className={({ isActive }) => (isActive ? 'active' : '')}>
-            {t('库管理')}
-          </NavLink>
-          {/* 直播电视（M5）：普通用户也能用（频道列表 + 起播），源与探测只对管理员显示 */}
-          <NavLink to="/livetv" className={({ isActive }) => (isActive ? 'active' : '')}>
-            {t('直播')}
-          </NavLink>
-          <NavLink to="/match" className={({ isActive }) => (isActive ? 'active' : '')}>
-            {t('人工匹配')}
-          </NavLink>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
-            {t('首页')}
-          </NavLink>
           <NavLink to="/account" className={({ isActive }) => (isActive ? 'active' : '')}>
             {t('个人中心')}
           </NavLink>
-          {/* 会话监控（M4）也只对管理员显示：普通用户看自己的播放会话没多大意义 */}
+          {/* 设置只对管理员有意义（接口也会拦），普通用户不显示入口，免得点进去只看到一句无权限。
+              库管理 / 人工匹配 / 会话监控都收在设置里（子页签），导航栏只留一条。 */}
           {user?.isAdmin && (
-            <NavLink to="/sessions" className={({ isActive }) => (isActive ? 'active' : '')}>
-              {t('会话')}
-            </NavLink>
-          )}
-          {/* 设置只对管理员有意义（接口也会拦），普通用户不显示入口，免得点进去只看到一句无权限 */}
-          {user?.isAdmin && (
-            <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => (isActive ? 'active' : '')}
+            >
               {t('设置')}
             </NavLink>
           )}

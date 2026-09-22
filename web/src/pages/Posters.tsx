@@ -36,7 +36,7 @@ export function Posters() {
       <div className="card">
         <h2>{t('读不到媒体库')}</h2>
         <div className="alert alert-error">{error}</div>
-        <Link className="btn" to="/libraries">
+        <Link className="btn" to="/settings/libraries">
           {t('去库管理看看')}
         </Link>
       </div>
@@ -52,7 +52,7 @@ export function Posters() {
         <p className="hint">
           {t('媒体库是「一个目录树 = 一面海报墙」。先在库管理里把服务器上的目录加进来，扫一次就有了。')}
         </p>
-        <Link className="btn btn-primary" to="/libraries">
+        <Link className="btn btn-primary" to="/settings/libraries">
           {t('去建媒体库')}
         </Link>
       </div>

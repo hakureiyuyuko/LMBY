@@ -13,6 +13,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/livetv"
 	"github.com/hakureiyuyuko/lmby/internal/livetvsync"
+	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
@@ -62,7 +63,15 @@ type Server struct {
 
 	// baseCtx 是服务的生命周期 context（后台任务用，见 SetBaseContext）。
 	baseCtx context.Context
+
+	// overlay 是只读媒体库的写入层（库级：元数据快照 + 刮削到的图片）。
+	// 可为 nil（未接入时相关统计不显示）。
+	overlay *overlay.Service
 }
+
+// SetOverlay 接入「只读媒体库」的叠加层（写在数据目录里，不碰媒体目录）。
+// 不接时相关界面只显示只读开关与说明，不显示叠加层占用。
+func (s *Server) SetOverlay(o *overlay.Service) { s.overlay = o }
 
 // New 构造 Server。
 func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,

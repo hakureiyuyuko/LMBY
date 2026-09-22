@@ -537,6 +537,9 @@ POST /api/v1/libraries/{id}/scrape/reset                                        
 覆盖顺序：**媒体目录里的本地图 > 用户手选（UI 未做）> TMDB 下载缓存**。
 本地图能直接用就直接送原文件；要缩放才落缓存（`<data_dir>/images/cache`，默认上限 512MB），
 回源下到的原图落 `<data_dir>/images/remote`（算数据，不参与清理）。
+**只读媒体库**（网盘 / 只读挂载）的刮削产物另落 `<data_dir>/overlay/<libraryId>/<itemId>/`
+（图片副本 + `meta.json` 元数据快照；算数据、不参与缓存淘汰，与 `images/` 分开是为了
+「别被缓存清理顺手删掉」）—— 见 `docs/notes/library-readonly.md`。
 
 ```
 GET /api/v1/items/{id}/images                      → 列出这个条目有哪些图（本地/回源、尺寸、URL）

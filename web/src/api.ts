@@ -143,6 +143,9 @@ export const api = {
   library: (id: number) => request<LibraryDetail>(`/api/v1/libraries/${id}`),
   createLibrary: (name: string, kind: string, paths: string[]) =>
     request<LibrarySummary>('/api/v1/libraries', { method: 'POST', ...json({ name, kind, paths }) }),
+  /** 改名与「只读」开关共用这一个 PATCH（两者可以一起改）。 */
+  updateLibrary: (id: number, body: { name?: string; readonly?: boolean }) =>
+    request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'PATCH', ...json(body) }),
   deleteLibrary: (id: number) =>
     request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'DELETE' }),
 
@@ -577,6 +580,8 @@ export interface LibrarySummary {
   counts: Record<string, number>;
   imageCount: number;
   scanRunning: boolean;
+  /** 只读（网盘 / 只读挂载）：LMBY 不往库目录里写，刮削产物落进 overlay。 */
+  readonly?: boolean;
 }
 
 export interface ScanRun {
@@ -621,6 +626,8 @@ export interface LibraryDetail {
   issues: ScanIssue[];
   progress: ScanProgress | null;
   probe: ProbeProgress;
+  /** 叠加层占用（只读库的刮削产物落地岛；未接入时是 0）。 */
+  overlay?: { files: number; bytes: number };
 }
 
 /** 流信息探测进度。 */

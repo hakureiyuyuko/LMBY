@@ -32,6 +32,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
+	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
@@ -473,6 +474,15 @@ func cmdServe(args []string) error {
 
 	scraper := scrape.NewHandler(st, cached, log)
 	pool.Register(scraper)
+
+	// 只读媒体库的叠加层：库目录一个字节不写，刮削产物（元数据快照 + 图片）
+	// 落在这里（数据目录下、每库一块，不参与图片缓存淘汰）。
+	ovSvc, err := overlay.NewService(cfg.OverlayDir(), st)
+	if err != nil {
+		return err
+	}
+	scraper.SetOverlay(ovSvc)
+	log.Info("只读库叠加层就绪", "dir", ovSvc.Root())
 	if !settingsSvc.Configured() {
 		log.Warn("尚未配置 TMDB 凭据：元数据刮削、图片回源与人工匹配暂不可用（可在设置页里填，或写进 config.toml）")
 	} else {
@@ -486,6 +496,8 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	// 只读库：回源到的图片另存一份进叠加层（可写库不动）
+	imgSvc.SetOverlay(ovSvc)
 	log.Info("图片管线就绪", "cacheDir", cfg.ImagesCacheDir(), "maxCacheMB", cfg.Images.MaxCacheMB)
 
 	// 转封装（播放）会话：每次播放一个子目录，空闲自动回收。
@@ -530,6 +542,7 @@ func cmdServe(args []string) error {
 	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
 	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore, cipher)
+	srv.SetOverlay(ovSvc)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {

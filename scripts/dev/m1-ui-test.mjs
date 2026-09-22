@@ -163,8 +163,12 @@ async function main() {
   await evaluate(clickSel('.center-card button[type="submit"]'));
   check('登录成功进入首页', await waitFor('首页', async () => (await evaluate('location.pathname')) === '/'));
 
-  await evaluate(clickSel('.nav a[href="/libraries"]'));
-  check('进入媒体库页', await waitFor('媒体库页', async () => (await evaluate('location.pathname')) === '/libraries'));
+  // 库管理现在是设置的子页签（M6 收尾把三个导航项收进设置）
+  await evaluate(clickSel('.nav a[href="/settings"]'));
+  await waitFor('管理面页签', async () =>
+    (await evaluate(`!!document.querySelector('[data-settings-tabs] a[href="/settings/libraries"]')`)) === true);
+  await evaluate(clickSel('[data-settings-tabs] a[href="/settings/libraries"]'));
+  check('进入库管理页', await waitFor('库管理页', async () => (await evaluate('location.pathname')) === '/settings/libraries'));
   check(
     '渲染出媒体库卡片',
     await waitFor('卡片', async () => (await evaluate(content)).includes('验证库')),

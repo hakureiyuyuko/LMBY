@@ -42,7 +42,7 @@ func (h *Handler) ApplyCandidate(ctx context.Context, item *store.Item, provider
 	}
 
 	meta := itemMeta(item, d)
-	if err := h.st.ApplyItemMeta(ctx, item.ID, meta); err != nil {
+	if err := h.applyMeta(ctx, item.ID, meta); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return fmt.Errorf("库里已有同名同年条目（《%s》），改名会撞唯一索引 —— "+
 				"可能是同一个作品被扫成了两个条目", meta.Title)

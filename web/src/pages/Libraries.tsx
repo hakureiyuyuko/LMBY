@@ -22,6 +22,7 @@ export function Libraries() {
   const [libraries, setLibraries] = useState<LibrarySummary[] | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState<Record<number, ScanProgress>>({});
 
   const load = useCallback(async () => {
@@ -82,6 +83,30 @@ export function Libraries() {
     }
   }
 
+  /**
+   * 切换「只读」（网盘 / 只读挂载）。
+   *
+   * 打开后：LMBY 一个字节也不往库目录里写，刮削到的元数据快照与图片落进
+   * 数据目录的 overlay 层（每库一块，不参与图片缓存淘汰）。
+   */
+  async function toggleReadOnly(lib: LibrarySummary) {
+    const next = !lib.readonly;
+    try {
+      await api.updateLibrary(lib.id, { readonly: next });
+      setError('');
+      setNotice(
+        next
+          ? t('已把「{name}」设为只读：刮削产物写进数据目录的 overlay 层，不写媒体目录。', {
+              name: lib.name,
+            })
+          : t('已把「{name}」改为可写。', { name: lib.name }),
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t('切换只读失败'));
+    }
+  }
+
   async function remove(id: number, name: string) {
     if (
       !window.confirm(
@@ -109,6 +134,7 @@ export function Libraries() {
           {t('扫描只读取文件系统与本地 nfo，不会修改你的文件；图片只登记路径，不入库。')}
         </p>
         {error && <div className="alert alert-error">{error}</div>}
+        {notice && <div className="alert alert-ok">{notice}</div>}
         {!libraries && <p className="muted">{t('正在读取…')}</p>}
         {libraries && libraries.length === 0 && (
           <p className="muted">{t('还没有媒体库。用上面的表单添加一个根路径即可。')}</p>
@@ -142,10 +168,20 @@ export function Libraries() {
                   </span>
                 ))}
                 <span className="badge">{t('图片 {n}', { n: lib.imageCount })}</span>
+                {/* 只读（网盘 / 只读挂载）：刮削产物进数据目录的 overlay 层 */}
+                {lib.readonly && <span className="badge">{t('只读')}</span>}
                 <div className="spacer" />
                 <Link className="btn btn-sm" to={`/library/${lib.id}`}>
                   {t('海报墙')}
                 </Link>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  title={t('网盘 / 只读挂载的库打开它：LMBY 不再写媒体目录，刮削产物落进数据目录的 overlay 层')}
+                  onClick={() => void toggleReadOnly(lib)}
+                >
+                  {lib.readonly ? t('改为可写') : t('设为只读')}
+                </button>
                 {running ? (
                   <button type="button" className="btn btn-sm" onClick={() => void cancelScan(lib.id)}>
                     {t('取消扫描')}
@@ -339,6 +375,15 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
         <h2>
           {detail.library.name} · {t('扫描记录')}
         </h2>
+        {detail.library.readonly && (
+          <div className="alert">
+            {t('这个库是只读的：LMBY 不会往它的目录里写任何东西。刮削到的元数据快照与图片写在数据目录的 overlay 层（每库一块、不参与图片缓存淘汰），当前 {files} 个文件 / {size}。',
+              {
+                files: detail.overlay?.files ?? 0,
+                size: sizeText(detail.overlay?.bytes ?? 0),
+              })}
+          </div>
+        )}
         {lastScan ? (
           <dl className="kv">
             <dt>{t('状态')}</dt>
@@ -604,7 +649,7 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
           {t('刷新')}
         </button>
         <div className="spacer" />
-        <Link className="btn btn-sm" to="/match">
+        <Link className="btn btn-sm" to="/settings/match">
           {t('去人工匹配')}
         </Link>
       </div>
@@ -783,4 +828,13 @@ function techSummary(it: Item): string {
 function shorten(p: string, max = 72): string {
   if (p.length <= max) return p;
   return '…' + p.slice(p.length - max + 1);
+}
+
+/** 字节数 → 「1.2 MB」这种人话（叠加层占用显示用）。 */
+function sizeText(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }

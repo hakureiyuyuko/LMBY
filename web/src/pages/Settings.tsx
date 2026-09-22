@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
+import { NavLink, Outlet } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { t, useI18n } from '../i18n';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
- * 设置页（管理员）。
+ * 设置页（管理员）—— 也是管理面的壳：库管理 / 人工匹配 / 会话监控都是它的子页签。
  *
- * 目前只有一件能改的事：TMDB 凭据。以前改它必须编辑 config.toml 再重启，
- * 现在在这里填完保存就生效（下一次刮削/图片回源就用新凭据）。
+ * 为什么收进来：这三件事都是「管理员偶尔进来调一下」的，占着顶栏等于把普通用户
+ * 永远用不到的入口排在最显眼处；而它们彼此之间又常要来回跳
+ * （库里发现匹配不对 → 去人工匹配 → 回来重扫）。
  *
  * 两条规矩写在界面上：
  *   - **密钥永远不回显**：只显示「已设置 / 未设置」，要换就输入新的；
@@ -28,6 +30,62 @@ function formatUptime(sec: number): string {
 }
 
 export function Settings() {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
+
+  if (!isAdmin) return <NotAdmin />;
+
+  return (
+    <>
+      {/* 管理面页签：库管理 / 人工匹配 / 会话监控都收在这里（顶栏只留一个「设置」） */}
+      <div className="card">
+        <h2>{t('设置')}</h2>
+        <nav className="tabs" data-settings-tabs>
+          <NavLink to="/settings" end className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
+            {t('元数据与服务状态')}
+          </NavLink>
+          <NavLink
+            to="/settings/libraries"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('库管理')}
+          </NavLink>
+          <NavLink
+            to="/settings/match"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('人工匹配')}
+          </NavLink>
+          <NavLink
+            to="/settings/sessions"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('会话')}
+          </NavLink>
+        </nav>
+      </div>
+
+      <Outlet />
+    </>
+  );
+}
+
+/** 非管理员看到的那一页（接口也会拦，这里只是不让人困惑）。 */
+function NotAdmin() {
+  const { t } = useI18n();
+  return (
+    <div className="card">
+      <h2>{t('设置')}</h2>
+      <p className="hint">
+        {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
+      </p>
+    </div>
+  );
+}
+
+/** 设置首页（`/settings`）：TMDB 凭据 + 服务状态 + 系统信息。 */
+export function SettingsOverview() {
   const { t } = useI18n();
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
@@ -129,16 +187,7 @@ export function Settings() {
     }
   }
 
-  if (!isAdmin) {
-    return (
-      <div className="card">
-        <h2>{t('设置')}</h2>
-        <p className="hint">
-          {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
-        </p>
-      </div>
-    );
-  }
+  if (!isAdmin) return <NotAdmin />;
 
   const tmdb = data?.tmdb;
   const system = data?.system;

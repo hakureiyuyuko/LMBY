@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings } from './pages/Settings';
+import { Settings, SettingsOverview } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
 
@@ -87,7 +87,6 @@ function AppRoutes() {
 
       <Route element={authed ? <Layout /> : <Navigate to={anonymousHome} replace />}>
         <Route index element={<Home />} />
-        <Route path="/libraries" element={<Libraries />} />
         <Route path="/lists" element={<Lists />} />
         <Route path="/list/:id" element={<ListDetail />} />
         {/* 直播电视（M5）：频道列表 + 就地播放 + 管理员看的源/探测面板 */}
@@ -98,13 +97,21 @@ function AppRoutes() {
         {/* 条目详情（M6）：电影/剧集/季/集都在这一页；旧的剧集地址重定向过来 */}
         <Route path="/item/:id" element={<Detail />} />
         <Route path="/series/:id" element={<SeriesRedirect />} />
-        <Route path="/settings" element={<Settings />} />
+        {/* 设置：库管理 / 人工匹配 / 会话监控都是它的子页签（M6 收尾把三个导航项收进来） */}
+        <Route path="/settings" element={<Settings />}>
+          <Route index element={<SettingsOverview />} />
+          <Route path="libraries" element={<Libraries />} />
+          <Route path="match" element={<Match />} />
+          <Route path="sessions" element={<Sessions />} />
+        </Route>
+        {/* 旧地址重定向：老书签、浏览器历史、别人分享过的链接都还指向它们 */}
+        <Route path="/libraries" element={<Navigate to="/settings/libraries" replace />} />
+        <Route path="/match" element={<Navigate to="/settings/match" replace />} />
+        <Route path="/sessions" element={<Navigate to="/settings/sessions" replace />} />
         <Route path="/search" element={<Search />} />
         <Route path="/items/:id" element={<ItemEdit />} />
         {/* 播放器独立成页（全屏播放）*/}
         <Route path="/play/:id" element={<Player />} />
-        <Route path="/match" element={<Match />} />
-        <Route path="/sessions" element={<Sessions />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<NotFound />} />
       </Route>

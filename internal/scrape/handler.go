@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/match"
+	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/store"
 	"github.com/hakureiyuyuko/lmby/internal/worker"
@@ -96,6 +97,9 @@ type Handler struct {
 	scorer match.Scorer
 	log    *slog.Logger
 	topN   int
+	// overlay 是只读媒体库的写入层：刮削结果落库后，再写一份元数据快照
+	// 到该库的叠加层（媒体目录一个字节也不碰）。可为 nil。
+	overlay *overlay.Service
 }
 
 // NewHandler 构造刮削处理器。client 为 nil 时任务会明确报错（而不是静默跳过）。
@@ -107,6 +111,72 @@ func NewHandler(st Store, client provider.Client, log *slog.Logger) *Handler {
 		log:    log,
 		topN:   5,
 	}
+}
+
+// SetOverlay 接入只读库的叠加层。
+func (h *Handler) SetOverlay(o *overlay.Service) { h.overlay = o }
+
+// overlaySnapshot 是写进叠加层的元数据快照（字段名与 API 的 camelCase 一致）。
+//
+// 它只对只读库写：那种库上的刮削成果只存在数据库里，用户想「把这个库的元数据
+// 拿去备份 / 搬到别处」时没有落点；写成 JSON 之后，叠加层就是这个库的成果包。
+type overlaySnapshot struct {
+	ItemID         int64             `json:"itemId"`
+	Title          string            `json:"title,omitempty"`
+	SortTitle      string            `json:"sortTitle,omitempty"`
+	OriginalTitle  string            `json:"originalTitle,omitempty"`
+	Year           *int32            `json:"year,omitempty"`
+	PremiereDate   *time.Time        `json:"premiereDate,omitempty"`
+	Overview       string            `json:"overview,omitempty"`
+	Tagline        string            `json:"tagline,omitempty"`
+	Rating         *float64          `json:"communityRating,omitempty"`
+	OfficialRating string            `json:"officialRating,omitempty"`
+	Genres         []string          `json:"genres,omitempty"`
+	Tags           []string          `json:"tags,omitempty"`
+	Studios        []string          `json:"studios,omitempty"`
+	ProviderIDs    map[string]string `json:"providerIds,omitempty"`
+	MetadataSource string            `json:"metadataSource,omitempty"`
+	MatchState     string            `json:"matchState,omitempty"`
+	ScrapedAt      time.Time         `json:"scrapedAt"`
+}
+
+// applyMeta 落库 +（只读库）把这次刮削到的值写成一份叠加层快照。
+//
+// 落库失败照旧原样返回（调用方要区分 ErrAlreadyExists 这种业务结论）；
+// 写快照失败只记警告：叠加层是「收获」，不该反过来把刮削判成失败。
+func (h *Handler) applyMeta(ctx context.Context, itemID int64, m store.ItemMeta) error {
+	if err := h.st.ApplyItemMeta(ctx, itemID, m); err != nil {
+		return err
+	}
+	if h.overlay == nil {
+		return nil
+	}
+	snap := overlaySnapshot{
+		ItemID:         itemID,
+		Title:          m.Title,
+		SortTitle:      m.SortTitle,
+		OriginalTitle:  m.OriginalTitle,
+		Year:           m.Year,
+		PremiereDate:   m.PremiereDate,
+		Overview:       m.Overview,
+		Tagline:        m.Tagline,
+		Rating:         m.Rating,
+		OfficialRating: m.OfficialRating,
+		Genres:         m.Genres,
+		Tags:           m.Tags,
+		Studios:        m.Studios,
+		ProviderIDs:    m.ProviderIDs,
+		MetadataSource: m.MetadataSource,
+		MatchState:     m.MatchState,
+		ScrapedAt:      time.Now().UTC(),
+	}
+	if p, err := h.overlay.WriteItemMeta(ctx, itemID, snap); err != nil {
+		h.log.Warn("只读库：写叠加层元数据快照失败（不影响刮削结果）",
+			"itemId", itemID, "err", err.Error())
+	} else if p != "" {
+		h.log.Info("只读库：元数据快照已进叠加层", "itemId", itemID, "path", p)
+	}
+	return nil
 }
 
 // Kind 实现 worker.Handler。
@@ -226,7 +296,7 @@ func (h *Handler) Handle(ctx context.Context, t store.Task) error {
 			return fmt.Errorf("取候选 %d（%s）的详情失败，稍后重试", top.CandidateID, top.Title)
 		}
 		meta := itemMeta(it, d)
-		if err := h.st.ApplyItemMeta(ctx, it.ID, meta); err != nil {
+		if err := h.applyMeta(ctx, it.ID, meta); err != nil {
 			// 同一个作品被扫成了两个条目时，刮削改名会撞上唯一索引：
 			// 这是「需要人工确认是否重复」的业务结论，不是可以重试的环境问题
 			// （否则只会拿同一条 SQL 重试到上限）。
@@ -462,7 +532,7 @@ func (h *Handler) scrapeSeason(ctx context.Context, it *store.Item) error {
 		return err
 	}
 
-	if err := h.st.ApplyItemMeta(ctx, it.ID, seasonMeta(det)); err != nil {
+	if err := h.applyMeta(ctx, it.ID, seasonMeta(det)); err != nil {
 		return err
 	}
 	h.log.Info("已刮削季",
@@ -510,7 +580,7 @@ func (h *Handler) scrapeEpisode(ctx context.Context, it *store.Item) error {
 		return err
 	}
 
-	if err := h.st.ApplyItemMeta(ctx, it.ID, episodeMeta(det)); err != nil {
+	if err := h.applyMeta(ctx, it.ID, episodeMeta(det)); err != nil {
 		return err
 	}
 	h.log.Info("已刮削集",

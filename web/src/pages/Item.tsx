@@ -307,7 +307,7 @@ export function ItemEdit() {
               <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>
                 {t('返回')}
               </button>
-              <Link className="btn btn-ghost" to="/match">
+              <Link className="btn btn-ghost" to="/settings/match">
                 {t('人工匹配')}
               </Link>
             </div>

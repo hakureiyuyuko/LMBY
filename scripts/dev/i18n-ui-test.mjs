@@ -278,11 +278,16 @@ async function main() {
     true,
     rowTitles.length > 0,
   );
-  check(
-    '行副标题也是英文（推荐依据那一条）',
-    false,
-    /因为|根据|进度按|你收藏过/.test(homeText),
+  // 失败时要能看出是哪一段中文没翻（只报 true/false 得再猜一轮）
+  //
+  // ⚠️ 只查**行头**（标题 + 副标题），不查整页文本：卡片里混着中文**数据**
+  //（条目简介、标题、流派），拿整页文本断言中文必然假失败（真踩到过）。
+  const rowHeads = await evaluate(
+    `[...document.querySelectorAll('.row-block .row-head')].map((h) => h.textContent).join(' | ')`,
   );
+  const zhReason = (rowHeads.match(/.{0,30}(?:因为|根据|进度按|你收藏过).{0,30}/) || [])[0];
+  if (zhReason) log(`   行头里剩下的中文：…${zhReason.replace(/\s+/g, ' ')}…`);
+  check('行副标题也是英文（推荐依据那一条）', false, Boolean(zhReason));
   await shot('01-home-en');
 
   log('\n== 4. 搜索页与海报墙 ==');

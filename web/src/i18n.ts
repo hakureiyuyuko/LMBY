@@ -284,6 +284,17 @@ const en: Record<string, string> = {
   '{kind} · {n} 个条目': '{kind} · {n} items',
 
   // ---------------------------------------------------------------- 库管理（Libraries）
+  '只读': 'Read-only',
+  '设为只读': 'Make read-only',
+  '改为可写': 'Make writable',
+  '切换只读失败': 'Failed to toggle read-only',
+  '网盘 / 只读挂载的库打开它：LMBY 不再写媒体目录，刮削产物落进数据目录的 overlay 层':
+    'Turn this on for network drives / read-only mounts: LMBY stops writing into the media folders and keeps scraped artifacts in an overlay under the data directory',
+  '已把「{name}」设为只读：刮削产物写进数据目录的 overlay 层，不写媒体目录。':
+    '“{name}” is now read-only: scraped artifacts go into the overlay under the data directory, never into the media folders.',
+  '已把「{name}」改为可写。': '“{name}” is writable again.',
+  '这个库是只读的：LMBY 不会往它的目录里写任何东西。刮削到的元数据快照与图片写在数据目录的 overlay 层（每库一块、不参与图片缓存淘汰），当前 {files} 个文件 / {size}。':
+    'This library is read-only: LMBY never writes inside its folders. Scraped metadata snapshots and images go into an overlay under the data directory (one tree per library, not subject to image-cache eviction) — currently {files} files / {size}.',
   '家庭视频': 'Home videos',
   '混合（推荐）': 'Mixed (recommended)',
   '添加媒体库': 'Add a library',
@@ -582,6 +593,7 @@ const en: Record<string, string> = {
   '刷新进度': 'Refresh progress',
 
   // ---------------------------------------------------------------- 设置页（Settings）
+  '元数据与服务状态': 'Metadata & status',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',

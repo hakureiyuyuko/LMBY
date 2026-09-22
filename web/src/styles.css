@@ -488,6 +488,9 @@ th {
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  /* 页签也可能渲染成 <a>（设置页的管理面页签），把链接样式压掉 */
+  text-decoration: none;
+  display: inline-block;
 }
 
 .tab.active {

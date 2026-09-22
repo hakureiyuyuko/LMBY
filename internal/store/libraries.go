@@ -19,6 +19,12 @@ type Library struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 
+	// ReadOnly：这个库的根路径**不允许写**（网盘挂载 / 只读挂载）。
+	// 打开后 LMBY 一个字节也不往库目录里写：刮削到的元数据与图片落进
+	// 数据目录的 overlay 层（每个库一块，不参与缓存淘汰），
+	// 将来启用「写回媒体目录」时也会先看这个开关。
+	ReadOnly bool `json:"readonly"`
+
 	Paths []LibraryPath `json:"paths,omitempty"`
 }
 
@@ -40,11 +46,11 @@ func ValidLibraryKind(k string) bool {
 	return false
 }
 
-const libraryColumns = `id, name, kind, options, created_at, updated_at`
+const libraryColumns = `id, name, kind, options, created_at, updated_at, readonly`
 
 func scanLibrary(row pgx.Row) (*Library, error) {
 	var l Library
-	err := row.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt)
+	err := row.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt, &l.ReadOnly)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -121,7 +127,7 @@ func (s *Store) ListLibraries(ctx context.Context) ([]Library, error) {
 	var out []Library
 	for rows.Next() {
 		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt, &l.ReadOnly); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -172,6 +178,72 @@ func (s *Store) UpdateLibrary(ctx context.Context, id int64, name string) error 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetLibraryReadOnly 开关媒体库的「只读」模式。
+//
+// 同时把 library_paths.readonly 一起改掉：表上那一列是「根路径级」的事实，
+// 而开关是库级的 —— 两者不同步的话，以后按路径判断写入权限的人会拿到错的答案。
+// 整个动作在一个事务里，没有中间态。
+func (s *Store) SetLibraryReadOnly(ctx context.Context, id int64, readOnly bool) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("开启事务失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	tag, err := tx.Exec(ctx,
+		`update libraries set readonly = $2, updated_at = now() where id = $1`, id, readOnly)
+	if err != nil {
+		return fmt.Errorf("更新只读开关失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx,
+		`update library_paths set readonly = $2 where library_id = $1`, id, readOnly); err != nil {
+		return fmt.Errorf("同步根路径只读标记失败: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// LibraryReadOnly 返回某个库是否处于只读模式。
+func (s *Store) LibraryReadOnly(ctx context.Context, libraryID int64) (bool, error) {
+	var ro bool
+	err := s.pool.QueryRow(ctx, `select readonly from libraries where id = $1`, libraryID).Scan(&ro)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("读取只读开关失败: %w", err)
+	}
+	return ro, nil
+}
+
+// ReadOnlyRoots 返回全部「只读」库的根路径。
+//
+// 用途只有一个：**写入前的最后一道闸** —— 任何要落到媒体目录里的写操作
+// 都得先拿目标路径问一遍（见 internal/overlay 的 AssertWritable）。
+func (s *Store) ReadOnlyRoots(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`select p.path from library_paths p
+		 join libraries l on l.id = p.library_id
+		 where p.readonly or l.readonly
+		 order by p.path`)
+	if err != nil {
+		return nil, fmt.Errorf("查询只读根路径失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // DeleteLibrary 删除媒体库（条目与文件靠外键级联清理）。
