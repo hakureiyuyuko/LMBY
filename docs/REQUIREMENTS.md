@@ -192,7 +192,8 @@ media_items(id,library_id,type,parent_id,series_id,season,episode,title,sort_tit
 media_files(id,item_id,path UNIQUE,size,mtime_ns,container,duration_ticks,
   video_streams jsonb,audio_streams jsonb,subtitle_streams jsonb,chapters jsonb,hdr jsonb,
   probed_at,probe_err)
-people(id,name,provider_ids), item_people(item_id,person_id,role,character,order)
+people(id, name, provider_ids jsonb, dedupe_key UNIQUE, created_at, updated_at)
+item_people(item_id, person_id, role, character, sort_order, PRIMARY KEY(item_id, person_id, role))
 images(id,item_id,kind,path,source,width,height,hash,lang)      -- 只有路径，无二进制
 play_states(user_id,item_id,position_ticks,played,played_at,play_count)
 provider_cache(key PK,url,response jsonb,etag,fetched_at,ttl)
@@ -212,8 +213,14 @@ collections, collection_items, playlists, playlist_items
 settings(key,value jsonb)   -- 含加密存储的 TMDB Key
 ```
 
-库内凭据的实现（M2 已落地，见 `docs/ROADMAP.md` 验收记录）：
+演职员（M6 落地，迁移 `0010_people.sql`）：`people` 按 `dedupe_key` 去重
+（有 tmdb/imdb/tvdb 就用外部 id；都没有才退化成「去空白 + 小写」的名字），
+`item_people` 存「在这条里演什么」—— 同一人在多集里只占一行 people。
+**数据来源目前只有 nfo**（`<actor>` / `<director>` / `<credits>`）：本地优先、不联网；
+TMDB 的 credits 还没接，所以没有 nfo 的条目这一块是空的（界面上如实写明，不让用户以为坏了）。
+这半件事其实是 M1 的遗留：nfo 解析器从那时起就在读 `<actor>`，但解析结果一直没落库。
 
+库内凭据的实现（M2 已落地，见 `docs/ROADMAP.md` 验收记录）：
 - 凭据存在 `settings` 的 `tmdb.credentials` 里，两个密钥字段是 `enc:v1:` 开头的密文
   （`internal/secrets`，AES-256-GCM，密钥是数据目录里 0600 的 `secret.key`）；
   没带前缀的值按明文读（兼容手工写进库的老数据）
