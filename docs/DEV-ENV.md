@@ -118,12 +118,45 @@ ssh root@<LMBY_DEV_IP> '
 >    远端落盘还剩一点尾巴。要么把「上传 + 校验」放在同一次会话里，要么中间
 >    `Start-Sleep -Seconds 2`。（本次出现过「md5 不一致 → 隔几秒再比就一致」的假警报。）
 
-## 容器内编译与验收（本机没装 Go）
+## 容器内编译与验收（本机也可以先跑一遍）
 
-所有编译、vet、单测都在容器里跑，不要在本机折腾工具链：
+**最终校验一律在容器里做**（那里才有与 CI 同版本的全套工具、ffmpeg、数据库、媒体库）。
+但在本机装一份**便携工具链**能把「改一行 → 等两分钟容器往返」变成十几秒的
+`gofmt` / `go vet` / `golangci-lint` 自检，提交前再走一次容器（本机与 CI 的差异主要是 cgo 与
+平台相关的单测）。
+
+### 本机的便携工具链（Linux 开发机）
+
+```bash
+# Go：官方压缩包解到 ~/.local/go（不入系统目录，不需要 root）
+curl -L -o /tmp/go.tgz https://go.dev/dl/go1.27.1.linux-amd64.tar.gz   # 版本跟容器对齐
+tar -C ~/.local -xzf /tmp/go.tgz
+export PATH="$HOME/.local/go/bin:$PATH"
+
+# golangci-lint：与容器/CI 同版本（版本不一致会报出对方没有的问题，白忙）
+curl -L -o /tmp/gcl.tar.gz https://github.com/golangci/golangci-lint/releases/download/v2.13.2/golangci-lint-2.13.2-linux-amd64.tar.gz
+tar -C ~/.local -xzf /tmp/gcl.tar.gz
+ln -sf ~/.local/golangci-lint-2.13.2-linux-amd64/golangci-lint ~/.local/bin/golangci-lint
+```
+
+日常自检（十几秒）：
+
+```bash
+export PATH="$HOME/.local/go/bin:$HOME/.local/bin:$PATH" CGO_ENABLED=0
+gofmt -l <本次改动的文件>        # ⚠️ 别对目录跑 gofmt -w：它会顺手改你没碰过的文件
+go build ./... && go vet ./...
+golangci-lint run internal/store/... internal/api/...
+```
+
+> 前端在**任何**编译/打包之前都必须先真实构建：`cd web && npm run build`，
+> 然后 `bash scripts/dev/check-web-built.sh` 断言（入库的 `web/dist/index.html` 是占位页，
+> `go build` 会把它嵌进二进制 —— 服务端就会一直发「前端未构建」）。
+> 界面验收脚本默认按平台找 Chrome，也可以显式 `CHROME=/usr/bin/google-chrome`。
+
+### 容器里（旧流程，仍可用）
 
 ```powershell
-# Windows 侧：打包（注意排除 .git 与 web/node_modules）
+# Windows 侧：打包（注意排除 .git 与 web/node_modules，且必须在仓库根目录）
 tar czf $env:TEMP\lmby-src.tgz --exclude=./.git --exclude=./web/node_modules -C . .
 
 node ssh.mjs put $env:TEMP\lmby-src.tgz /root/lmby-src.tgz
@@ -131,6 +164,9 @@ node ssh.mjs put scripts/dev/container-verify.sh /root/cv.sh
 Start-Sleep -Seconds 2
 node ssh.mjs exec "tr -d '\r' < /root/cv.sh > /tmp/cv.sh && bash /tmp/cv.sh"
 ```
+
+（Linux 开发机上直接用 `scp` + `ssh` 即可，不需要 `ssh.mjs`：
+`scp /tmp/lmby-src.tgz 主机:/root/` → `ssh 主机 'bash /root/run-cv.sh <md5>'`。）
 
 `scripts/dev/container-verify.sh` 一次做完：解包 → 校验新代码标记 → gofmt → `go build`（产物
 `/tmp/lmby.new`）→ `go vet` → `go test`。gofmt 真的改过的文件会复制到 `/root/fmt-pull/`，

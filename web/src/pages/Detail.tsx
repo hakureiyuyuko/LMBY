@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { roleLabel } from '../people';
 import type {
   ChildSummary,
   Item,
@@ -33,15 +34,6 @@ const stateLabels: Record<string, string> = {
   failed: '没找到',
 };
 
-const roleLabels: Record<string, string> = {
-  actor: '演员',
-  director: '导演',
-  writer: '编剧',
-  producer: '制片',
-  composer: '作曲',
-  gueststar: '客串',
-};
-
 /** 把 ticks（100ns）换成「1 小时 23 分」。 */
 function runtimeText(ticks?: number): string {
   if (!ticks || ticks <= 0) return '';
@@ -65,10 +57,6 @@ function sizeText(bytes?: number): string {
   if (!bytes || bytes <= 0) return '';
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   return `${Math.round(bytes / 1024 ** 2)} MB`;
-}
-
-function roleLabel(role: string): string {
-  return roleLabels[role.toLowerCase()] ?? role;
 }
 
 export function Detail() {

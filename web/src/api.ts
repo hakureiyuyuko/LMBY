@@ -274,19 +274,62 @@ export const api = {
     ),
 
   // ---------------------------------------------------------------- 搜索
+  /**
+   * 搜索条目。q 可以为空，但那时**必须**至少给一个筛选条件（库/类型/流派/人），
+   * 否则后端回 400 —— 空词返回全部是库列表接口的活。
+   */
   search: (params: {
-    q: string;
+    q?: string;
     libraryId?: number;
     kind?: string;
+    genre?: string;
+    personId?: number;
     limit?: number;
     offset?: number;
   }) => {
-    const sp = new URLSearchParams({ q: params.q });
+    const sp = new URLSearchParams({ q: params.q ?? '' });
     if (params.libraryId) sp.set('libraryId', String(params.libraryId));
     if (params.kind) sp.set('kind', params.kind);
+    if (params.genre) sp.set('genre', params.genre);
+    if (params.personId) sp.set('personId', String(params.personId));
     if (params.limit) sp.set('limit', String(params.limit));
     if (params.offset) sp.set('offset', String(params.offset));
     return request<SearchPage>(`/api/v1/search?${sp.toString()}`);
+  },
+
+  /**
+   * 结果分面（类型 / 媒体库 / 流派 / 人 的命中数）。
+   *
+   * 筛选参数与 search 必须**完全一致**，否则分面的数字与结果对不上。
+   */
+  searchFacets: (params: {
+    q?: string;
+    libraryId?: number;
+    kind?: string;
+    genre?: string;
+    personId?: number;
+  }) => {
+    const sp = new URLSearchParams({ q: params.q ?? '' });
+    if (params.libraryId) sp.set('libraryId', String(params.libraryId));
+    if (params.kind) sp.set('kind', params.kind);
+    if (params.genre) sp.set('genre', params.genre);
+    if (params.personId) sp.set('personId', String(params.personId));
+    return request<SearchFacetsPage>(`/api/v1/search/facets?${sp.toString()}`);
+  },
+
+  /** 「人」这一档的结果列表（只认 q，人没有库与流派归属）。 */
+  searchPeople: (params: { q: string; limit?: number; offset?: number }) => {
+    const sp = new URLSearchParams({ q: params.q });
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    return request<SearchPeoplePage>(`/api/v1/search/people?${sp.toString()}`);
+  },
+
+  /** 即时联想（作品 + 人）。前缀匹配 / 错字容忍与搜索结果同一套规则。 */
+  searchSuggest: (params: { q: string; limit?: number }) => {
+    const sp = new URLSearchParams({ q: params.q });
+    if (params.limit) sp.set('limit', String(params.limit));
+    return request<SearchSuggestPage>(`/api/v1/search/suggest?${sp.toString()}`);
   },
 
   // ---------------------------------------------------------------- 直播电视（M5）
@@ -622,12 +665,83 @@ export interface SearchHit extends Item {
   similarity: number;
 }
 
+/** 生效的筛选条件（后端回显，界面用它画「已筛选」标签）。 */
+export interface SearchFilters {
+  kind: string;
+  genre: string;
+  libraryId: number | null;
+  personId: number | null;
+}
+
 export interface SearchPage {
   query: string;
+  filters: SearchFilters;
   items: SearchHit[];
   total: number;
   limit: number;
   offset: number;
+}
+
+/** 一个分面取值与命中数（媒体库分面的 value 是库 id 的字符串）。 */
+export interface SearchFacet {
+  value: string;
+  count: number;
+}
+
+/**
+ * 结果分面。
+ *
+ * 两个可以用来自检的不变量：sum(kind) == total、sum(library) == total
+ * （每个条目恰好一个类型、一个库）；sum(genre) >= total（一条可以有多个流派）。
+ */
+export interface SearchFacets {
+  kind: SearchFacet[];
+  library: SearchFacet[];
+  genre: SearchFacet[];
+  people: number;
+  total: number;
+}
+
+export interface SearchFacetsPage {
+  query: string;
+  filters: SearchFilters;
+  facets: SearchFacets;
+}
+
+/** 「人」这一档的一条命中。 */
+export interface PersonHit {
+  id: number;
+  name: string;
+  roles: string[];
+  /** 参演作品数：集数已折进所属剧集。 */
+  works: number;
+  rank: number;
+  similarity: number;
+}
+
+export interface SearchPeoplePage {
+  query: string;
+  people: PersonHit[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** 联想下拉里的一项（作品或人）。 */
+export interface Suggestion {
+  type: 'item' | 'person';
+  id: number;
+  title: string;
+  kind?: string;
+  year?: number;
+  works?: number;
+  roles?: string[];
+}
+
+export interface SearchSuggestPage {
+  query: string;
+  items: Suggestion[];
+  people: Suggestion[];
 }
 
 /** 后端返回的完整条目（GET /api/v1/items/{id} 里的 item）。 */

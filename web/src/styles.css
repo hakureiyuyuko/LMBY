@@ -1488,3 +1488,209 @@ th {
     width: 140px;
   }
 }
+
+/* ---------------------------------------------------------------- 搜索（M6） */
+/* 即时联想下拉 + 结果分面。分面是「一排可点的带数字的胶囊」：
+ * 点的当前生效项高亮，数字就是命中数（点之前就能知道会有几条）。 */
+
+.search-box {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.search-box .search-input {
+  width: 100%;
+  flex: none;
+}
+
+.suggest-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+
+.suggest-group {
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.suggest-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggest-item.active {
+  background: var(--bg-elev-2);
+}
+
+.suggest-thumb {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 38px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
+}
+
+.suggest-avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin: 0 0 0 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev-2);
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.suggest-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.suggest-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-more {
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  color: var(--accent);
+  margin-top: 4px;
+}
+
+.facet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.facet-label {
+  flex: 0 0 52px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+}
+
+.chip-on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.chip-static {
+  cursor: default;
+}
+
+.chip-person {
+  border-color: var(--accent);
+}
+
+.chip-count {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+.chip-on .chip-count {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.chip-x {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+  cursor: pointer;
+}
+
+/* 「人」那一档的列表：首字头像 + 名字/角色 + 看作品 */
+.people-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px 16px;
+}
+
+.people-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.people-avatar {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev-2);
+  color: var(--fg-muted);
+}
+
+.people-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.people-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
