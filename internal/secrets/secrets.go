@@ -16,7 +16,9 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -36,6 +38,10 @@ const keySize = 32
 // Cipher 是加解密器。
 type Cipher struct {
 	aead cipher.AEAD
+	// macKey 是从主密钥**派生**出来的 HMAC 密钥（见 Sign）。
+	// 与加密密钥分开派生：签名只要求抗伪造，不该把加密密钥直接暴露在
+	// 「会算很多次、还可能被侧信道观测」的 HMAC 里。
+	macKey []byte
 	// path 是密钥文件位置，只用于报错信息。
 	path string
 }
@@ -59,7 +65,24 @@ func LoadOrCreate(path string) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("初始化加密器失败: %w", err)
 	}
-	return &Cipher{aead: aead, path: path}, nil
+	// 派生签名密钥（领域字符串固定，改它等于让已发出的签名全部失效）
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("lmby/mac-key/v1"))
+	return &Cipher{aead: aead, macKey: mac.Sum(nil), path: path}, nil
+}
+
+// Sign 用主密钥派生出的 HMAC 密钥对消息签名（HMAC-SHA256）。
+//
+// domain 用来**隔离用途**：不同用途用不同 domain，签名值就不同，
+// 避免一处的 token 拿到另一处去冒充（例如外链播放 token 与以后的下载 token）。
+//
+// 典型用途是无状态凭据：服务端不存表，靠签名保证参数没被改过、且带过期时间。
+func (c *Cipher) Sign(domain string, msg []byte) []byte {
+	mac := hmac.New(sha256.New, c.macKey)
+	mac.Write([]byte(domain))
+	mac.Write([]byte{0})
+	mac.Write(msg)
+	return mac.Sum(nil)
 }
 
 // Path 返回密钥文件位置。

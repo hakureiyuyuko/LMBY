@@ -45,12 +45,17 @@ type Server struct {
 	encoders *encoder.Store
 	// liveFetch 拉取直播订阅源（M5）。
 	liveFetch *livetv.Fetcher
+	// liveSigner 给直播外链 token 签名（M5；实现是 secrets.Cipher）。
+	// 为空表示没装密钥（单测/无数据目录），此时外链接口回 503。
+	liveSigner livetv.Signer
+	// livePlays 是直播播放会话表（sid → 频道）。
+	livePlays *livePlayRegistry
 }
 
 // New 构造 Server。
 func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,
 	scraper *scrape.Handler, settingsSvc *settings.Service, meta provider.Client,
-	streams *stream.Manager, encoders *encoder.Store) *Server {
+	streams *stream.Manager, encoders *encoder.Store, signer livetv.Signer) *Server {
 	if streams == nil {
 		// 没有 ffmpeg 时也要有个非 nil 的管理器（各处的调用会给出明确的失败原因），
 		// 而不是让每个 handler 都要判一次 nil。
@@ -61,22 +66,24 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		encoders = encoder.NewStore(encoder.StoreOptions{FFmpeg: cfg.FFmpeg.Path, Log: log})
 	}
 	return &Server{
-		cfg:       cfg,
-		store:     st,
-		log:       log,
-		ffmpeg:    ff,
-		images:    img,
-		scraper:   scraper,
-		settings:  settingsSvc,
-		meta:      meta,
-		started:   time.Now(),
-		limiter:   newLoginLimiter(8, 15*time.Minute),
-		scans:     scan.NewManager(st, log),
-		streams:   streams,
-		plays:     newPlayRegistry(),
-		subs:      newSubtitleJobs(),
-		encoders:  encoders,
-		liveFetch: livetv.NewFetcher(),
+		cfg:        cfg,
+		store:      st,
+		log:        log,
+		ffmpeg:     ff,
+		images:     img,
+		scraper:    scraper,
+		settings:   settingsSvc,
+		meta:       meta,
+		started:    time.Now(),
+		limiter:    newLoginLimiter(8, 15*time.Minute),
+		scans:      scan.NewManager(st, log),
+		streams:    streams,
+		plays:      newPlayRegistry(),
+		subs:       newSubtitleJobs(),
+		encoders:   encoders,
+		liveFetch:  livetv.NewFetcher(),
+		liveSigner: signer,
+		livePlays:  newLivePlayRegistry(),
 	}
 }
 
@@ -206,6 +213,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PATCH /api/v1/livetv/sources/{id}", s.requireAdmin(s.handleUpdateTVSource))
 	mux.Handle("DELETE /api/v1/livetv/sources/{id}", s.requireAdmin(s.handleDeleteTVSource))
 	mux.Handle("POST /api/v1/livetv/sources/{id}/refresh", s.requireAdmin(s.handleRefreshTVSource))
+	// 直播播放（M5）：同一频道所有观众共用一路 ffmpeg。
+	mux.Handle("POST /api/v1/livetv/channels/{id}/play", s.requireAuth(s.handleStartLivePlay))
+	mux.Handle("POST /api/v1/livetv/channels/{id}/share", s.requireAuth(s.handleShareLiveChannel))
+	mux.Handle("GET /api/v1/livetv/sessions", s.requireAuth(s.handleListLiveSessions))
+	// 分片路由必须与播放列表同级：m3u8 里写的是相对文件名，客户端会拿
+	// 播放列表的 URL 当基准去拼（与点播那边同一个坑，见 handlePlayStream 的注释）。
+	mux.Handle("GET /api/v1/live/{sid}/index.m3u8", s.requireAuth(s.handleLivePlaylist))
+	mux.Handle("GET /api/v1/live/{sid}/{name}", s.requireAuth(s.handleLivePlaySegment))
+	mux.Handle("POST /api/v1/live/{sid}/stop", s.requireAuth(s.handleStopLivePlay))
+	// 外链出口（无需登录，靠签名 token）：给 VLC / 手机播放器用。
+	mux.HandleFunc("GET /s/{token}/playlist.m3u", s.handleSharedLivePlaylist)
+	mux.HandleFunc("GET /s/{token}/{name}", s.handleSharedLiveSegment)
 
 	// ---- 前端静态资源（必须最后注册，作为兜底）----
 	mux.Handle("/", s.staticHandler())

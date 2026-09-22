@@ -489,8 +489,8 @@ func cmdServe(args []string) error {
 	// 放在 api.New 之前创建并 Start：进程退出时 StopAll 会杀掉所有 ffmpeg ——
 	// 否则一次 Ctrl-C 就会留下一堆还在写分片的孤儿进程。
 	streams := stream.NewManager(stream.Options{
-		FFmpeg:         cfg.FFmpeg.Path,
-		Root:           cfg.StreamsDirPath(),
+		FFmpeg:          cfg.FFmpeg.Path,
+		Root:            cfg.StreamsDirPath(),
 		SegmentSeconds:  cfg.Playback.HLSSegmentSeconds,
 		WindowSeconds:   cfg.Playback.HLSWindowSeconds,
 		MaxSessions:     cfg.Playback.MaxSessions,
@@ -525,7 +525,7 @@ func cmdServe(args []string) error {
 
 	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
-	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore)
+	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore, cipher)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {

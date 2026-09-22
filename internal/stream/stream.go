@@ -33,6 +33,13 @@ var ErrTooMany = errors.New("同时播放的路数已达上限，请稍后再试
 // ErrStartTimeout 表示等第一个分片超时（源文件读不动或参数不对）。
 var ErrStartTimeout = errors.New("等待转封装起步超时")
 
+// reapInterval 是后台维护（回收 + 节流）的扫描周期。
+//
+// 单独提成常量是因为它参与「回收最晚什么时候发生」的算术：
+// 空闲回收最早要等到下一轮扫描，所以直播的判定阈值要把这一个周期减掉
+// （见 reap），否则「无人观看后 45 秒内退出」这类承诺会差一个周期。
+const reapInterval = 5 * time.Second
+
 // errThrottleUnsupported 表示这个平台没法暂停/恢复 ffmpeg 进程（Windows）。
 var errThrottleUnsupported = errors.New("这个平台不支持暂停 ffmpeg 进程")
 
@@ -111,6 +118,27 @@ type Spec struct {
 	StartSeconds float64
 	// WindowSeconds 是这一段生成多长（0 表示用 Options 的默认值）。
 	WindowSeconds int
+
+	// SegmentSeconds 覆盖分片时长（0 = 用 Options 的默认值）。
+	// 直播用它把分片压到 2 秒：分片越长，起播等的时间越久。
+	SegmentSeconds int
+
+	// Live 为真表示这是**直播源**（Path 是 URL 而不是本地文件）。
+	//
+	// 与点播（转封装）的四点不同：
+	//   - 没有 -ss / -t：直播是连续的，没有「这一段窗口」的概念；
+	//   - 播放列表是**滚动窗口**（只留最近 N 个分片，旧的边删边丢），
+	//     而不是 `-hls_list_size 0`（点播要留住全部才能就地跳）；
+	//   - 不参与节流：源站本身就是按实时投递的，没有「预生成超前」这回事
+	//     （节流靠 SIGSTOP，对直播只会造成卡顿）；
+	//   - 音视频按「第一条视频/第一条音频」映射（`0:v:0?`），因为直播源的
+	//     流序号每次拉起来都可能不一样。
+	//
+	// 直播源的输入参数（-rtsp_transport tcp / -timeout / -headers …）走
+	// Video.InputArgs —— 与转码时放硬件加速参数是同一个位置（都在 -i 之前）。
+	Live bool
+	// LiveListSize 是滚动窗口保留的分片数（Live 时生效，0 用默认 6）。
+	LiveListSize int
 }
 
 // Session 是一个转封装会话：一个 ffmpeg 进程 + 一个分片目录。
@@ -194,7 +222,7 @@ func (m *Manager) StopAll() {
 }
 
 func (m *Manager) reapLoop() {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(reapInterval)
 	defer t.Stop()
 	for {
 		select {
@@ -232,13 +260,27 @@ func (m *Manager) throttleAll() {
 // 注意**不能**按「进程已退出」回收：窗口生成完（源文件比窗口短，或用户只看完了这一小段）
 // ffmpeg 会正常退出，但分片还在服务中 —— 那时把会话收掉，播放器会在几秒后突然断流。
 // 正常退出的会话一律等空闲超时。
+//
+// 直播判定要减掉一个扫描周期：扫描是每 reapInterval 一次，
+// 所以「空闲超过 IdleSeconds」的会话**最晚**要到 IdleSeconds+reapInterval 才真的被杀掉。
+// M5 的 DoD 是「无人观看后 45 秒内退出」，于是直播用 IdleSeconds-reapInterval 判定，
+// 让实测退出时间落在 45 秒以内（真跑实测：40~45 秒）。
 func (m *Manager) reap() {
 	var victims []*Session
 	now := time.Now()
+	idleLimit := time.Duration(m.opts.IdleSeconds) * time.Second
+	liveLimit := idleLimit - reapInterval
+	if liveLimit < reapInterval {
+		liveLimit = reapInterval
+	}
 	m.mu.Lock()
 	for k, s := range m.sessions {
 		failed := s.exitedNow() && (s.err() != nil || s.segmentCount() == 0)
-		idle := now.Sub(s.LastActive()) > time.Duration(m.opts.IdleSeconds)*time.Second
+		limit := idleLimit
+		if s.Spec.Live {
+			limit = liveLimit
+		}
+		idle := now.Sub(s.LastActive()) > limit
 		if failed || idle {
 			delete(m.sessions, k)
 			victims = append(victims, s)
@@ -390,7 +432,7 @@ type SessionStat struct {
 	Bitrate   string  `json:"bitrate,omitempty"`
 	MediaTime string  `json:"mediaTime,omitempty"`
 	Error     string  `json:"error,omitempty"`
-	Log          string  `json:"log,omitempty"`
+	Log       string  `json:"log,omitempty"`
 }
 
 func newSession(opts Options, spec Spec) *Session {
@@ -399,11 +441,16 @@ func newSession(opts Options, spec Spec) *Session {
 		window = opts.WindowSeconds
 	}
 	spec.WindowSeconds = window
+	// 分片时长：spec 里指定了就用它（直播固定 2 秒），否则用全局默认
+	segSecs := opts.SegmentSeconds
+	if spec.SegmentSeconds > 0 {
+		segSecs = spec.SegmentSeconds
+	}
 	s := &Session{
 		Key:     spec.Key,
 		Spec:    spec,
 		dir:     filepath.Join(opts.Root, safeDirName(spec.Key)),
-		segSecs: opts.SegmentSeconds,
+		segSecs: segSecs,
 		exited:  make(chan struct{}),
 		logs:    newRingLog(120),
 	}
@@ -487,6 +534,9 @@ func (s *Session) exitedNow() bool {
 		return false
 	}
 }
+
+// Exited 报告 ffmpeg 进程是否已经退出（对外暴露，播放层用它决定要不要重拉）。
+func (s *Session) Exited() bool { return s.exitedNow() }
 
 func (s *Session) err() error {
 	s.exitMu.Lock()
@@ -589,6 +639,11 @@ func (s *Session) Paused() bool { return s.paused.Load() }
 //
 // 恢复阀值取「提前量的一半」，避开在阀值上反复暂停/恢复。
 func (s *Session) throttle(limit int) {
+	// 直播不节流：源站按实时投递，暂停 ffmpeg 只会把画面卡住
+	//（而且直播的「已生成位置超前客户端」是没有意义的度量）。
+	if s.Spec.Live {
+		return
+	}
 	if limit <= 0 || s.throttleOff.Load() || s.exitedNow() {
 		return
 	}

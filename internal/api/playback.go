@@ -269,18 +269,18 @@ type playStateResponse struct {
 	// SubtitleFormat：vtt（浏览器原生轨道）| ass（前端 libass 渲染，保留特效）。
 	SubtitleFormat string `json:"subtitleFormat,omitempty"`
 	// SubtitleState：ready（已可挂上）/ preparing（内嵌字幕还在抽，前端轮询）。
-	SubtitleState   string         `json:"subtitleState,omitempty"`
+	SubtitleState string `json:"subtitleState,omitempty"`
 	// WindowEndSeconds：转封装模式下这一段预生成窗口的结束位置（秒）。
 	//
 	// 播放器靠它判断「该续下一段了」：不能用 video.seekable.end ——
 	// hls.js 的可用区间只是「已加载的那几个分片」，播放中永远是「当前时间 + 几秒」，
 	// 拿它做判据会一开播就疯狂续窗口。
-	WindowEndSeconds float64 `json:"windowEndSeconds,omitempty"`
-	ItemID          int64          `json:"itemId"`
-	Title           string         `json:"title,omitempty"`
-	Progress        *progressView  `json:"progress,omitempty"`
-	Streams         map[string]any `json:"streams,omitempty"`
-	PlaybackSeconds float64        `json:"playbackSeconds"`
+	WindowEndSeconds float64        `json:"windowEndSeconds,omitempty"`
+	ItemID           int64          `json:"itemId"`
+	Title            string         `json:"title,omitempty"`
+	Progress         *progressView  `json:"progress,omitempty"`
+	Streams          map[string]any `json:"streams,omitempty"`
+	PlaybackSeconds  float64        `json:"playbackSeconds"`
 }
 
 // progressView 是给界面的进度视图。
@@ -955,7 +955,7 @@ func (s *Server) handlePlayPlaylist(w http.ResponseWriter, r *http.Request) {
 // 客户端会拿播放列表 URL 作基准拼接。
 //
 // 为什么**不能**允许缓存：换一段窗口（seek）时分片文件名是一模一样的
-//（都是从 seg_00000.m4s 开始），而内容完全不同。若允许浏览器缓存，
+// （都是从 seg_00000.m4s 开始），而内容完全不同。若允许浏览器缓存，
 // seek 之后 hls.js 再要 seg_00000.m4s 就会拿回上一段的字节 ——
 // 表现是「拖到 1:30 却从头开始放」，而且时间轴显示的是新位置（实测踩到）。
 // 分片是“写一次、读一次”的临时文件，禁缓存没有任何代伷。
