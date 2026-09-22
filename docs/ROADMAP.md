@@ -736,7 +736,9 @@ staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器�
    提交前要还原它（`git checkout HEAD -- web/dist/index.html`）—— 但**还原之后如果还要交叉编译，
    必须先重跑 `npm run build`**。本次连续几次部署把占位页打进二进制，服务端在发「前端未构建」，
    用户看到的只是浏览器缓存里的旧前端，误导了一阵排查。根治：走 `task build`（依赖链自带 `web:build`）。
-   现在的做法：交叉编译前用一行断言卡住 —— `web/dist/index.html` 里必须含 `/assets/`，否则中止。
+   现在的做法：交叉编译前先卡一道断言 —— `bash scripts/dev/check-web-built.sh`（或 `task build`）。
+   注意判据别写成「index.html 里含 `/assets/`」：**占位页的注释里就有这个字符串**，
+   会把占位页当成构建产物（2026-09-22 发现，改成看标题与真正的 `<script src="/assets/…">`）。
 2. **`gofmt -w <目录>` 会改到你没碰过的文件**：它顺手重排了 `playback.go` 与 `throttle_test.go`
    （这两个文件本来就不是 gofmt 干净状态）。只对本次改动的文件跑 `gofmt -w <文件>`。
 3. **推送前先跑容器里的同版本工具**：lint 又连红两次（unparam、errorlint），

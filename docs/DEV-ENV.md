@@ -300,8 +300,14 @@ task web:restore-placeholder # = git checkout -- web/dist/index.html，只在提
 后端现在会对缺失资源回 404，至少能在控制台看到真正的错误。
 
 2026-09-22 真踩了一次：连续几次交叉编译前忘了重跑 `npm run build`，服务端在发「前端未构建」，
-而浏览器里缓存着旧前端，看着像「UI 没更新」，白排查了一阵。现在的做法是交叉编译前先断言
-`web/dist/index.html` 里含 `/assets/`，否则中止；更省事的是直接用 `task build`（依赖链自带 `web:build`）。
+而浏览器里缓存着旧前端，看着像「UI 没更新」，白排查了一阵。现在的做法是**交叉编译前先卡一道断言**：
+
+```bash
+bash scripts/dev/check-web-built.sh        # 或 task build（依赖链自带 web:build）
+```
+
+> ⚠️ 别用「`index.html` 里含 `/assets/`」当判据：**占位页的注释里就有这个字符串**（它在解释构建方式），
+> 那个判断会把占位页当成构建产物。脚本看的是「标题不是『前端未构建』」+「真引用了 `/assets/…` 脚本」。
 
 这几个脚本都是**无依赖**的（`smoke-test.sh` / `verify-item-edit.sh` 只用 curl + jq；两个界面脚本只用
 Node 内置 `WebSocket` 直连 Chrome DevTools Protocol，不需要 Puppeteer）。
