@@ -118,7 +118,10 @@ note "选中：$CH_NAME（id=$CH_ID，试了 $((DEAD + 1)) 个）"
 # 会留下拉流的孤儿 ffmpeg，后面「只该有一路」的断言就全乱了。
 # 用 M4 就有的管理员接口按 stream key 停，比按进程名 kill 干净。
 stop_stream() { curl -s -o /dev/null -b "$JAR" -X POST "$BASE/api/v1/playback/streams/$1/stop"; }
-stop_stream "live:ch$CH_ID"
+# 会话键带处理方式后缀（live:ch<id>:copy / :transcode）—— 两种都要停，
+# 只停无后缀的那个键是停不到任何东西的（脚本曾经因为这项把「起始 0 路」误判成失败）。
+stop_stream "live:ch$CH_ID:copy"
+stop_stream "live:ch$CH_ID:transcode"
 sleep 2
 check "同频道遗留流已清（起始应为 0 路）" 0 "$(ffmpeg_count "$CH_URL")"
 

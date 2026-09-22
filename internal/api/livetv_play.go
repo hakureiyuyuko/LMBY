@@ -432,11 +432,8 @@ func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) 
 
 	out := make([]map[string]any, 0, 4)
 	for _, st := range s.streams.Stats() {
-		if !strings.HasPrefix(st.Key, "live:") {
-			continue
-		}
-		id, err := strconv.ParseInt(strings.TrimPrefix(st.Key, "live:ch"), 10, 64)
-		if err != nil {
+		id, ok := liveChannelIDFromKey(st.Key)
+		if !ok {
 			continue
 		}
 		name := ""
@@ -446,6 +443,28 @@ func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) 
 		out = append(out, liveSessionView(st, name, id, s.livePlays.viewers(id, now)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": out, "count": len(out)})
+}
+
+// liveChannelIDFromKey 从转封装/转码会话的键里取出频道 id。
+//
+// 键的形如 `live:ch<id>:<mode>`（mode = copy / transcode），后缀是后来为了
+// 「转封装与转码各走一路」（Safari 与 Chrome 同看一台 HEVC 频道）加的；
+// 早期版本没有后缀，所以这里也接受 `live:ch<id>`。
+//
+// 为什么单独抽一个函数：解析写错过一次 —— 直接 `ParseInt(TrimPrefix(key, "live:ch"))`
+// 遇到 `29:copy` 就失败，而失败分支是 `continue`（静默跳过），结果是
+// **管理面「会话」页里的直播那一段永远空着但不报任何错**。抽出来便于单测钉住。
+func liveChannelIDFromKey(key string) (int64, bool) {
+	trimmed, ok := strings.CutPrefix(key, "live:ch")
+	if !ok {
+		return 0, false
+	}
+	idPart, _, _ := strings.Cut(trimmed, ":")
+	id, err := strconv.ParseInt(idPart, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func liveSessionView(st stream.SessionStat, name string, channelID int64, viewers int) map[string]any {
