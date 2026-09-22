@@ -1360,3 +1360,131 @@ th {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
+
+/* ---------------------------------------------------------------- 详情页（M6）
+   背景图 + 海报 + 元数据 + 操作。背景图用绝对定位铺满并压低不透明度，
+   否则亮色主题下白底上放一张剧照会看不清字。 */
+
+.detail-hero {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: var(--gap);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+
+.detail-hero-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.detail-hero-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.3;
+}
+
+.detail-hero-inner {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+}
+
+.detail-poster {
+  flex: 0 0 200px;
+  width: 200px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  align-self: flex-start;
+  background: var(--bg-elev-2);
+}
+
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detail-body h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.detail-tagline {
+  margin: 0;
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+.detail-overview {
+  margin: 6px 0 0;
+  max-width: 75ch;
+}
+
+.detail-genres {
+  gap: 6px;
+  margin: 2px 0 0;
+}
+
+.cast-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px 16px;
+}
+
+.cast-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* nfo 里没有头像地址（也不联网），所以用首字占位 —— 比一排空心圆好看 */
+.cast-avatar {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev-2);
+  color: var(--fg-muted);
+  font-size: 15px;
+}
+
+.cast-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cast-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窄屏：海报变成小图、竖着排（M6 的响应式只做到「手机能用」这一步） */
+@media (max-width: 640px) {
+  .detail-hero-inner {
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .detail-poster {
+    flex: 0 0 auto;
+    width: 140px;
+  }
+}

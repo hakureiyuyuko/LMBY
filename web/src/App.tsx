@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
 import { Account } from './pages/Account';
 import { Browse } from './pages/Browse';
+import { Detail } from './pages/Detail';
 import { Home } from './pages/Home';
 import { ItemEdit } from './pages/Item';
 import { Libraries } from './pages/Libraries';
@@ -13,7 +14,6 @@ import { Match } from './pages/Match';
 import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
-import { SeriesView } from './pages/Series';
 import { Sessions } from './pages/Sessions';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
@@ -90,7 +90,9 @@ function AppRoutes() {
         {/* 海报墙入口：一个库时直接进那面墙，多个库时先挑 */}
         <Route path="/posters" element={<Posters />} />
         <Route path="/library/:id" element={<Browse />} />
-        <Route path="/series/:id" element={<SeriesView />} />
+        {/* 条目详情（M6）：电影/剧集/季/集都在这一页；旧的剧集地址重定向过来 */}
+        <Route path="/item/:id" element={<Detail />} />
+        <Route path="/series/:id" element={<SeriesRedirect />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/search" element={<Search />} />
         <Route path="/items/:id" element={<ItemEdit />} />
@@ -103,6 +105,14 @@ function AppRoutes() {
       </Route>
     </Routes>
   );
+}
+
+/** 旧的剧集地址（`/series/:id`）重定向到详情页：
+ *  剧集视图已经并入 `/item/:id`（季集列表就在详情页下面）。
+ *  留着这条路由是因为老书签、浏览器历史与之前分享过的链接都指向它。 */
+function SeriesRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/item/${id}`} replace />;
 }
 
 function NotFound() {

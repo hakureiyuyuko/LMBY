@@ -248,6 +248,13 @@ type playRequest struct {
 	// 只对图形字幕（PGS/VobSub）有意义：它不是文本，前端渲染不了；而烧录必须
 	// 重新编码，所以它会把本来能直出的片子也拉进转码（理由链里会写明）。
 	BurnSubtitle bool `json:"burnSubtitle,omitempty"`
+
+	// FileID 指定用哪个文件（同一个条目的多版本场景）。
+	//
+	// 省略时由播放决策引擎自己挑（它会优先能直出的那个）；
+	// 指定了就把候选缩到这一个 —— 「我要放 4K 那一版」是用户的明确选择，
+	// 不该被决策引擎「帮你挑个更流畅的」而改掉。
+	FileID *int64 `json:"fileId,omitempty"`
 }
 
 // playStateResponse 是播放状态响应（开始播放与查询状态共用）。
@@ -277,6 +284,8 @@ type playStateResponse struct {
 	// 拿它做判据会一开播就疯狂续窗口。
 	WindowEndSeconds float64 `json:"windowEndSeconds,omitempty"`
 	ItemID          int64          `json:"itemId"`
+	// FileID 是这一次实际用的文件（条目下有多个版本时，能看出放的是哪一版）
+	FileID          int64          `json:"fileId,omitempty"`
 	Title           string         `json:"title,omitempty"`
 	Progress        *progressView  `json:"progress,omitempty"`
 	Streams         map[string]any `json:"streams,omitempty"`
@@ -345,6 +354,22 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 	for _, f := range files {
 		candidates = append(candidates, playbackFile(f))
 	}
+	// 多版本：指定了 fileId 就把候选缩到那一个（找不到就如实报 404，
+	// 而不是默默放另一版 —— 用户明确选了哪一版，静默改掉比报错更糟）。
+	if req.FileID != nil {
+		picked := make([]playback.File, 0, 1)
+		for _, f := range files {
+			if f.ID == *req.FileID {
+				picked = append(picked, playbackFile(f))
+				break
+			}
+		}
+		if len(picked) == 0 {
+			writeError(w, http.StatusNotFound, "这个条目下没有指定的那个文件（可能已被扫描清理）")
+			return
+		}
+		candidates = picked
+	}
 
 	progress, err := s.store.GetPlaybackProgress(r.Context(), userID, item.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -401,6 +426,7 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		Reasons:         plan.Reasons,
 		Plan:            plan,
 		ItemID:          item.ID,
+		FileID:          file.ID,
 		Title:           item.Title,
 		Progress:        viewProgress(progress),
 		State:           "error",
@@ -658,6 +684,7 @@ func (s *Server) handlePlayState(w http.ResponseWriter, r *http.Request) {
 		Reasons:         ps.Plan.Reasons,
 		Plan:            ps.Plan,
 		ItemID:          ps.ItemID,
+		FileID:          ps.FileID,
 		Title:           ps.Item.Title,
 		StartSeconds:    ps.StartSeconds,
 		DurationSeconds: ps.DurationSeconds,
@@ -761,6 +788,7 @@ func (s *Server) handlePlaySeek(w http.ResponseWriter, r *http.Request) {
 		Reasons:         ps.Plan.Reasons,
 		Plan:            ps.Plan,
 		ItemID:          ps.ItemID,
+		FileID:          ps.FileID,
 		Title:           ps.Item.Title,
 		StartSeconds:    ps.StartSeconds,
 		DurationSeconds: ps.DurationSeconds,

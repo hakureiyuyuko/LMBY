@@ -267,6 +267,9 @@ export function ItemEdit() {
               </p>
             )}
             <div className="row" style={{ marginTop: 10 }}>
+              <Link className="btn" to={`/item/${it.id}`}>
+                返回详情页
+              </Link>
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
                 保存
               </button>

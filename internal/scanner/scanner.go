@@ -808,6 +808,16 @@ func (w *walker) applyNFO(ctx context.Context, md *metadata.Metadata, nfoPath st
 	if err := w.st.ApplyItemMeta(ctx, itemID, meta); err != nil {
 		w.issue("warning", nfoPath, "写入条目元数据失败: "+err.Error())
 	}
+
+	// 演职员单独写一张表（一对多 + 每人带角色）。
+	//
+	// **只在 nfo 里真有演职员时才写**：为空说明这份 nfo 没带演职员，
+	// 不该把库里已有的清掉（比如将来从 TMDB 拉的，或者目录级 nfo 里的）。
+	if people := peopleFromNFO(md); len(people) > 0 {
+		if err := w.st.ReplaceItemPeople(ctx, itemID, people); err != nil {
+			w.issue("warning", nfoPath, "写入演职员失败: "+err.Error())
+		}
+	}
 }
 
 // refreshDirMetadata 在「重扫但文件没变」时补读目录级 nfo。
@@ -920,6 +930,28 @@ func itemMetaFromNFO(md *metadata.Metadata) store.ItemMeta {
 		meta.RuntimeTicks = &t
 	}
 	return meta
+}
+
+// peopleFromNFO 把 nfo 里的演职员转成要落库的形状。
+//
+// nfo 解析器早就把 <actor>（含 role/type/tmdbid…）、<director>、<credits> 读出来了，
+// 但一直没落库；M6 的详情页要用，这里把它接上（**本地优先**：不联网、不占 API 配额）。
+func peopleFromNFO(md *metadata.Metadata) []store.ItemPerson {
+	out := make([]store.ItemPerson, 0, len(md.People))
+	for i, p := range md.People {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, store.ItemPerson{
+			Name:        name,
+			Role:        strings.TrimSpace(p.Kind),
+			Character:   strings.TrimSpace(p.Role),
+			Order:       i,
+			ProviderIDs: p.ProviderIDs,
+		})
+	}
+	return out
 }
 
 // nfoHasMetadata 判断这份 nfo 是否真的带了人工整理的元数据。

@@ -5,9 +5,12 @@ import { ThemeToggle } from './ThemeToggle';
 export function Layout() {
   const { user, meta, signOut } = useAuth();
   const loc = useLocation();
-  // 「海报墙」在只有一个库时会重定向到 /library/{id}，所以在库/剧集/番剧页里
+  // 「海报墙」在只有一个库时会重定向到 /library/{id}，所以在库/剧集/详情页里
   // 也要把它标成当前项 —— 否则点进去之后导航栏看起来“没选中任何东西”。
-  const inBrowse = loc.pathname.startsWith('/library/') || loc.pathname.startsWith('/series/');
+  const inBrowse =
+    loc.pathname.startsWith('/library/') ||
+    loc.pathname.startsWith('/series/') ||
+    loc.pathname.startsWith('/item/');
 
   return (
     <div className="shell">

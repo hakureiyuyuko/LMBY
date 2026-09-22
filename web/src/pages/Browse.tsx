@@ -180,7 +180,7 @@ export function Browse() {
               <Link
                 key={it.id}
                 className="poster-card"
-                to={it.kind === 'series' ? `/series/${it.id}` : `/items/${it.id}`}
+                to={`/item/${it.id}`}
               >
                 {/* 占位块在下、图在上：没海报时不会留下一堆空洞（墙的节奏全靠它）*/}
                 <span className="poster-frame">

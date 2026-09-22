@@ -177,6 +177,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))
 	mux.Handle("GET /api/v1/items/{id}/images/{kind}", s.requireAuth(s.handleItemImage))
 
+	// ---- 详情页（M6）：演职员与相关推荐 ----
+	mux.Handle("GET /api/v1/items/{id}/people", s.requireAuth(s.handleItemPeople))
+	mux.Handle("GET /api/v1/items/{id}/related", s.requireAuth(s.handleItemRelated))
+
 	// ---- 人工匹配 ----
 	mux.Handle("GET /api/v1/items/{id}/match", s.requireAuth(s.handleGetItemMatch))
 	mux.Handle("POST /api/v1/items/{id}/match", s.requireAuth(s.handleApplyItemMatch))

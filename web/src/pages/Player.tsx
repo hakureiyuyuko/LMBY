@@ -196,6 +196,17 @@ export function Player() {
   const itemId = Number(params.id);
   /** ?restart=1 = 从头播放（条目页的「从头播放」按钮）；只生效一次。 */
   const restartOnceRef = useRef(search.get('restart') === '1');
+  /**
+   * ?file=<fileId> = 指定多版本里的哪一个（详情页的版本选择器）。
+   *
+   * 只在**第一次**开播时带：后面的换音轨/字幕/画质重开一路时还是同一个文件，
+   * 而那时候再带一次反而会把「决策引擎自己挑」的余地抹掉（比如切到低画质档）。
+   */
+  const fileOnceRef = useRef<number | undefined>(
+    Number.isFinite(Number(search.get('file'))) && Number(search.get('file')) > 0
+      ? Number(search.get('file'))
+      : undefined,
+  );
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -329,6 +340,7 @@ export function Player() {
       try {
         const st = await api.startPlayback(itemId, {
           profile: detectProfile(),
+          fileId: fileOnceRef.current,
           audioStreamIndex: opts.audio || undefined,
           subtitleStreamIndex: opts.sub,
           burnSubtitle: opts.burn,
@@ -904,7 +916,7 @@ export function Player() {
               <button type="button" className="btn" onClick={() => setSeq((v) => v + 1)}>
                 重新开始
               </button>
-              <Link className="btn btn-ghost" to={`/items/${itemId}`}>
+              <Link className="btn btn-ghost" to={`/item/${itemId}`}>
                 去条目详情
               </Link>
             </div>

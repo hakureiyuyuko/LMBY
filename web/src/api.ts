@@ -377,6 +377,12 @@ export const api = {
 
   // ---------------------------------------------------------------- 条目详情与人工编辑
   item: (id: number) => request<ItemDetail>(`/api/v1/items/${id}`),
+  /** 演职员（目前只有 nfo 这一个来源）。 */
+  itemPeople: (id: number) =>
+    request<{ itemId: number; people: ItemPerson[]; source: string }>(`/api/v1/items/${id}/people`),
+  /** 相关推荐（同库 + 同类型 + 共同流派，离线可算）。 */
+  itemRelated: (id: number, limit = 12) =>
+    request<{ items: Item[]; total: number }>(`/api/v1/items/${id}/related?limit=${limit}`),
   updateItem: (id: number, body: { fields?: Record<string, unknown>; lockedFields?: string[] }) =>
     request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', ...json(body) }),
   rescrapeItem: (id: number, force = true) =>
@@ -700,6 +706,18 @@ export interface ItemsPage {
   offset: number;
 }
 
+/** 条目的一位演职员（数据来源：同目录 nfo 的 <actor>/<director>/<credits>）。 */
+export interface ItemPerson {
+  personId: number;
+  name: string;
+  /** actor / director / writer / …（nfo 的 <type> 写什么就是什么）。 */
+  role: string;
+  /** 演的是谁（演员才有）。 */
+  character?: string;
+  order: number;
+  providerIds?: Record<string, string>;
+}
+
 // ---------------------------------------------------------------- 播放（M3）
 
 /** 客户端上报的播放能力（服务端的 DeviceProfile 只做兜底）。 */
@@ -844,6 +862,13 @@ export interface ContinueWatchingEntry {
 /** 开始播放的请求体。 */
 export interface StartPlaybackBody {
   profile?: PlaybackProfile;
+  /**
+   * 指定用条目下的哪个文件（多版本）。
+   *
+   * 省略时由服务端的播放决策引擎自己挑（它会优先能直出的那一个）；
+   * 指定了就只放这一个 —— 「我要 4K 那一版」是用户的明确选择。
+   */
+  fileId?: number;
   videoStreamIndex?: number;
   audioStreamIndex?: number;
   /** -1 = 明确不要字幕，0/缺省 = 自动（只选强制字幕轨）。 */

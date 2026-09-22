@@ -172,7 +172,7 @@ export function Search() {
         <div className="card">
           <div className="search-grid">
             {data.items.map((it) => (
-              <Link key={it.id} className="search-card" to={`/items/${it.id}`}>
+              <Link key={it.id} className="search-card" to={`/item/${it.id}`}>
                 <img
                   className="search-thumb"
                   src={`/api/v1/items/${it.id}/images/poster?w=160`}

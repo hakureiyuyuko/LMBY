@@ -208,7 +208,8 @@ async function main() {
     (await evaluate('location.pathname')).startsWith('/library/')));
   check('铺出了海报卡片', true, await waitFor('海报卡片', async () =>
     (await evaluate(`document.querySelectorAll('.poster-card').length`)) > 0));
-  const totalText = await evaluate(`document.querySelector('.card')?.textContent || ''`);
+  // 用整个内容区找「共 N 条」：库里不止一个媒体库时，第一张 .card 是媒体库切换卡
+  const totalText = await evaluate(`document.querySelector('.content')?.textContent || ''`);
   check('显示总数', true, /共\s*\d+\s*条/.test(totalText));
   await shot('01-poster-wall-dark');
 
@@ -222,7 +223,7 @@ async function main() {
     (await evaluate('location.search')).includes('kind=movie')));
   // 等卡片**真的换成电影**再往下：只等 URL 会拿到上一批（剧集）的卡片
   await waitFor('电影卡片刷新', async () =>
-    (await evaluate(`[...document.querySelectorAll('.poster-card')].every((a) => a.getAttribute('href').startsWith('/items/'))`)) === true);
+    (await evaluate(`[...document.querySelectorAll('.poster-card')].every((a) => a.getAttribute('href').startsWith('/item/'))`)) === true);
   check('切到电影后仍有卡片', true, (await evaluate(`document.querySelectorAll('.poster-card').length`)) > 0);
   check('筛选后数量不超过全集', true,
     (await evaluate(`document.querySelectorAll('.poster-card').length`)) <= allCount);
@@ -234,19 +235,27 @@ async function main() {
     return true;
   })()`);
   await waitFor('剧集筛选', async () => (await evaluate('location.search')).includes('kind=series'));
-  // 同上：等卡片真的换成剧集（否则点到的是上一批电影卡片，测出来的是条目页）
-  const hasSeries = await waitFor('剧集卡片刷新', async () =>
-    (await evaluate(`document.querySelectorAll('.poster-card').length`)) > 0 &&
-    (await evaluate(`[...document.querySelectorAll('.poster-card')].every((a) => a.getAttribute('href').startsWith('/series/'))`)) === true);
+  // 等卡片真的换成剧集：只看 URL 会拿到上一批（电影）卡片，
+  // 而「卡片 href 前缀」已经不能当判据了（M6 起剧集与电影共用 /item/{id}），
+  // 所以直接问接口「这张卡片指向的条目是什么类型」。
+  const hasSeries = await waitFor('剧集卡片刷新', async () => {
+    const href = await evaluate(`document.querySelector('.poster-card')?.getAttribute('href') || ''`);
+    if (!href.startsWith('/item/')) return false;
+    const id = Number(href.split('/').pop());
+    if (!Number.isFinite(id)) return false;
+    const kind = await evaluate(`(async () => (await (await fetch('/api/v1/items/${id}')).json()).item.kind)()`);
+    return kind === 'series';
+  });
   if (!hasSeries) {
     log('   库里没有剧集卡片，跳过剧集视图用例');
   } else {
     const href = await evaluate(`document.querySelector('.poster-card')?.getAttribute('href') || ''`);
-    check('卡片指向剧集页', true, href.startsWith('/series/'));
+    // M6 起剧集与电影共用详情页（`/item/{id}`），旧的 /series/{id} 只做重定向
+    check('卡片指向详情页', true, href.startsWith('/item/'));
     await evaluate(clickSel('.poster-card'));
-    check('跳到剧集页', true, await waitFor('剧集页', async () =>
+    check('跳到详情页', true, await waitFor('详情页', async () =>
       (await evaluate('location.pathname')) === href));
-    check('剧集页有季标签或集列表', true, await waitFor('季/集', async () =>
+    check('详情页有季标签或集列表', true, await waitFor('季/集', async () =>
       (await evaluate(`document.querySelectorAll('.tabs .tab').length`)) > 0 ||
       (await evaluate(`document.querySelectorAll('.ep-row').length`)) > 0));
     // 集列表是选中季之后**再发一次请求**回来的，必须等它渲染（不等会拿到 0 条）
@@ -259,13 +268,16 @@ async function main() {
     check('集行显示了季集号', true, await evaluate(
       `(document.querySelector('.ep-row')?.textContent || '').includes('E0')`,
     ));
-    check('有「返回海报墙」', true, await evaluate(`!!document.querySelector('.btn[href^="/library/"]')`));
-    check('有「编辑字段与锁定」', true, await evaluate(`!!document.querySelector('.btn[href^="/items/"]')`));
+    check('有「回海报墙」', true, await evaluate(`!!document.querySelector('.btn[href^="/library/"]')`));
+    check('有「编辑元数据」', true, await evaluate(`!!document.querySelector('.btn[href^="/items/"]')`));
     await shot('02-series-view-dark');
 
-    // 点一集 → 条目页
+    // 点一集 → 该集的详情页 → 再点「编辑元数据」→ 字段表
     await evaluate(clickSel('.ep-row'));
-    check('点集进条目页', true, await waitFor('条目页', async () =>
+    check('点集进该集详情页', true, await waitFor('集详情页', async () =>
+      (await evaluate('location.pathname')).startsWith('/item/')));
+    await evaluate(clickSel('.btn[href^="/items/"]'));
+    check('再点「编辑元数据」进编辑页', true, await waitFor('编辑页', async () =>
       (await evaluate('location.pathname')).startsWith('/items/')));
     check('条目页字段表渲染', true, await waitFor('字段表', async () =>
       (await evaluate(`!!document.querySelector('[data-field="title"]')`)) === true));
