@@ -96,6 +96,55 @@ if [[ -n "$SECOND" ]]; then
 fi
 
 echo
+echo "== 1.5 读路径：带可见库过滤的查询不能在真库上 500 =="
+# 这一节的由来：M7 把「可见库」接进 SQL 之后，首页 / 收藏的语句**占位符与传参错位**
+# （count 复用了带 $5 的条件串，却又多传了 limit/offset → $3/$4 在参数表里但 SQL 里
+#  没有引用 → PostgreSQL 42P18「could not determine data type of parameter $3」），
+# 表现是前端整页「读取首页失败」。这类错位编译期看不出来、单测也不连库，
+# **只有真库真 HTTP 才炸**，所以把每条带 libraryFilter 的读接口都在这里打一遍。
+psqlq() { PGPASSWORD=$(cat "$PGPASS_FILE") psql -h 127.0.0.1 -U lmby -d lmby -tAc "$1"; }
+# 让验收用户「看过」一条有流派的条目：首页只有这种情况下才走「为你推荐」，
+# 而画像 / 种子 / 候选池三段各自带着一个可见库参数（第一个 bug 就藏在里面）。
+SEED_ITEM=$(psqlq "select id from media_items where library_id = $FIRST and deleted_at is null
+  and kind in ('movie','series') and genres <> '[]'::jsonb order by id limit 1")
+if [[ -n "$SEED_ITEM" ]]; then
+  psqlq "insert into playback_progress (user_id, item_id, position_ticks, duration_ticks, last_played_at, updated_at)
+         values ($NEW_ID, $SEED_ITEM, 1000000, 2000000, now(), now())
+         on conflict (user_id, item_id) do update set last_played_at = now(), updated_at = now()" >/dev/null
+  note "给验收用户造了一条观看记录（条目 #$SEED_ITEM），首页会走「为你推荐」"
+else
+  note "库里没有带流派的条目，跳过「为你推荐」那一段"
+fi
+
+QTITLE=$(json "$ADMIN_JAR" "$BASE/api/v1/libraries/$FIRST/items?limit=1" | jq -r '.items[0].title // empty')
+Q=$(jq -rn --arg t "${QTITLE:-a}" '$t|@uri')
+for who in admin user; do
+  jar=$ADMIN_JAR; [[ "$who" == user ]] && jar=$USER_JAR
+  check "$who 首页 200" 200 "$(code "$jar" "$BASE/api/v1/home")"
+  check "$who 收藏 200" 200 "$(code "$jar" "$BASE/api/v1/favorites")"
+  check "$who 搜索 200" 200 "$(code "$jar" "$BASE/api/v1/search?q=$Q")"
+  check "$who 搜索分面 200" 200 "$(code "$jar" "$BASE/api/v1/search/facets?q=$Q")"
+  check "$who 联想 200" 200 "$(code "$jar" "$BASE/api/v1/search/suggest?q=$Q")"
+  check "$who 库列表 200" 200 "$(code "$jar" "$BASE/api/v1/libraries")"
+  check "$who 库浏览 200" 200 "$(code "$jar" "$BASE/api/v1/libraries/$FIRST/browse")"
+  check "$who 库内条目 200" 200 "$(code "$jar" "$BASE/api/v1/libraries/$FIRST/items?limit=5")"
+done
+if [[ -n "$SEED_ITEM" ]]; then
+  check "受限用户 条目详情 200" 200 "$(code "$USER_JAR" "$BASE/api/v1/items/$SEED_ITEM")"
+  check "受限用户 相关条目 200" 200 "$(code "$USER_JAR" "$BASE/api/v1/items/$SEED_ITEM/related")"
+  check "受限用户 演职员 200" 200 "$(code "$USER_JAR" "$BASE/api/v1/items/$SEED_ITEM/people")"
+fi
+# 200 还不够：响应体里带「失败」说明服务端是「部分成功」（首页 sections 少一行不明显）
+check "首页响应里没有错误文案" 0 "$(json "$USER_JAR" "$BASE/api/v1/home" | grep -c '失败' || true)"
+check "受限用户首页出了「为你推荐」" 1 \
+  "$(json "$USER_JAR" "$BASE/api/v1/home" | jq -r '[.sections[]? | select(.key=="recommend")] | length')"
+
+# 首页 500 时后端日志里的真实原因（脚本跑完给人一眼看到，不必再翻 journalctl）
+if [[ "$(code "$USER_JAR" "$BASE/api/v1/home")" != "200" ]]; then
+  note "日志里最后一条首页报错：$(journalctl -u lmby --since '-5 min' --no-pager 2>/dev/null | grep '读取首页' | tail -1)"
+fi
+
+echo
 echo "== 2. 允许转码：关掉后必须转码的片直接 403，且不起 ffmpeg =="
 json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowTranscode":false}' >/dev/null
 check "关掉转码后旧 token 不受影响（没吊销：这个开关下一次请求就生效）" 200 "$(code "$USER_JAR" "$BASE/api/v1/libraries")"
@@ -130,8 +179,10 @@ if [[ -n "$NEED_TX" ]]; then
   fi
 
   # 直播：带 force=transcode 就是「这一路必须转码」，用它把开关验实
-  # 挑一个「探测能通」的频道：拿第一个可能正好是失效源（起播 502，
-  # 那就分不清是权限拒绝还是源站挂了 —— 真踩到）
+  # 挑一个「探测能通」的频道：**不要拿全量列表的第一条** —— 那可能正好是失效源，
+  # 起播 502 会跟「权限拒绝」混在一起（真踩到）。probe=ok 是探测快照，
+  # 快照也会过期（源站会 302 重定向到别的节点、节点会挂），所以下面再用管理员
+  # 做一次基线：源站真失效时把那条断言**降级为提示**，而不是「今天源站不好，验收红了」。
   CHT=$(json "$ADMIN_JAR" "$BASE/api/v1/livetv/channels?probe=ok" | jq -r '.channels[0].id // empty')
   if [[ -n "$CHT" ]]; then
     st2=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
@@ -141,8 +192,17 @@ if [[ -n "$NEED_TX" ]]; then
     st3=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
       -H 'Content-Type: application/json' -d '{"force":"transcode"}')
     note "放开转码后再起播：$st3（200 = 真的放行了）"
-    check "放开转码后同一路径放行（200）" 200 "$st3"
-    SID=$(json "$USER_JAR" "$BASE/api/v1/livetv/channels" >/dev/null; echo)
+    # 基线：管理员打同一条频道。起不来（502）说明是**源站**的事（探测快照过期），
+    # 与权限无关 —— 硬断言 200 会变成「今天源站不好，验收红了」这种假失败。
+    stbase=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
+      -H 'Content-Type: application/json' -d '{"force":"transcode"}')
+    if [[ "$stbase" == "200" ]]; then
+      check "放开转码后同一路径放行（200）" 200 "$st3"
+    else
+      note "管理员对 #$CHT 也起不来（$stbase）—— 源站已失效，跳过这条断言（不是权限问题）"
+    fi
+  else
+    note "没有「探测能通」的频道，跳过直播转码那两条断言"
   fi
 fi
 
@@ -150,7 +210,9 @@ echo
 echo "== 3. 允许直播：关掉后列表与起播都拒绝 =="
 json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowLiveTV":false}' >/dev/null
 check "不允许直播：频道列表 403" 403 "$(code "$USER_JAR" "$BASE/api/v1/livetv/channels")"
-CH=$(json "$ADMIN_JAR" "$BASE/api/v1/livetv/channels" | jq -r '.channels[0].id // empty')
+# 权限判定在拉流之前（403 立刻返回、不会去连源站），挑哪条频道都不影响断言；
+# 仍然用 probe=ok 挑，免得日志里混进失效源的无谓起播。
+CH=$(json "$ADMIN_JAR" "$BASE/api/v1/livetv/channels?probe=ok" | jq -r '.channels[0].id // empty')
 if [[ -n "$CH" ]]; then
   check "不允许直播：起播 403" 403 "$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST \
     "$BASE/api/v1/livetv/channels/$CH/play" -H 'Content-Type: application/json' -d '{}')"

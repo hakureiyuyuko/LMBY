@@ -91,11 +91,20 @@ func (s *Store) ListFavorites(ctx context.Context, userID int64, kind string, li
 		return nil, 0, err
 	}
 
+	// count 单独拼一份条件：占位符必须**从 $1 连续排到最后一个引用**。
+	// 直接复用 cond 再把 limit/offset 一起塞进来，会让 $3/$4 出现在参数表里
+	// 却不在 SQL 里（PostgreSQL 直接报 42P18「could not determine data type of
+	// parameter $3」—— 首页 500 就是这么来的）。
+	countCond := `f.user_id = $1
+		and media_items.deleted_at is null
+		and ($2::text = '' or media_items.kind = $2)
+		and ` + libraryFilter("media_items.library_id", "$3")
+
 	var total int64
 	if err := s.pool.QueryRow(ctx,
 		`select count(*) from media_items
 		 join favorites f on f.item_id = media_items.id
-		 where `+cond, userID, kind, limit, offset, libsArg(libs)).Scan(&total); err != nil {
+		 where `+countCond, userID, kind, libsArg(libs)).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("统计收藏失败: %w", err)
 	}
 	return items, total, nil

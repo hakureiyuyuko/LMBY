@@ -132,7 +132,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int, l
 		 from playback_progress pp
 		 join media_items i on i.id = pp.item_id
 		 where pp.user_id = $1 and i.deleted_at is null
-		   and `+libraryFilter("i.library_id", "$4")+``, userID, libsArg(libs)).Scan(&out.SourceWorks); err != nil {
+		   and `+libraryFilter("i.library_id", "$2")+``, userID, libsArg(libs)).Scan(&out.SourceWorks); err != nil {
 		return out, fmt.Errorf("统计观看记录失败: %w", err)
 	}
 	if out.SourceWorks == 0 {
@@ -144,7 +144,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int, l
 		 join media_items i on i.id = pp.item_id
 		 left join media_items s on s.id = i.series_id
 		 where pp.user_id = $1 and i.deleted_at is null
-		   and `+libraryFilter("i.library_id", "$4")+`
+		   and `+libraryFilter("i.library_id", "$2")+`
 		 order by pp.last_played_at desc nulls last, pp.updated_at desc
 		 limit 1`, userID, libsArg(libs)).Scan(&out.SeedTitle); err != nil {
 		return out, fmt.Errorf("查询最近观看失败: %w", err)
@@ -156,7 +156,7 @@ func (s *Store) RecommendForUser(ctx context.Context, userID int64, limit int, l
 		 from (select genres from playback_progress pp
 		       join media_items i on i.id = pp.item_id
 		       where pp.user_id = $1 and i.deleted_at is null
-		         and `+libraryFilter("i.library_id", "$4")+`
+		         and `+libraryFilter("i.library_id", "$3")+`
 		       order by pp.last_played_at desc nulls last, pp.updated_at desc
 		       limit $2) w,
 		      jsonb_array_elements_text(w.genres) g
