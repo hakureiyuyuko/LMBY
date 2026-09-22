@@ -236,7 +236,7 @@ GET  /api/v1/libraries/{id}/items?matchState=review,failed   列表支持按状�
 |---|---|
 | `scripts/dev/verify-browse.sh` | **40 项断言全绿**：海报墙无季/集/花絮、总数 = 电影+剧集、kind/sort 过滤与分页、层级 parentId 正确、每季集数对得上、参数校验、批量跳转/标记/入队（跑完重扫还原）|
 | `scripts/dev/verify-settings.sh` | **38 项断言全绿**：密钥不回显、非管理员 403（临时造了个只读用户）、未登录 401、保存后立刻生效（填错 token → 真实请求立刻失败；**证明不需要重启**）、库里存的是 `enc:v1:` 密文且无明文、恢复为配置文件的值后又能通 |
-| `scripts/dev/m2-ui-test.mjs` | **34 项断言全绿**（无头 Chrome）：海报墙（筛选/排序/卡片指向）、剧集视图（季标签 → 集列表 → 点集进条目页）、人工匹配的勾选与批量条（确认框取消时不误改数据）、设置页（状态/来源/测试连接/保存/恢复/系统信息）|
+| `scripts/dev/m2-ui-test.mjs` | **35 项断言全绿**（无头 Chrome）：海报墙（筛选/排序/卡片指向）、剧集视图（季标签 → 集列表 → 点集进该集详情 → 编辑元数据）、人工匹配的勾选与批量条（确认框取消时不误改数据）、设置页（状态/来源/测试连接/保存/恢复/系统信息）。**M6 起剧集入口并进了详情页**，所以断言从「卡片指向 /series/」改成「问接口这条是什么类型」 |
 | `scripts/dev/seed-review-item.sh` | 验收库全部是 nfo（没东西可刮）时，用它临时造一条 review 条目来验证人工匹配与批量选择界面（`--restore` 还原）|
 | 截图 | `docs/images/poster-wall.png` / `series-view.png` / `settings.png` |
 
