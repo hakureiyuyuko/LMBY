@@ -10,6 +10,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
+	"github.com/hakureiyuyuko/lmby/internal/livetv"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
@@ -42,6 +43,8 @@ type Server struct {
 	subs *subtitleJobs
 	// encoders 是本机编码能力表（真跑探测过，带磁盘缓存）。
 	encoders *encoder.Store
+	// liveFetch 拉取直播订阅源（M5）。
+	liveFetch *livetv.Fetcher
 }
 
 // New 构造 Server。
@@ -58,21 +61,22 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, 
 		encoders = encoder.NewStore(encoder.StoreOptions{FFmpeg: cfg.FFmpeg.Path, Log: log})
 	}
 	return &Server{
-		cfg:      cfg,
-		store:    st,
-		log:      log,
-		ffmpeg:   ff,
-		images:   img,
-		scraper:  scraper,
-		settings: settingsSvc,
-		meta:     meta,
-		started:  time.Now(),
-		limiter:  newLoginLimiter(8, 15*time.Minute),
-		scans:    scan.NewManager(st, log),
-		streams:  streams,
-		plays:    newPlayRegistry(),
-		subs:     newSubtitleJobs(),
-		encoders: encoders,
+		cfg:       cfg,
+		store:     st,
+		log:       log,
+		ffmpeg:    ff,
+		images:    img,
+		scraper:   scraper,
+		settings:  settingsSvc,
+		meta:      meta,
+		started:   time.Now(),
+		limiter:   newLoginLimiter(8, 15*time.Minute),
+		scans:     scan.NewManager(st, log),
+		streams:   streams,
+		plays:     newPlayRegistry(),
+		subs:      newSubtitleJobs(),
+		encoders:  encoders,
+		liveFetch: livetv.NewFetcher(),
 	}
 }
 
@@ -190,6 +194,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/play/{sid}/seek", s.requireAuth(s.handlePlaySeek))
 	mux.Handle("POST /api/v1/play/{sid}/progress", s.requireAuth(s.handlePlayProgress))
 	mux.Handle("POST /api/v1/play/{sid}/stop", s.requireAuth(s.handlePlayStop))
+
+	// ---- 直播电视（M5）----
+	// 频道列表与播放是普通登录用户就能用；源的增删改（会把频道表整体改动的操作）限管理员。
+	mux.Handle("GET /api/v1/livetv/channels", s.requireAuth(s.handleListTVChannels))
+	mux.Handle("PATCH /api/v1/livetv/channels/{id}", s.requireAuth(s.handleUpdateTVChannel))
+	mux.Handle("POST /api/v1/livetv/channels/{id}/favorite", s.requireAuth(s.handleToggleTVFavorite))
+	mux.Handle("GET /api/v1/livetv/export.m3u", s.requireAuth(s.handleExportTVM3U))
+	mux.Handle("GET /api/v1/livetv/sources", s.requireAuth(s.handleListTVSources))
+	mux.Handle("POST /api/v1/livetv/sources", s.requireAdmin(s.handleCreateTVSource))
+	mux.Handle("PATCH /api/v1/livetv/sources/{id}", s.requireAdmin(s.handleUpdateTVSource))
+	mux.Handle("DELETE /api/v1/livetv/sources/{id}", s.requireAdmin(s.handleDeleteTVSource))
+	mux.Handle("POST /api/v1/livetv/sources/{id}/refresh", s.requireAdmin(s.handleRefreshTVSource))
 
 	// ---- 前端静态资源（必须最后注册，作为兜底）----
 	mux.Handle("/", s.staticHandler())

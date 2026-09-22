@@ -1,0 +1,25 @@
+#EXTM3U
+# 样例播放列表（假地址，专供单测用；真实订阅源不进版本库）
+#EXTINF:-1 tvg-id="cctv1" tvg-name="CCTV1" group-title="央视",CCTV1 综合
+rtsp://10.10.0.1:554/live/cctv1
+#EXTINF:-1 tvg-id="cctv2",CCTV2 财经
+rtsp://10.10.0.1:554/live/cctv2
+#EXTINF:-1 ,CCTV5 体育
+rtsp://10.10.0.1:554/live/cctv5
+#EXTINF:-1 group-title="卫视,地方",湖南卫视
+http://10.10.0.2/hls/hunan.m3u8|User-Agent=Lavf/1&Referer=http://10.10.0.2/
+#EXTINF:-1 ,重庆卫视
+udp://@239.1.1.1:1234
+#EXTINF:-1 ,某频道名里带,逗号
+rtsp://10.10.0.3:554/odd
+#EXTINF:-1 ,CCTV15 音乐
+#EXTGRP:音乐戏曲
+rtsp://10.10.0.1:554/live/cctv15
+# 裸地址（没有 #EXTINF 的写法）
+http://10.10.0.5/bare.ts
+# 重复地址应当被去重（与 cctv1 同址）
+#EXTINF:-1 ,CCTV1 综合（重复）
+rtsp://10.10.0.1:554/live/cctv1
+# 非流地址的条目：Parse 会收下，FilterStreams 会丢掉
+#EXTINF:-1 ,节目单文件
+ftp://10.10.0.6/epg.xml
