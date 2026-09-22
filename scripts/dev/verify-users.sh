@@ -148,63 +148,74 @@ echo
 echo "== 2. 允许转码：关掉后必须转码的片直接 403，且不起 ffmpeg =="
 json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowTranscode":false}' >/dev/null
 check "关掉转码后旧 token 不受影响（没吊销：这个开关下一次请求就生效）" 200 "$(code "$USER_JAR" "$BASE/api/v1/libraries")"
-# 找一个「文件需要转码」的条目：库里 387 个文件需要转码，取第一个条目的起播接口看结果
-NEED_TX=$(json "$ADMIN_JAR" "$BASE/api/v1/libraries/$FIRST/items?limit=50" | jq -r '[.items[] | select(.kind=="movie" or .kind=="episode")][0].id // empty')
-if [[ -n "$NEED_TX" ]]; then
+# 找一条**真的要走转码**的条目 —— 挑法用 SQL，不是「盲扫前 25 条」：
+# 浏览器解不开的编码（hevc / mpeg2video / vc1…）、10bit、HDR 这几类必然转码。
+# 而且要**由管理员去确认决策结果**：受限用户打同一条会先被 403 拦掉，响应里
+# 根本没有 mode —— 上一轮「挑不到需要转码的条目」的真身就在这里（脚本拿受限用户
+# 去扫候选，遇到真需要转码的条目只会拿到 403，于是永远以为「库里没有」）。
+CAND=$(psqlq "select i.id from media_items i
+  join media_files f on f.item_id = i.id and f.deleted_at is null
+  where i.deleted_at is null and i.kind in ('movie', 'episode') and f.probe_state = 'ok'
+    and (coalesce(f.video_streams->0->>'codec', '') not in ('', 'h264')
+         or coalesce((f.video_streams->0->>'bitDepth')::int, 8) > 8
+         or (f.hdr is not null and f.hdr <> 'null'::jsonb))
+  order by i.id limit 8")
+note "SQL 挑出 $(wc -w <<<"$CAND") 条「可能要转码」的候选"
+TXID=""; TXMODE=""; TXJSON=""
+for id in $CAND; do
+  r=$(json "$ADMIN_JAR" "$BASE/api/v1/items/$id/play" POST '{}')
+  TXMODE=$(jq -r '.mode // empty' <<<"$r")
+  if [[ "$TXMODE" == "transcode" ]]; then TXID="$id"; TXJSON="$r"; break; fi
+done
+check "库里能挑出一条「决策为转码」的条目" true "$([[ -n "$TXID" ]] && echo true || echo false)"
+if [[ -n "$TXID" ]]; then
+  note "需要转码的条目：#$TXID（$(jq -r '.title // ""' <<<"$TXJSON")，mode=$TXMODE）"
+  # 为了确认决策，刚才真起了一路转码：先停干净，否则下面「403 时不起 ffmpeg」的基线会被它污染
+  KEY=$(json "$ADMIN_JAR" "$BASE/api/v1/playback/sessions" \
+    | jq -r --argjson id "$TXID" '[.sessions[]? | select(.itemId == $id) | .stream.key // empty] | first // empty')
+  if [[ -n "$KEY" ]]; then
+    curl -s -o /dev/null -b "$ADMIN_JAR" -X POST "$BASE/api/v1/playback/streams/$KEY/stop"
+    note "已停掉刚才那一路转码会话（key=$KEY）"
+  fi
+  sleep 1
   before=$(pgrep -fc ffmpeg || true)
-  # 挑一个真的能播的条目：起播接口对「没探出视频流」的条目本来就会 404，
-  # 那跟权限无关（第一版脚本就栽在这上面 —— 拿响应体当状态码读，还挑了个空条目）。
-  # 找「决策结果是转码」的条目：直接看响应体里有没有 transcode
-  # （响应结构改过几次，别去猜字段名 —— 判「这一路要不要转码」只看这个关键词就够）。
-  st=""; txid=""
-  for id in $(json "$ADMIN_JAR" "$BASE/api/v1/libraries/$FIRST/items?limit=60" | jq -r '.items[].id' | head -25); do
-    r=$(json "$USER_JAR" "$BASE/api/v1/items/$id/play" POST '{}')
-    if grep -q '"transcode"' <<<"$r"; then txid="$id"; break; fi
-  done
-  note "找到需要转码的条目：${txid:-（没有）}"
-  if [[ -n "$txid" ]]; then
-    st=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/items/$txid/play" \
-      -H 'Content-Type: application/json' -d '{}')
-    note "条目 #$txid 起播返回 $st（403 = 必须转码但被账号限制；200 = 这个文件不需要转码，不算失败）"
-    check "不允许转码时：要么 403，要么本来就不需要转码" true "$([[ "$st" == "403" || "$st" == "200" ]] && echo true || echo false)"
-    sleep 1
-    after=$(pgrep -fc ffmpeg || true)
-    if [[ "$st" == "403" ]]; then
-      check "403 时没有多起 ffmpeg" "$before" "$after"
-    else
-      note "这一条不需要转码，跳过「不起 ffmpeg」的检查"
-    fi
-  else
-    note "库里没找到「决策为转码」的条目 —— 改用直播那条路验（force=transcode 必定走转码）"
-  fi
-
-  # 直播：带 force=transcode 就是「这一路必须转码」，用它把开关验实
-  # 挑一个「探测能通」的频道：**不要拿全量列表的第一条** —— 那可能正好是失效源，
-  # 起播 502 会跟「权限拒绝」混在一起（真踩到）。probe=ok 是探测快照，
-  # 快照也会过期（源站会 302 重定向到别的节点、节点会挂），所以下面再用管理员
-  # 做一次基线：源站真失效时把那条断言**降级为提示**，而不是「今天源站不好，验收红了」。
-  CHT=$(json "$ADMIN_JAR" "$BASE/api/v1/livetv/channels?probe=ok" | jq -r '.channels[0].id // empty')
-  if [[ -n "$CHT" ]]; then
-    st2=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
-      -H 'Content-Type: application/json' -d '{"force":"transcode"}')
-    check "不允许转码：直播强制转码起播被拒（403）" 403 "$st2"
-    json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowTranscode":true}' >/dev/null
-    st3=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
-      -H 'Content-Type: application/json' -d '{"force":"transcode"}')
-    note "放开转码后再起播：$st3（200 = 真的放行了）"
-    # 基线：管理员打同一条频道。起不来（502）说明是**源站**的事（探测快照过期），
-    # 与权限无关 —— 硬断言 200 会变成「今天源站不好，验收红了」这种假失败。
-    stbase=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
-      -H 'Content-Type: application/json' -d '{"force":"transcode"}')
-    if [[ "$stbase" == "200" ]]; then
-      check "放开转码后同一路径放行（200）" 200 "$st3"
-    else
-      note "管理员对 #$CHT 也起不来（$stbase）—— 源站已失效，跳过这条断言（不是权限问题）"
-    fi
-  else
-    note "没有「探测能通」的频道，跳过直播转码那两条断言"
-  fi
+  st=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/items/$TXID/play" \
+    -H 'Content-Type: application/json' -d '{}')
+  check "不允许转码：这条必须转码的片起播被拒（403）" 403 "$st"
+  sleep 1
+  after=$(pgrep -fc ffmpeg || true)
+  check "403 时没有多起 ffmpeg" "$before" "$after"
 fi
+
+# 直播：带 force=transcode 就是「这一路必须转码」，用它把开关验实
+# 挑一个「探测能通」的频道：**不要拿全量列表的第一条** —— 那可能正好是失效源，
+# 起播 502 会跟「权限拒绝」混在一起（真踩到）。probe=ok 是探测快照，
+# 快照也会过期（源站会 302 重定向到别的节点、节点会挂），所以下面再用管理员
+# 做一次基线：源站真失效时把那条断言**降级为提示**，而不是「今天源站不好，验收红了」。
+CHT=$(json "$ADMIN_JAR" "$BASE/api/v1/livetv/channels?probe=ok" | jq -r '.channels[0].id // empty')
+if [[ -n "$CHT" ]]; then
+  st2=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
+    -H 'Content-Type: application/json' -d '{"force":"transcode"}')
+  check "不允许转码：直播强制转码起播被拒（403）" 403 "$st2"
+  json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowTranscode":true}' >/dev/null
+  st3=$(curl -s -o /dev/null -w '%{http_code}' -b "$USER_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
+    -H 'Content-Type: application/json' -d '{"force":"transcode"}')
+  note "放开转码后再起播：$st3（200 = 真的放行了）"
+  # 基线：管理员打同一条频道。起不来（502）说明是**源站**的事（探测快照过期），
+  # 与权限无关 —— 硬断言 200 会变成「今天源站不好，验收红了」这种假失败。
+  stbase=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -X POST "$BASE/api/v1/livetv/channels/$CHT/play" \
+    -H 'Content-Type: application/json' -d '{"force":"transcode"}')
+  if [[ "$stbase" == "200" ]]; then
+    check "放开转码后同一路径放行（200）" 200 "$st3"
+  else
+    note "管理员对 #$CHT 也起不来（$stbase）—— 源站已失效，跳过这条断言（不是权限问题）"
+  fi
+else
+  note "没有「探测能通」的频道，跳过直播转码那两条断言"
+fi
+
+# 这一节的开关用完要恢复：后面第 3、4 节还在同一个账号上继续跑
+json "$ADMIN_JAR" "$BASE/api/v1/users/$NEW_ID" PATCH '{"allowTranscode":true}' >/dev/null
 
 echo
 echo "== 3. 允许直播：关掉后列表与起播都拒绝 =="
