@@ -8,6 +8,7 @@ import { ChannelManager } from '../components/ChannelManager';
 import { TranscodePanel } from '../components/TranscodePanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { ScanPlanPanel } from '../components/ScanPlanPanel';
+import { AuditPanel } from '../components/AuditPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -107,6 +108,12 @@ export function Settings() {
           >
             {t('用户')}
           </NavLink>
+          <NavLink
+            to="/settings/audit"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('审计日志')}
+          </NavLink>
         </nav>
       </div>
 
@@ -136,6 +143,11 @@ export function SettingsLogs() {
 /** 设置页签：扫描计划（间隔属于每个库；调度器只负责「谁到期了」）。 */
 export function SettingsScan() {
   return <ScanPlanPanel />;
+}
+
+/** 设置页签：审计日志（持久的问责记录，见 internal/api/audit.go）。 */
+export function SettingsAudit() {
+  return <AuditPanel />;
 }
 
 /** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */

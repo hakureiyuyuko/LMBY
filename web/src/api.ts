@@ -160,6 +160,20 @@ export const api = {
     const qs = sp.toString();
     return request<LogsPayload>(`/api/v1/logs${qs ? `?${qs}` : ''}`);
   },
+
+  // 审计日志（持久，只给管理员）：谁在什么时候做了什么。
+  audit: (
+    params: { limit?: number; offset?: number; action?: string; q?: string; failed?: boolean } = {},
+  ) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    if (params.action) sp.set('action', params.action);
+    if (params.q) sp.set('q', params.q);
+    if (params.failed) sp.set('failed', '1');
+    const qs = sp.toString();
+    return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
+  },
   revokeSession: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -1273,6 +1287,29 @@ export type LogsPayload = {
   capacity: number;
   /** 因容量被覆盖掉的条数（看不到更早的日志时，要能说清是为什么）。 */
   dropped: number;
+};
+
+/** 一条审计记录（`GET /api/v1/audit`）：谁在什么时候做了什么。 */
+export type AuditEntry = {
+  id: number;
+  at: string;
+  actorId?: number;
+  actorName: string;
+  /** 稳定的点分动作名，如 user.create。 */
+  action: string;
+  /** 对象标识，如 user:3 / library:1（也可能为空）。 */
+  target: string;
+  /** ok | failed。 */
+  result: string;
+  detail?: Record<string, unknown>;
+  ip: string;
+};
+
+export type AuditPayload = {
+  entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 /** 一条活跃播放会话（监控页用）。 */

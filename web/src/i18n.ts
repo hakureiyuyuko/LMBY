@@ -676,6 +676,32 @@ const en: Record<string, string> = {
   '还没有媒体库 —— 先去「库管理」加一个。': 'No libraries yet — add one on the Libraries page.',
   '扫描间隔是每个媒体库自己的设置。服务端会定期检查有没有库到期，到点就自动扫一次；不会因为「新加了一个文件」而立刻醒来（那是文件系统监控的事，属于二期）。':
     'The scan interval belongs to each library. The server periodically checks which ones are due and scans them; it does not wake up the moment a file is added (that is filesystem watching, planned for later).',
+
+  // —— 审计日志（AuditPanel）——
+  '审计日志': 'Audit log',
+  '读取审计日志失败': 'Failed to load the audit log',
+  '谁在什么时候做了什么：登录、改口令、用户与媒体库的增删改、手动扫描、修改设置。口令与密钥不会出现在这里。':
+    'Who did what and when: sign-ins, password changes, user and library changes, manual scans, settings changes. Passwords and keys never appear here.',
+  '动作': 'Action',
+  '全部动作': 'All actions',
+  '搜操作者或对象…': 'Search actor or target…',
+  '只看失败': 'Failed only',
+  '没有符合条件的记录。': 'No matching entries.',
+  '时间': 'Time',
+  '操作者': 'Actor',
+  '对象': 'Target',
+  '细节': 'Detail',
+  '（未知）': '(unknown)',
+  '成功': 'OK',
+  '第 {from}–{to} 条，共 {total} 条': '{from}–{to} of {total}',
+  '新建用户': 'Create user',
+  '修改用户': 'Update user',
+  '调整可见库': 'Change library access',
+  '新建媒体库': 'Create library',
+  '修改媒体库': 'Update library',
+  '删除媒体库': 'Delete library',
+  '手动扫描': 'Manual scan',
+  '修改设置': 'Update settings',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',

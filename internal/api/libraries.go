@@ -462,6 +462,8 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == nil {
 		s.log.Info("已启动扫描", "libraryId", id, "scanRunId", runID, "refreshMetadata", req.RefreshMetadata)
+		s.audit(r.Context(), r, "library.scan", fmt.Sprintf("library:%d", id), "ok",
+			map[string]any{"refreshMetadata": req.RefreshMetadata, "scanRunId": runID})
 	}
 	if errors.Is(err, scan.ErrAlreadyRunning) {
 		writeJSON(w, http.StatusConflict, map[string]any{

@@ -100,6 +100,12 @@ func (s *Server) handleUpdateTMDBSettings(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// 审计只记「改了哪些开关、语言是什么」——**凭据本身（ReadToken/APIKey）不落审计**。
+	s.audit(r.Context(), r, "settings.update", "tmdb", "ok", map[string]any{
+		"configured": next.Configured(), "language": next.Language,
+		"hasReadToken": next.ReadToken != "", "hasApiKey": next.APIKey != "",
+		"clearedCache": cleared,
+	})
 	s.log.Info("已保存 TMDB 设置",
 		"language", next.Language, "configured", next.Configured(),
 		"langChanged", langChanged, "clearedCache", cleared, "username", usernameOf(r))
