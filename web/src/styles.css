@@ -2464,3 +2464,25 @@ th {
 .user-head:hover { background: var(--bg-elev); }
 .user-name { font-weight: 600; }
 .user-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------- 日志（设置 → 日志） */
+.badge-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.logs {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.logs td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.logs tr:last-child td {
+  border-bottom: none;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

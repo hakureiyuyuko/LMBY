@@ -150,6 +150,16 @@ export const api = {
   capabilities: () => request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities'),
   refreshCapabilities: () =>
     request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities/refresh', { method: 'POST' }),
+
+  // 最近日志（内存环形缓冲，只给管理员）：limit 条数、level 最低级别、q 关键字。
+  logs: (params: { limit?: number; level?: string; q?: string } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.level) sp.set('level', params.level);
+    if (params.q) sp.set('q', params.q);
+    const qs = sp.toString();
+    return request<LogsPayload>(`/api/v1/logs${qs ? `?${qs}` : ''}`);
+  },
   revokeSession: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -1239,6 +1249,24 @@ export type TranscodeCapabilitiesPayload = {
   capabilities: TranscodeCapabilities;
   /** 当前会用的后端（都不可用时为 null）。 */
   best: TranscodeBackend | null;
+};
+
+/** 一条服务日志（`GET /api/v1/logs`）。 */
+export type LogEntry = {
+  time: string;
+  level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+  msg: string;
+  attrs?: Record<string, unknown>;
+};
+
+export type LogsPayload = {
+  /** 时间倒序（新的在前）。 */
+  entries: LogEntry[];
+  /** 缓冲区里当前保留的条数。 */
+  total: number;
+  capacity: number;
+  /** 因容量被覆盖掉的条数（看不到更早的日志时，要能说清是为什么）。 */
+  dropped: number;
 };
 
 /** 一条活跃播放会话（监控页用）。 */

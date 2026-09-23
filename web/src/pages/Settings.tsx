@@ -6,6 +6,7 @@ import { t, useI18n } from '../i18n';
 import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
 import { ChannelManager } from '../components/ChannelManager';
 import { TranscodePanel } from '../components/TranscodePanel';
+import { LogsPanel } from '../components/LogsPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -64,6 +65,12 @@ export function Settings() {
             {t('转码与硬件')}
           </NavLink>
           <NavLink
+            to="/settings/logs"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('日志')}
+          </NavLink>
+          <NavLink
             to="/settings/libraries"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
@@ -112,6 +119,11 @@ function NotAdmin() {
       </p>
     </div>
   );
+}
+
+/** 设置页签：日志（最近的服务端日志；数据来自内存环形缓冲，见 internal/logbuf）。 */
+export function SettingsLogs() {
+  return <LogsPanel />;
 }
 
 /** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */

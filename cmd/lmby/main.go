@@ -32,6 +32,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
 	"github.com/hakureiyuyuko/lmby/internal/images"
+	"github.com/hakureiyuyuko/lmby/internal/logbuf"
 	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
@@ -316,6 +317,18 @@ func newCLILogger(level string) *slog.Logger {
 }
 
 func newLoggerTo(w io.Writer, level string) *slog.Logger {
+	return slog.New(jsonHandler(w, level))
+}
+
+// newServeLogger 给 `lmby serve` 用：日志照旧写 stderr，**同时**在内存里留一份最近日志，
+// 给管理界面的「日志」页看（见 internal/logbuf）。其他子命令不需要内存副本。
+func newServeLogger(level string) (*slog.Logger, *logbuf.Buffer) {
+	buf := logbuf.New(jsonHandler(os.Stderr, level), logbuf.DefaultCapacity)
+	return slog.New(buf), buf
+}
+
+// jsonHandler 构造 JSON 格式的 handler（服务与各子命令共用同一套级别解析）。
+func jsonHandler(w io.Writer, level string) slog.Handler {
 	var lv slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -327,7 +340,7 @@ func newLoggerTo(w io.Writer, level string) *slog.Logger {
 	default:
 		lv = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv}))
+	return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv})
 }
 
 func cmdMigrate(args []string) error {
@@ -383,7 +396,7 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	log := newLogger(cfg.LogLevel)
+	log, logBuf := newServeLogger(cfg.LogLevel)
 	log.Info("启动 LMBY",
 		"version", version.String(),
 		"listen", cfg.Listen,
@@ -543,6 +556,8 @@ func cmdServe(args []string) error {
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
 	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore, cipher)
 	srv.SetOverlay(ovSvc)
+	// 接入「最近日志」缓冲：设置 → 日志 页读它。
+	srv.SetLogBuffer(logBuf)
 
 	// 上次进程被中断时可能留下「正在扫描」的幽灵记录，启动时收尾。
 	if n, err := st.MarkStaleRunsFailed(ctx); err != nil {

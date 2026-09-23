@@ -388,6 +388,7 @@ const en: Record<string, string> = {
   '不致命但值得看一眼：文件过小、识别不了、nfo 解析失败等。':
     'Not fatal, but worth a look: tiny files, unrecognised names, unparseable nfo, and so on.',
   '级别': 'Level',
+  '条数': 'Entries',
   '路径': 'Path',
   '说明': 'Note',
   '收起': 'Collapse',
@@ -631,6 +632,22 @@ const en: Record<string, string> = {
   '真跑失败的记录': 'Real-run failures',
   '硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。':
     'Which hardware backend really works is on the Transcoding & hardware page — every entry there comes from a real run.',
+
+  // —— 日志（LogsPanel）——
+  '日志': 'Logs',
+  '读取日志失败': 'Failed to load logs',
+  '全部级别': 'All levels',
+  'INFO 以上': 'INFO and above',
+  'WARN 以上': 'WARN and above',
+  '只有 ERROR': 'ERROR only',
+  '搜消息或字段…': 'Search messages or fields…',
+  '读取中…': 'Loading…',
+  '自动刷新（5 秒）': 'Auto-refresh (5s)',
+  '下载当前视图': 'Download view',
+  '显示最近 {n} 条（缓冲区共 {total} 条，容量 {cap}）':
+    'Showing the latest {n} (buffer holds {total}, capacity {cap})',
+  '更早的 {n} 条已被覆盖': '{n} older entries were overwritten',
+  '没有符合条件的日志。': 'No log entries match.',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',

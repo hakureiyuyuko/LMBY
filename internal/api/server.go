@@ -14,6 +14,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/images"
 	"github.com/hakureiyuyuko/lmby/internal/livetv"
 	"github.com/hakureiyuyuko/lmby/internal/livetvsync"
+	"github.com/hakureiyuyuko/lmby/internal/logbuf"
 	"github.com/hakureiyuyuko/lmby/internal/overlay"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/scan"
@@ -72,6 +73,10 @@ type Server struct {
 	// overlay 是只读媒体库的写入层（库级：元数据快照 + 刮削到的图片）。
 	// 可为 nil（未接入时相关统计不显示）。
 	overlay *overlay.Service
+
+	// logBuf 是「最近日志」的内存缓冲（设置 → 日志 页读它）。
+	// 可为 nil（未接入时那个接口返回空表，不报错）。
+	logBuf *logbuf.Buffer
 }
 
 // newScanManager 构造扫描管理器并注入 config 里的小旋钮。
@@ -92,6 +97,9 @@ func (s *Server) viewerFor(ctx context.Context, r *http.Request) (store.Viewer, 
 }
 
 func (s *Server) SetOverlay(o *overlay.Service) { s.overlay = o }
+
+// SetLogBuffer 接入「最近日志」缓冲（见 internal/logbuf）：接入后设置 → 日志 页就有东西看。
+func (s *Server) SetLogBuffer(b *logbuf.Buffer) { s.logBuf = b }
 
 // New 构造 Server。
 func New(cfg *config.Config, st *store.Store, log *slog.Logger, ff ffmpeg.Info, img *images.Service,
@@ -196,6 +204,8 @@ func (s *Server) Handler() http.Handler {
 
 	// ---- 设置（管理员）----
 	mux.Handle("GET /api/v1/settings", s.requireAdmin(s.handleGetSettings))
+	// 最近日志（内存环形缓冲）：只给管理员 —— 里面有用户名、路径与错误详情。
+	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))

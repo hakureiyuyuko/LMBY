@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsLiveTV, SettingsOverview, SettingsTranscode } from './pages/Settings';
+import { Settings, SettingsLiveTV, SettingsLogs, SettingsOverview, SettingsTranscode } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -102,6 +102,7 @@ function AppRoutes() {
         <Route path="/settings" element={<Settings />}>
           <Route index element={<SettingsOverview />} />
           <Route path="transcode" element={<SettingsTranscode />} />
+          <Route path="logs" element={<SettingsLogs />} />
           <Route path="libraries" element={<Libraries />} />
           <Route path="match" element={<Match />} />
           <Route path="sessions" element={<Sessions />} />
