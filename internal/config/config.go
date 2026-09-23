@@ -38,6 +38,8 @@ type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	// Scan 是扫描器的小旋钮（M6 补：之前写在代码常量里，换不出手）。
 	Scan     ScanConfig     `toml:"scan"`
+	// Audit 是审计日志的保留策略。
+	Audit    AuditConfig    `toml:"audit"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
@@ -202,6 +204,15 @@ type FFmpegConfig struct {
 }
 
 // Default 返回带默认值的配置。
+// AuditConfig 是审计日志的保留策略。
+type AuditConfig struct {
+	// KeepDays 是审计记录保留多少天（0 = 永久保留）。
+	//
+	// 默认 365 天：一方面「翻旧账」总得有个实际边界，另一方面这张表只会一直长
+	//（每次登录、每次管理操作都是一条）。清理发生在服务启动时。
+	KeepDays int `toml:"keep_days"`
+}
+
 // ScanConfig 是扫描器的小旋钮。
 type ScanConfig struct {
 	// MinFileSize 是「小于该字节数的文件不当视频」的下限（0 = 用内置默认）。
@@ -264,6 +275,10 @@ func Default() *Config {
 		// 调度器每 60 秒看一眼有没有库到期。
 		Scan: ScanConfig{
 			ScheduleTickSeconds: 60,
+		},
+		// 审计日志：默认保留一年（启动时清理）。
+		Audit: AuditConfig{
+			KeepDays: 365,
 		},
 	}
 }
@@ -333,6 +348,7 @@ func applyEnv(cfg *Config) error {
 	setInt(&cfg.LiveTV.ProbeTimeoutSeconds, "LMBY_LIVETV_PROBE_TIMEOUT_SECONDS")
 	setInt(&cfg.LiveTV.ProbeConcurrency, "LMBY_LIVETV_PROBE_CONCURRENCY")
 	setInt(&cfg.Scan.ScheduleTickSeconds, "LMBY_SCAN_SCHEDULE_TICK_SECONDS")
+	setInt(&cfg.Audit.KeepDays, "LMBY_AUDIT_KEEP_DAYS")
 
 	if v, ok := os.LookupEnv("LMBY_LIVETV_AUTO_REFRESH"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -442,6 +458,10 @@ func (c *Config) Validate() error {
 	// 维护时想停掉调度就是它）。
 	if c.Scan.ScheduleTickSeconds < 0 || c.Scan.ScheduleTickSeconds > 3600 {
 		c.Scan.ScheduleTickSeconds = 60
+	}
+	// 审计保留天数：负数归到默认；**0 保留**（表示永久保留，不清理）。
+	if c.Audit.KeepDays < 0 {
+		c.Audit.KeepDays = 365
 	}
 	return nil
 }

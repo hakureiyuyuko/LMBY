@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -122,6 +123,8 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "创建媒体库失败", err)
 		return
 	}
+	s.audit(r.Context(), r, "library.create", fmt.Sprintf("library:%d", lib.ID), "ok",
+		map[string]any{"name": lib.Name, "kind": lib.Kind})
 	s.log.Info("已创建媒体库", "id", lib.ID, "name", lib.Name, "kind", lib.Kind, "paths", paths)
 	writeJSON(w, http.StatusCreated, libraryResponse{Library: *lib, Counts: map[string]int64{}})
 }
@@ -295,6 +298,7 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("媒体库扫描计划已更新", "libraryId", id, "intervalMinutes", m)
 	}
+	s.audit(r.Context(), r, "library.update", fmt.Sprintf("library:%d", id), "ok", nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -427,6 +431,7 @@ func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		s.notFoundOrError(w, err)
 		return
 	}
+	s.audit(r.Context(), r, "library.delete", fmt.Sprintf("library:%d", id), "ok", nil)
 	s.log.Info("已删除媒体库", "id", id)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

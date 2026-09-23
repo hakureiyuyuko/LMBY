@@ -206,6 +206,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/settings", s.requireAdmin(s.handleGetSettings))
 	// 最近日志（内存环形缓冲）：只给管理员 —— 里面有用户名、路径与错误详情。
 	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
+	// 审计日志（持久）：谁在什么时候做了什么。同样只给管理员。
+	mux.Handle("GET /api/v1/audit", s.requireAdmin(s.handleListAudit))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))

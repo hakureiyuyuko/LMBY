@@ -14,6 +14,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -23,19 +24,19 @@ import (
 
 // userView 是下发给界面的用户信息（**绝不带口令哈希**）。
 type userView struct {
-	ID                   int64    `json:"id"`
-	Username             string   `json:"username"`
-	DisplayName          string   `json:"displayName"`
-	IsAdmin              bool     `json:"isAdmin"`
-	IsDisabled           bool     `json:"isDisabled"`
-	MaxConcurrentStreams int32    `json:"maxConcurrentStreams"`
-	RestrictedLibraries  bool     `json:"restrictedLibraries"`
-	LibraryIDs           []int64  `json:"libraryIds"`
-	AllowTranscode       bool     `json:"allowTranscode"`
-	AllowLiveTV          bool     `json:"allowLiveTV"`
-	LastLoginAt          string   `json:"lastLoginAt,omitempty"`
-	CreatedAt            string   `json:"createdAt"`
-	ActiveSessions       int      `json:"activeSessions"`
+	ID                   int64   `json:"id"`
+	Username             string  `json:"username"`
+	DisplayName          string  `json:"displayName"`
+	IsAdmin              bool    `json:"isAdmin"`
+	IsDisabled           bool    `json:"isDisabled"`
+	MaxConcurrentStreams int32   `json:"maxConcurrentStreams"`
+	RestrictedLibraries  bool    `json:"restrictedLibraries"`
+	LibraryIDs           []int64 `json:"libraryIds"`
+	AllowTranscode       bool    `json:"allowTranscode"`
+	AllowLiveTV          bool    `json:"allowLiveTV"`
+	LastLoginAt          string  `json:"lastLoginAt,omitempty"`
+	CreatedAt            string  `json:"createdAt"`
+	ActiveSessions       int     `json:"activeSessions"`
 }
 
 func (s *Server) userViews(r *http.Request, users []store.User) ([]userView, error) {
@@ -129,6 +130,8 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "创建用户失败", err)
 		return
 	}
+	s.audit(r.Context(), r, "user.create", "user:"+u.Username, "ok",
+		map[string]any{"username": u.Username, "isAdmin": u.IsAdmin})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
 		s.serverError(w, "读取用户权限失败", err)
@@ -208,6 +211,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.audit(r.Context(), r, "user.update", "user:"+u.Username, "ok",
+		map[string]any{"isAdmin": u.IsAdmin, "disabled": u.IsDisabled})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
 		s.serverError(w, "读取用户权限失败", err)
@@ -255,6 +260,8 @@ func (s *Server) handleSetUserLibraries(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "用户不存在")
 		return
 	}
+	s.audit(r.Context(), r, "user.libraries", "user:"+u.Username, "ok",
+		map[string]any{"count": len(req.LibraryIDs)})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
 		s.serverError(w, "读取用户权限失败", err)
@@ -294,6 +301,8 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "重置口令失败", err)
 		return
 	}
+	// 口令**绝不进审计**：只记「谁给谁重置了口令」这个事实（重置已吊销其全部会话）。
+	s.audit(r.Context(), r, "user.password_reset", fmt.Sprintf("user:%d", id), "ok", nil)
 	if err := s.store.DeleteUserSessions(r.Context(), id); err != nil {
 		s.serverError(w, "吊销会话失败", err)
 		return
@@ -324,6 +333,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "删除用户失败", err)
 		return
 	}
+	s.audit(r.Context(), r, "user.delete", fmt.Sprintf("user:%d", id), "ok", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -337,4 +347,3 @@ func toIntPtr(v *int32) *int {
 
 // timeLayout 是下发时间用的格式（与其它接口一致：RFC3339）。
 const timeLayout = "2006-01-02T15:04:05Z07:00"
-

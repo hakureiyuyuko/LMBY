@@ -114,6 +114,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// 关键：用户不存在时也做一次等价的口令哈希运算，抹平响应时间差异。
 			auth.DummyVerify(req.Password)
 			s.limiter.Fail(limitKey)
+			s.auditNamed(r.Context(), r, username, "auth.login", "", "failed",
+				map[string]any{"reason": "用户名不存在"})
 			writeError(w, http.StatusUnauthorized, "用户名或口令不正确")
 			return
 		}
@@ -123,6 +125,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if u.IsDisabled {
 		s.limiter.Fail(limitKey)
+		s.auditNamed(r.Context(), r, u.Username, "auth.login", "user:"+u.Username, "failed",
+			map[string]any{"reason": "账号已禁用"})
 		writeError(w, http.StatusUnauthorized, "该账号已被禁用")
 		return
 	}
@@ -135,10 +139,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		s.limiter.Fail(limitKey)
 		s.log.Warn("登录失败", "username", u.Username, "ip", clientIP(r))
+		s.auditNamed(r.Context(), r, u.Username, "auth.login", "user:"+u.Username, "failed",
+			map[string]any{"reason": "口令不正确"})
 		writeError(w, http.StatusUnauthorized, "用户名或口令不正确")
 		return
 	}
 	s.limiter.Reset(limitKey)
+	// 登录成功也进审计：失败那条记的是「谁尝试了」，这条记的是「谁进来了」。
+	{
+		uid := u.ID
+		s.writeAudit(r.Context(), store.AuditEntry{
+			ActorID: &uid, ActorName: u.Username, Action: "auth.login",
+			Target: "user:" + u.Username, Result: "ok", IP: clientIP(r),
+		})
+	}
 
 	// 代价参数升级后静默重算，用户无感。
 	if needsRehash {
@@ -281,6 +295,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("撤销其他会话失败", "err", err)
 	}
 	s.log.Info("口令已修改", "username", a.User.Username, "revokedSessions", revoked)
+	s.audit(r.Context(), r, "auth.password_change", "user:"+a.User.Username, "ok",
+		map[string]any{"revokedSessions": revoked})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,

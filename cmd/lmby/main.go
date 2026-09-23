@@ -432,6 +432,16 @@ func cmdServe(args []string) error {
 	}
 	log.Info("数据库就绪", "schemaVersion", schemaVersion)
 
+	// 审计日志：按保留天数清理（0 = 永久保留，不清理）。
+	if cfg.Audit.KeepDays > 0 {
+		cutoff := time.Now().AddDate(0, 0, -cfg.Audit.KeepDays)
+		if n, err := st.PruneAuditLogs(ctx, cutoff); err != nil {
+			log.Warn("清理过期审计日志失败", "err", err)
+		} else if n > 0 {
+			log.Info("已清理过期审计日志", "count", n, "keepDays", cfg.Audit.KeepDays)
+		}
+	}
+
 	ff := ffmpeg.Detect(ctx, cfg.FFmpeg.Path)
 	if ff.Available {
 		log.Info("ffmpeg 就绪",
