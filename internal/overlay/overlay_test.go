@@ -15,6 +15,7 @@ import (
 // fakeStore 只需要三个方法：条目、库是否只读、只读根路径清单。
 type fakeStore struct {
 	items    map[int64]*store.Item
+	libs     map[int64]*store.Library
 	readOnly map[int64]bool
 	roots    []string
 }
@@ -22,6 +23,14 @@ type fakeStore struct {
 func (f *fakeStore) GetItem(_ context.Context, id int64) (*store.Item, error) {
 	if it, ok := f.items[id]; ok {
 		return it, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+// GetLibrary 是「清理叠加层孤儿」时判断库还在不在用的。
+func (f *fakeStore) GetLibrary(_ context.Context, id int64) (*store.Library, error) {
+	if lib, ok := f.libs[id]; ok {
+		return lib, nil
 	}
 	return nil, store.ErrNotFound
 }

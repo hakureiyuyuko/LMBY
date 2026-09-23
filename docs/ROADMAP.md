@@ -861,20 +861,29 @@ recent 前 10 条与 hero 逐条一致；**自造一条观看记录**后验推�
 
 ---
 
-## M8 — 迁移、运维、发布（1.5 周）
+## M8 — 运维、发布（1.0）
 
-- [ ] **Emby/Jellyfin 导入器**（`lmby import-emby`）：读 `/config/metadata/library/**/*.nfo` + 媒体同目录 nfo → 匹配灌入 PG；可选读 `library.db` 导入播放进度；图片路径映射
-- [ ] 缓存与清理策略：转码分片、trickplay、图片缓存、日志轮转、孤儿文件清理
-- [ ] `lmby backup` / `lmby restore`（PG dump + 配置 + 缓存策略）
-- [ ] `/metrics`（Prometheus，可选）+ 日志分级
-- [ ] 文档：README（截图 + 5 分钟快速开始）、`docs/CONFIG.md`、`docs/TRANSCODING.md`、`docs/ARCHITECTURE.md`、`docs/ADR/*`
-- [ ] 发布流程：GitHub Actions 交叉编译（linux amd64/arm64）+ 多架构镜像 + `SHA256SUMS.txt`
+- [x] 【发布流程：release workflow 交叉编译 4 平台（linux amd64/arm64/armv7 + windows amd64）
+      + `SHA256SUMS.txt` + GitHub Release（说明用 `docs/releases/<tag>.md`）—— 每个 tag 自动出，
+      已经跑过 v0.2.0 / v0.3.x / v0.9.0】
+- [ ] 缓存与清理策略：转码分片（孤立会话残留）、图片缓存、孤儿文件清理、日志
+- [ ] `lmby backup` / `lmby restore`（PG dump + 配置 + 数据目录清单）
+- [ ] `/metrics`（Prometheus，可选）
+- [ ] 文档：`docs/CONFIG.md`、`docs/ARCHITECTURE.md`（README / TRANSCODING / ADR 已有）
 - [ ] **DoD**：全新用户照 README 30 分钟内从零跑起来并播出第一个视频
+
+> **Emby/Jellyfin 导入器已经挪到 M9（可选）** —— 它是「迁移工具」而不是服务器能力，
+> 1.0 的判定标准是「从零跑起来能播」而不是「能把旧数据搬过来」；而且外部格式会变
+> （Emby / Jellyfin 各自的 nfo 与 library.db 结构都改过几轮），跟着它们追的成本不该
+> 压在 1.0 上。真要迁移的人，按 nfo 约定把目录摆好再扫一遍就能得到大部分结果。
 
 ---
 
 ## M9 — 二期候选（先不做，留扩展点）
 > 音乐库与 DLNA/UPnP **已砍**，不在候选列表内（本项目就是纯 Web 播放站点）。
+- [ ] **Emby/Jellyfin 导入器**（从 M8 挪过来）：读 `/config/metadata/library/**/*.nfo` +
+      媒体同目录 nfo → 匹配灌入 PG；可选读 `library.db` 导入播放进度；图片路径映射。
+      等真有迁移需求时再做（外部格式会变，跟着追的成本不低）
 - [ ] DVR / 录制 / EPG（XMLTV）
 - [ ] **海报墙虚拟滚动（万级条目）+ 筛选排序 + 多选批量加入列表**（从 M6 挪过来：
       10 万条目下的帧率是性能债，但它不挡住「手机能用」与「能发版」；

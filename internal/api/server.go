@@ -208,6 +208,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
 	// 审计日志（持久）：谁在什么时候做了什么。同样只给管理员。
 	mux.Handle("GET /api/v1/audit", s.requireAdmin(s.handleListAudit))
+	// 维护：缓存占用与清理（设置 → 缓存与清理）。
+	mux.Handle("GET /api/v1/maintenance", s.requireAdmin(s.handleMaintenance))
+	mux.Handle("POST /api/v1/maintenance/clean", s.requireAdmin(s.handleMaintenanceClean))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))

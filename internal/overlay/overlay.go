@@ -23,8 +23,10 @@ package overlay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +40,7 @@ import (
 // Store 是本包需要的存储能力（窄接口，便于注入测试替身）。
 type Store interface {
 	GetItem(ctx context.Context, id int64) (*store.Item, error)
+	GetLibrary(ctx context.Context, id int64) (*store.Library, error)
 	LibraryReadOnly(ctx context.Context, libraryID int64) (bool, error)
 	ReadOnlyRoots(ctx context.Context) ([]string, error)
 }
@@ -275,6 +278,108 @@ func (s *Service) Clear(ctx context.Context, libraryID int64) (int, int64, error
 }
 
 // Stats 统计某个库叠加层的文件数与占用（目录不存在就是 0）。
+// OrphanStats 只统计「孤儿」有多少（**不删**）：界面上先看数量，再决定清不清。
+func (s *Service) OrphanStats(ctx context.Context) (int, int64, error) {
+	return s.purgeOrphans(ctx, false)
+}
+
+// PurgeOrphans 删掉孤儿，返回 (文件数, 字节数)。
+//
+// 与 OrphanStats 走同一段逻辑（只差一个 remove）—— 否则「统计说 3 个」而「清完说 5 个」
+// 这种不一致会让人不敢相信界面上的数字。
+func (s *Service) PurgeOrphans(ctx context.Context) (int, int64, error) {
+	return s.purgeOrphans(ctx, true)
+}
+
+// purgeOrphans 是两者的共同实现。
+//
+// 边界（都是刻意的）：
+//   - 只碰**确实已经不在库里**的（`ErrNotFound`）。查库出错（数据库有问题）时一律
+//     **跳过** —— 那种时候「查不到」并不等于「不存在」，照删会把好数据抹了；
+//   - 不在这里做容量淘汰：叠加层是「刮削产物的备份」，按容量删它是另一回事；
+//   - 目录名不是数字的（比如清空过程中用的 `.clearing-*` 坟场）一律跳过 —— 它们有自己的生命周期。
+func (s *Service) purgeOrphans(ctx context.Context, remove bool) (int, int64, error) {
+	libEntries, err := os.ReadDir(s.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("读取叠加层目录失败: %w", err)
+	}
+
+	var files int
+	var bytes int64
+	for _, le := range libEntries {
+		if !le.IsDir() {
+			continue
+		}
+		libID, err := strconv.ParseInt(le.Name(), 10, 64)
+		if err != nil {
+			continue
+		}
+		libDir := filepath.Join(s.root, le.Name())
+		if _, err := s.st.GetLibrary(ctx, libID); err != nil {
+			if !errors.Is(err, store.ErrNotFound) {
+				continue // 查库出错：宁可留着，也不误删
+			}
+			f, b := dirUsage(libDir)
+			if remove {
+				if rmErr := os.RemoveAll(libDir); rmErr != nil {
+					return files, bytes, fmt.Errorf("删除叠加层目录失败: %w", rmErr)
+				}
+			}
+			files += f
+			bytes += b
+			continue
+		}
+		itemEntries, err := os.ReadDir(libDir)
+		if err != nil {
+			continue
+		}
+		for _, ie := range itemEntries {
+			if !ie.IsDir() {
+				continue
+			}
+			itemID, err := strconv.ParseInt(ie.Name(), 10, 64)
+			if err != nil {
+				continue
+			}
+			itemDir := filepath.Join(libDir, ie.Name())
+			if _, err := s.st.GetItem(ctx, itemID); err != nil {
+				if !errors.Is(err, store.ErrNotFound) {
+					continue
+				}
+				f, b := dirUsage(itemDir)
+				if remove {
+					if rmErr := os.RemoveAll(itemDir); rmErr != nil {
+						return files, bytes, fmt.Errorf("删除叠加层目录失败: %w", rmErr)
+					}
+				}
+				files += f
+				bytes += b
+			}
+		}
+	}
+	return files, bytes, nil
+}
+
+// dirUsage 统计一个目录里的文件数与总字节数（用于「清掉了多少」的回报）。
+func dirUsage(dir string) (int, int64) {
+	var files int
+	var bytes int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			files++
+			bytes += info.Size()
+		}
+		return nil
+	})
+	return files, bytes
+}
+
 func (s *Service) Stats(libraryID int64) (Stats, error) {
 	var out Stats
 	root := s.LibraryDir(libraryID)
