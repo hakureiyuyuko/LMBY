@@ -28,6 +28,7 @@ import (
 
 	"github.com/hakureiyuyuko/lmby/internal/api"
 	"github.com/hakureiyuyuko/lmby/internal/auth"
+	"github.com/hakureiyuyuko/lmby/internal/backup"
 	"github.com/hakureiyuyuko/lmby/internal/config"
 	"github.com/hakureiyuyuko/lmby/internal/encoder"
 	"github.com/hakureiyuyuko/lmby/internal/ffmpeg"
@@ -75,6 +76,10 @@ func run(args []string) error {
 		return cmdScrape(args)
 	case "livetv":
 		return cmdLiveTV(args)
+	case "backup":
+		return cmdBackup(args)
+	case "restore":
+		return cmdRestore(args)
 	case "version", "--version", "-v":
 		fmt.Println("lmby " + version.String())
 		return nil
@@ -93,6 +98,8 @@ func usage() {
 用法:
   lmby serve   [--config 路径] [--migrate=false]   启动服务（默认命令）
   lmby migrate [--config 路径]                     仅应用数据库迁移
+  lmby backup  [-o 文件] [--with-overlay]          备份（数据库 + 配置 + 密钥）
+  lmby restore -i 文件 [--yes] [--dsn DSN]          恢复（**会清空目标库**，需 --yes）
   lmby user add <用户名> [--admin]                 创建账号
   lmby user passwd <用户名>                        重置口令
   lmby user ls                                    列出账号
@@ -920,4 +927,105 @@ func janitor(ctx context.Context, st *store.Store, srv *api.Server, log *slog.Lo
 			cancel()
 		}
 	}
+}
+
+// cmdBackup 把「数据库 + 配置 + 密钥」打成一个包。
+//
+//	lmby backup [-o 文件] [--with-overlay] [--config 路径]
+//
+// 刻意**不**备份缓存类目录（图片缓存、转码分片、探测工作目录）—— 它们都能重新生成。
+// 备份要小、要快、要能一眼看懂里面有什么（所以包里带 MANIFEST.json）。
+func cmdBackup(args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	out := fs.String("o", "", "输出文件（默认 lmby-backup-<时间>.tar.gz）")
+	withOverlay := fs.Bool("with-overlay", false, "连叠加层（只读库的刮削产物）一起备份")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	path, err := backup.Create(ctx, backup.Options{
+		Output:      *out,
+		DSN:         cfg.Database.DSN,
+		DataDir:     cfg.DataDir,
+		ConfigPath:  actualConfigPath(*configPath),
+		PgDump:      cfg.Backup.PgDump,
+		WithOverlay: *withOverlay,
+		Version:     version.String(),
+		Log:         newLogger(cfg.LogLevel),
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("备份已写入 %s\n", path)
+	fmt.Println("提示：包里带着 secret.key（它能解开配置里的凭据）—— 当秘密文件保管。")
+	return nil
+}
+
+// cmdRestore 用备份包覆盖目标实例。
+//
+//	lmby restore -i 备份包 [--yes] [--dsn DSN] [--data-dir 目录] [--overwrite-config]
+//
+// **会清空目标数据库**（pg_restore --clean），所以必须 --yes。
+// 恢复到另一个实例就把它指过去（--dsn / --data-dir）；配置与密钥默认**不覆盖**已存在的文件，
+// 免得「恢复数据」顺手把现有实例的配置换掉。
+func cmdRestore(args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	configPath := fs.String("config", "", "配置文件路径")
+	in := fs.String("i", "", "备份包路径（必填）")
+	dsn := fs.String("dsn", "", "目标数据库 DSN（默认取配置里的）")
+	dataDir := fs.String("data-dir", "", "目标数据目录（默认取配置里的）")
+	yes := fs.Bool("yes", false, "确认：恢复会清空并覆盖目标数据库")
+	overwriteCfg := fs.Bool("overwrite-config", false, "覆盖已存在的 config.toml / secret.key")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*in) == "" {
+		return errors.New("用法: lmby restore -i <备份包> [--yes] [--dsn DSN] [--data-dir 目录]")
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return err
+	}
+	targetDSN := *dsn
+	if targetDSN == "" {
+		targetDSN = cfg.Database.DSN
+	}
+	targetDir := *dataDir
+	if targetDir == "" {
+		targetDir = cfg.DataDir
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return backup.Restore(ctx, backup.RestoreOptions{
+		Input:           *in,
+		DSN:             targetDSN,
+		DataDir:         targetDir,
+		ConfigPath:      actualConfigPath(*configPath),
+		PgRestore:       cfg.Backup.PgRestore,
+		Confirm:         *yes,
+		OverwriteConfig: *overwriteCfg,
+		Log:             newLogger(cfg.LogLevel),
+	})
+}
+
+// actualConfigPath 返回真正生效的配置文件路径（备份时把「生效的那份」带走）。
+// Load 内部也会做同样的搜索，这里只是把结果拿到手。
+func actualConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	for _, p := range config.DefaultSearchPaths() {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }

@@ -37,9 +37,11 @@ type Config struct {
 
 	Database DatabaseConfig `toml:"database"`
 	// Scan 是扫描器的小旋钮（M6 补：之前写在代码常量里，换不出手）。
-	Scan     ScanConfig     `toml:"scan"`
+	Scan ScanConfig `toml:"scan"`
 	// Audit 是审计日志的保留策略。
-	Audit    AuditConfig    `toml:"audit"`
+	Audit AuditConfig `toml:"audit"`
+	// Backup 是备份/恢复用的外部工具路径（空 = 从 PATH 找）。
+	Backup   BackupConfig   `toml:"backup"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
@@ -195,6 +197,15 @@ type DatabaseConfig struct {
 	MaxConns int32 `toml:"max_conns"`
 	// AutoMigrate 为 true 时，服务启动会自动应用迁移。
 	AutoMigrate bool `toml:"auto_migrate"`
+}
+
+// BackupConfig 是备份/恢复用到的外部工具（可选）。
+//
+// 默认从 PATH 找 `pg_dump` / `pg_restore`（它们跟 PostgreSQL 一起装）；
+// 找不到时用这里显式指定路径（例如只装了 server、客户端工具在别处）。
+type BackupConfig struct {
+	PgDump    string `toml:"pg_dump"`
+	PgRestore string `toml:"pg_restore"`
 }
 
 // FFmpegConfig 指向外部 ffmpeg 可执行文件。

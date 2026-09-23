@@ -869,7 +869,10 @@ recent 前 10 条与 hero 逐条一致；**自造一条观看记录**后验推�
 - [x] 缓存与清理策略 —— 2026-09-23：叠加层孤儿清理（`overlay.PurgeOrphans`，
       查库出错时**一律不删**）+ 缓存占用与一键清理（设置 → 缓存与清理）；
       转码分片由 `stream.NewManager` 启动时清，图片缓存由 LRU 管；`verify-maintenance.sh` 12/0
-- [ ] `lmby backup` / `lmby restore`（PG dump + 配置 + 数据目录清单）
+- [x] `lmby backup` / `lmby restore` —— 2026-09-23：pg_dump -Fc 打包
+      （MANIFEST + db.dump + config.toml + secret.key，`--with-overlay` 可选）；
+      恢复必须 `--yes`（会清空目标库）、配置与密钥默认不覆盖、DSN 遮罩、解包拒 `../`；
+      `verify-backup.sh` 15/0
 - [ ] `/metrics`（Prometheus，可选）
 - [ ] 文档：`docs/CONFIG.md`、`docs/ARCHITECTURE.md`（README / TRANSCODING / ADR 已有）
 - [ ] **DoD**：全新用户照 README 30 分钟内从零跑起来并播出第一个视频
