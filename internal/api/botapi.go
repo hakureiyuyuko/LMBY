@@ -112,12 +112,6 @@ func botAllowedPath(r *http.Request) bool {
 	return false
 }
 
-// isBotRequest 判断这次请求是不是管理密钥认证的（审计里用）。
-func isBotRequest(r *http.Request) bool {
-	v, _ := r.Context().Value(botCtxKey).(bool)
-	return v
-}
-
 // ---- 密钥的生成 / 查看 / 撤销（管理员，会话认证） ----
 
 // handleGetBotKey 返回当前密钥的元信息（**明文只在生成时出现一次**）。
@@ -150,7 +144,7 @@ func (s *Server) handleCreateBotKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 审计只记「生成了/轮换了一把」，**不记密钥本身**。
-	s.audit(r.Context(), r, "settings.bot_key_created", "bot_api_key", "ok",
+	s.audit(r.Context(), r, "settings.bot_key_created", "bot_api_key",
 		map[string]any{"prefix": key[:len(botKeyPrefix)+8]})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"key":    key,
@@ -168,7 +162,7 @@ func (s *Server) handleDeleteBotKey(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": existed})
 	if existed {
-		s.audit(r.Context(), r, "settings.bot_key_revoked", "bot_api_key", "ok", nil)
+		s.audit(r.Context(), r, "settings.bot_key_revoked", "bot_api_key", nil)
 	}
 }
 

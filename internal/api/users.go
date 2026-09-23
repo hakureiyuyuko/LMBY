@@ -130,7 +130,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "创建用户失败", err)
 		return
 	}
-	s.audit(r.Context(), r, "user.create", "user:"+u.Username, "ok",
+	s.audit(r.Context(), r, "user.create", "user:"+u.Username,
 		map[string]any{"username": u.Username, "isAdmin": u.IsAdmin})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
@@ -211,7 +211,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.audit(r.Context(), r, "user.update", "user:"+u.Username, "ok",
+	s.audit(r.Context(), r, "user.update", "user:"+u.Username,
 		map[string]any{"isAdmin": u.IsAdmin, "disabled": u.IsDisabled})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
@@ -260,7 +260,7 @@ func (s *Server) handleSetUserLibraries(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "用户不存在")
 		return
 	}
-	s.audit(r.Context(), r, "user.libraries", "user:"+u.Username, "ok",
+	s.audit(r.Context(), r, "user.libraries", "user:"+u.Username,
 		map[string]any{"count": len(req.LibraryIDs)})
 	views, err := s.userViews(r, []store.User{*u})
 	if err != nil {
@@ -302,7 +302,7 @@ func (s *Server) handleSetUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 口令**绝不进审计**：只记「谁给谁重置了口令」这个事实（重置已吊销其全部会话）。
-	s.audit(r.Context(), r, "user.password_reset", fmt.Sprintf("user:%d", id), "ok", nil)
+	s.audit(r.Context(), r, "user.password_reset", fmt.Sprintf("user:%d", id), nil)
 	if err := s.store.DeleteUserSessions(r.Context(), id); err != nil {
 		s.serverError(w, "吊销会话失败", err)
 		return
@@ -333,7 +333,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "删除用户失败", err)
 		return
 	}
-	s.audit(r.Context(), r, "user.delete", fmt.Sprintf("user:%d", id), "ok", nil)
+	s.audit(r.Context(), r, "user.delete", fmt.Sprintf("user:%d", id), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

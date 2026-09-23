@@ -26,9 +26,11 @@ const (
 	auditMaxLimit     = 600
 )
 
-// audit 记一条审计，自动带上当前操作者与来源 IP。
-func (s *Server) audit(ctx context.Context, r *http.Request, action, target, result string, detail map[string]any) {
-	e := store.AuditEntry{Action: action, Target: target, Result: result, Detail: detail, IP: clientIP(r)}
+// audit 记一条**成功**的审计，自动带上当前操作者与来源 IP。
+//
+// 失败那条（result=failed）走 auditNamed；这里的结果恒为 ok，所以不设 result 形参。
+func (s *Server) audit(ctx context.Context, r *http.Request, action, target string, detail map[string]any) {
+	e := store.AuditEntry{Action: action, Target: target, Result: "ok", Detail: detail, IP: clientIP(r)}
 	if auth := currentAuth(r); auth != nil && auth.User != nil {
 		id := auth.User.ID
 		e.ActorID = &id

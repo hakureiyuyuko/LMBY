@@ -97,7 +97,7 @@ func (s *Server) handleMaintenanceClean(w http.ResponseWriter, r *http.Request) 
 		}
 		res["images"] = map[string]any{"files": files, "bytes": bytes}
 		s.log.Info("已清空图片缓存", "files", files, "bytes", bytes)
-		s.audit(ctx, r, "maintenance.images_cleared", "images", "ok",
+		s.audit(ctx, r, "maintenance.images_cleared", "images",
 			map[string]any{"files": files, "bytes": bytes})
 	}
 	if req.OverlayOrphans {
@@ -112,7 +112,7 @@ func (s *Server) handleMaintenanceClean(w http.ResponseWriter, r *http.Request) 
 		}
 		res["overlayOrphans"] = map[string]any{"files": files, "bytes": bytes}
 		s.log.Info("已清理叠加层孤儿", "files", files, "bytes", bytes)
-		s.audit(ctx, r, "maintenance.overlay_orphans_purged", "overlay", "ok",
+		s.audit(ctx, r, "maintenance.overlay_orphans_purged", "overlay",
 			map[string]any{"files": files, "bytes": bytes})
 	}
 

@@ -295,7 +295,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("撤销其他会话失败", "err", err)
 	}
 	s.log.Info("口令已修改", "username", a.User.Username, "revokedSessions", revoked)
-	s.audit(r.Context(), r, "auth.password_change", "user:"+a.User.Username, "ok",
+	s.audit(r.Context(), r, "auth.password_change", "user:"+a.User.Username,
 		map[string]any{"revokedSessions": revoked})
 
 	writeJSON(w, http.StatusOK, map[string]any{

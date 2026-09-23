@@ -100,7 +100,7 @@ func Create(ctx context.Context, o Options) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("建临时目录失败: %w", err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	// 1) 数据库
 	dumpPath := filepath.Join(tmp, dumpName)
@@ -218,7 +218,7 @@ func Restore(ctx context.Context, o RestoreOptions) error {
 	if err != nil {
 		return fmt.Errorf("建临时目录失败: %w", err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	if err := readTarGz(o.Input, tmp); err != nil {
 		return err
@@ -307,7 +307,7 @@ func readSchemaVersion(ctx context.Context, dsn string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 	var v int
 	if err := conn.QueryRow(ctx, `select coalesce(max(version), 0) from schema_migrations`).Scan(&v); err != nil {
 		return 0, err
@@ -338,7 +338,7 @@ func copyFileMode(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func copyFileMode(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
@@ -375,7 +375,7 @@ func writeTarGz(dest, dir string) error {
 	if err != nil {
 		return fmt.Errorf("创建备份文件失败: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
 
@@ -406,7 +406,7 @@ func writeTarGz(dest, dir string) error {
 		if err != nil {
 			return err
 		}
-		defer in.Close()
+		defer func() { _ = in.Close() }()
 		_, err = io.Copy(tw, in)
 		return err
 	})
@@ -427,12 +427,12 @@ func readTarGz(src, dir string) error {
 	if err != nil {
 		return fmt.Errorf("打开备份包失败: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return fmt.Errorf("这不是一个 gzip 文件: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -462,10 +462,12 @@ func readTarGz(src, dir string) error {
 				return err
 			}
 			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+				_ = out.Close()
 				return err
 			}
-			out.Close()
+			if err := out.Close(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
