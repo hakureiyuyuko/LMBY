@@ -144,6 +144,54 @@ export const api = {
     }),
 
   sessions: () => request<{ sessions: SessionInfo[] }>('/api/v1/auth/sessions'),
+
+  // 转码与硬件：本机编码能力表。每一条都是**真跑过**的结论（拿 1 秒小样真编一遍），
+  // 所以它能回答「这台机器到底能不能硬解 HEVC」—— 每台机器都不一样，只能实测。
+  capabilities: () => request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities'),
+  refreshCapabilities: () =>
+    request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities/refresh', { method: 'POST' }),
+
+  // 最近日志（内存环形缓冲，只给管理员）：limit 条数、level 最低级别、q 关键字。
+  logs: (params: { limit?: number; level?: string; q?: string } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.level) sp.set('level', params.level);
+    if (params.q) sp.set('q', params.q);
+    const qs = sp.toString();
+    return request<LogsPayload>(`/api/v1/logs${qs ? `?${qs}` : ''}`);
+  },
+
+  // 审计日志（持久，只给管理员）：谁在什么时候做了什么。
+  audit: (
+    params: { limit?: number; offset?: number; action?: string; q?: string; failed?: boolean } = {},
+  ) => {
+    const sp = new URLSearchParams();
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    if (params.action) sp.set('action', params.action);
+    if (params.q) sp.set('q', params.q);
+    if (params.failed) sp.set('failed', '1');
+    const qs = sp.toString();
+    return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
+  },
+
+  // 管理 API 密钥（给 bot / 脚本用的长期凭据；只能开用户管理那几个接口）。
+  botKey: () =>
+    request<{ configured: boolean; prefix?: string; createdAt?: string }>('/api/v1/settings/bot-key'),
+  createBotKey: () =>
+    request<{ key: string; prefix: string; note: string }>('/api/v1/settings/bot-key', {
+      method: 'POST',
+    }),
+  deleteBotKey: () =>
+    request<{ revoked: boolean }>('/api/v1/settings/bot-key', { method: 'DELETE' }),
+
+  // 维护：缓存占用与清理（设置 → 缓存与清理）。
+  maintenance: () => request<MaintenancePayload>('/api/v1/maintenance'),
+  cleanMaintenance: (body: { images?: boolean; overlayOrphans?: boolean }) =>
+    request<{ cleaned: Record<string, { files: number; bytes: number }> }>(
+      '/api/v1/maintenance/clean',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   revokeSession: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -155,7 +203,7 @@ export const api = {
   createLibrary: (name: string, kind: string, paths: string[]) =>
     request<LibrarySummary>('/api/v1/libraries', { method: 'POST', ...json({ name, kind, paths }) }),
   /** 改名 / 改类型 / 替换根路径 / 只读开关，共用一个 PATCH。 */
-  updateLibrary: (id: number, body: { name?: string; kind?: string; paths?: string[]; readonly?: boolean }) =>
+  updateLibrary: (id: number, body: { name?: string; kind?: string; paths?: string[]; readonly?: boolean; scanIntervalMinutes?: number }) =>
     request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'PATCH', ...json(body) }),
   /** 清空某个只读库的叠加层（只删数据目录里那一块，媒体目录与数据库不动）。 */
   clearLibraryOverlay: (id: number) =>
@@ -667,6 +715,12 @@ export interface LibrarySummary {
   scanRunning: boolean;
   /** 只读（网盘 / 只读挂载）：LMBY 不往库目录里写，刮削产物落进 overlay。 */
   readonly?: boolean;
+  /** 自动扫描间隔（分钟；0 = 不自动扫）。 */
+  scanIntervalMinutes?: number;
+  /** 上次扫描开始时间（派生字段）。 */
+  lastScanAt?: string;
+  /** 下次扫描时间（派生字段，按间隔算出来）。 */
+  nextScanAt?: string;
 }
 
 export interface ScanRun {
@@ -1184,6 +1238,115 @@ export interface TranscodeSessionStat {
   error?: string;
   log?: string;
 }
+
+/**
+ * 一个转码后端的能力（`GET /api/v1/transcode/capabilities`）。
+ *
+ * 里面的 encode / decode / quality 都是**真跑过**的结论：拿 1 秒小样真编一遍，
+ * 只有跑通的才会是 true —— `ffmpeg -encoders` 列出某个编码器不代表这台机器能用它。
+ */
+export type TranscodeBackend = {
+  kind: string;
+  name: string;
+  device?: string;
+  available: boolean;
+  /** "h264"/"hevc"/"av1" → 是否真跑通过。 */
+  encode?: Record<string, boolean>;
+  /** "h264"/"hevc" → 是否真跑通过。 */
+  decode?: Record<string, boolean>;
+  /** 真跑通过的码率模式（cqp/vbr/cbr/icq…）。 */
+  quality?: string[];
+  /** 上面第一个能用的：运行时直接用，不再猜。 */
+  preferQuality?: string;
+  lowPower?: boolean;
+  filters?: string[];
+  /** 不可用的原因（真跑失败时 ffmpeg 的原话）。 */
+  notes?: string[];
+};
+
+/** 本机能力表全貌。 */
+export type TranscodeCapabilities = {
+  probedAt: string;
+  elapsedMs: number;
+  ffmpeg: string;
+  version: string;
+  /** ffmpeg 声明支持的（≠ 能用）。 */
+  hwaccels: string[];
+  encoders: string[];
+  filters: string[];
+  devices: string[];
+  software: TranscodeBackend;
+  backends: TranscodeBackend[];
+  warnings?: string[];
+  samplePath?: string;
+  /** "vaapi/h264" → 实测倍速（比实时快多少倍）。 */
+  speeds?: Record<string, number>;
+};
+
+export type TranscodeCapabilitiesPayload = {
+  capabilities: TranscodeCapabilities;
+  /** 当前会用的后端（都不可用时为 null）。 */
+  best: TranscodeBackend | null;
+};
+
+/** 一条服务日志（`GET /api/v1/logs`）。 */
+export type LogEntry = {
+  time: string;
+  level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+  msg: string;
+  attrs?: Record<string, unknown>;
+};
+
+export type LogsPayload = {
+  /** 时间倒序（新的在前）。 */
+  entries: LogEntry[];
+  /** 缓冲区里当前保留的条数。 */
+  total: number;
+  capacity: number;
+  /** 因容量被覆盖掉的条数（看不到更早的日志时，要能说清是为什么）。 */
+  dropped: number;
+};
+
+/** 一条审计记录（`GET /api/v1/audit`）：谁在什么时候做了什么。 */
+export type AuditEntry = {
+  id: number;
+  at: string;
+  actorId?: number;
+  actorName: string;
+  /** 稳定的点分动作名，如 user.create。 */
+  action: string;
+  /** 对象标识，如 user:3 / library:1（也可能为空）。 */
+  target: string;
+  /** ok | failed。 */
+  result: string;
+  detail?: Record<string, unknown>;
+  ip: string;
+};
+
+export type AuditPayload = {
+  entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/** 某个缓存目录的占用（`GET /api/v1/maintenance`）。 */
+export type CacheUsage = {
+  dir?: string;
+  files: number;
+  bytes: number;
+  /** 目录的用途与「清了会怎样」（界面直接显示）。 */
+  note: string;
+};
+
+export type MaintenancePayload = {
+  images: CacheUsage;
+  streams: CacheUsage;
+  probe: CacheUsage;
+  overlay: CacheUsage;
+  /** 库或条目已经不在库里的叠加层数据（可以清）。 */
+  overlayOrphans: CacheUsage;
+};
 
 /** 一条活跃播放会话（监控页用）。 */
 export interface PlaySessionInfo {

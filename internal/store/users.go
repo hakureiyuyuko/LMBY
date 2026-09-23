@@ -19,21 +19,21 @@ var (
 
 // User 是一个账号。PasswordHash 用 `json:"-"` 标记，永不对外序列化。
 type User struct {
-	ID                   int64      `json:"id"`
-	Username             string     `json:"username"`
-	DisplayName          string     `json:"displayName"`
-	IsAdmin              bool       `json:"isAdmin"`
-	IsDisabled           bool       `json:"isDisabled"`
-	MaxConcurrentStreams int32      `json:"maxConcurrentStreams"`
+	ID                   int64  `json:"id"`
+	Username             string `json:"username"`
+	DisplayName          string `json:"displayName"`
+	IsAdmin              bool   `json:"isAdmin"`
+	IsDisabled           bool   `json:"isDisabled"`
+	MaxConcurrentStreams int32  `json:"maxConcurrentStreams"`
 	// RestrictedLibraries：打开后按 user_libraries 白名单给库；关着＝全部库可见。
 	// 默认关（＝现在行为）：升级后老账号不会忽然看不见东西。
 	RestrictedLibraries bool `json:"restrictedLibraries"`
 	// AllowTranscode：关掉只能直出/转封装（保护 CPU）。默认开。
 	AllowTranscode bool `json:"allowTranscode"`
 	// AllowLiveTV：关掉看不到「直播」页。默认开。
-	AllowLiveTV  bool       `json:"allowLiveTV"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	LastLoginAt  *time.Time `json:"lastLoginAt,omitempty"`
+	AllowLiveTV bool       `json:"allowLiveTV"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	LastLoginAt *time.Time `json:"lastLoginAt,omitempty"`
 
 	PasswordHash string `json:"-"`
 }

@@ -477,9 +477,15 @@ th {
   display: flex;
   gap: 6px;
   align-items: center;
+  /* 页签数量已经上双（设置页 10 个），让它横向滚动而不是换行：
+     换行会把卡片挤成两行、手机上更乱。 */
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
 }
 
 .tab {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   background: var(--bg-elev-2);
   color: var(--fg);
@@ -2464,3 +2470,25 @@ th {
 .user-head:hover { background: var(--bg-elev); }
 .user-name { font-weight: 600; }
 .user-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------- 日志（设置 → 日志） */
+.badge-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.logs {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.logs td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.logs tr:last-child td {
+  border-bottom: none;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

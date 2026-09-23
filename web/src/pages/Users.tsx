@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
 import { useI18n } from '../i18n';
+import { BotKeyCard } from '../components/BotKeyCard';
 import type { LibrarySummary, UserView } from '../api';
 
 export function Users() {
@@ -95,6 +96,7 @@ export function Users() {
           </div>
         )}
       </div>
+      <BotKeyCard />
     </>
   );
 }

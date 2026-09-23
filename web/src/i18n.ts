@@ -107,7 +107,8 @@ const en: Record<string, string> = {
   '欢迎使用': 'Welcome to LMBY',
   '欢迎使用 LMBY': 'Welcome to LMBY',
   '还剩 {t}': '{t} left',
-  '添加一个媒体库并扫描，海报、简介与演职员信息就会出现在这里。': 'Add a library and run a scan — posters, overviews and cast will show up here.',
+  '添加一个媒体库并扫描，条目的海报、简介与演职员会从同目录的 nfo 读进来（本地优先，不联网）。':
+    'to add a library and scan. Posters, overviews and cast come from nfo files next to your media (local first, no network).',
   '库管理链接': 'Libraries',
   '轮播上一部': 'Previous featured title',
   '轮播下一部': 'Next featured title',
@@ -142,7 +143,8 @@ const en: Record<string, string> = {
   '读取媒体库失败': 'Failed to load libraries',
   '删除{kind}「{name}」？\n（只删这个列表，媒体文件不受影响）':
     'Delete {kind} “{name}”?\n(only the list is deleted — your media files are untouched)',
-  '没有匹配的演职员。': 'No matching cast or crew.',
+  '没有匹配的演职员。演职员数据来自媒体同目录的 nfo（本地优先）。':
+    'No matching cast or crew. Cast data comes from nfo files next to your media (local first).',
 
   // ---------------------------------------------------------------- 登录页
   '登录 LMBY': 'Sign in to LMBY',
@@ -245,7 +247,8 @@ const en: Record<string, string> = {
   '还没有任何列表。上面新建一个，然后去影片详情页把它加进去':
     'No lists yet. Create one above, then add titles from a movie’s detail page',
   '（详情页的「加入列表」按钮）。': '(the “Add to list” button).',
-    '{n} 个条目': '{n} items',
+  'M5 播放（直出 / 转封装 / 转码 / 直播）': 'M5 playback (direct / remux / transcode / live TV)',
+  '{n} 个条目': '{n} items',
   '由 {name} 维护': 'maintained by {name}',
   '删除{kind}「{name}」？': 'Delete {kind} “{name}”?',
   '（只删这个列表，媒体文件不受影响）': '(only the list is deleted — your files are untouched)',
@@ -285,10 +288,13 @@ const en: Record<string, string> = {
   '设为只读': 'Make read-only',
   '改为可写': 'Make writable',
   '切换只读失败': 'Failed to toggle read-only',
-  '网盘 / 只读挂载的库打开它：不再写媒体目录，刮削产物落进数据目录': 'Turn this on for network / read-only mounts: nothing is written to the media directory, scrape artifacts go to the data directory',
-  '已把「{name}」设为只读：刮削产物写进数据目录，不写媒体目录。': '“{name}” is now read-only: scrape artifacts go to the data directory, not the media directory.',
+  '网盘 / 只读挂载的库打开它：LMBY 不再写媒体目录，刮削产物落进数据目录的 overlay 层':
+    'Turn this on for network drives / read-only mounts: LMBY stops writing into the media folders and keeps scraped artifacts in an overlay under the data directory',
+  '已把「{name}」设为只读：刮削产物写进数据目录的 overlay 层，不写媒体目录。':
+    '“{name}” is now read-only: scraped artifacts go into the overlay under the data directory, never into the media folders.',
   '已把「{name}」改为可写。': '“{name}” is writable again.',
-  '这个库是只读的：不往媒体目录写入任何东西。刮削产物存在数据目录，当前 {files} 个文件 / {size}。': 'This library is read-only: nothing is written into the media directory. Scrape artifacts live in the data directory — currently {files} files / {size}.',
+  '这个库是只读的：LMBY 不会往它的目录里写任何东西。刮削到的元数据快照与图片写在数据目录的 overlay 层（每库一块、不参与图片缓存淘汰），当前 {files} 个文件 / {size}。':
+    'This library is read-only: LMBY never writes inside its folders. Scraped metadata snapshots and images go into an overlay under the data directory (one tree per library, not subject to image-cache eviction) — currently {files} files / {size}.',
   '家庭视频': 'Home videos',
   '混合（推荐）': 'Mixed (recommended)',
   '添加媒体库': 'Add a library',
@@ -332,7 +338,8 @@ const en: Record<string, string> = {
   '错误': 'Error',
   '还没有扫描记录。': 'No scans yet.',
   '条目（{n}）': 'Items ({n})',
-  '扫描入库的原始条目。': 'Raw items registered by scanning.',
+  '扫描入库的原始条目。matching 与海报墙属于 M2 / M5。':
+    'The raw items registered by scanning. Matching and the poster wall belong to M2 / M5.',
   '没有条目。': 'No items.',
   '年': 'Year',
   '季/集': 'S/E',
@@ -357,7 +364,8 @@ const en: Record<string, string> = {
   '已入队 {n} 条（已有 nfo/已匹配的会自动跳过）':
     '{n} queued (items with an nfo or already matched are skipped automatically)',
   '强制重刮全部': 'Force re-scrape all',
-  '强制重刮会覆盖所有条目的未锁定字段（锁住的与人工改过的不动）。确定继续？': 'Force rescrape overwrites unlocked fields on every item (locked and manually edited ones are kept). Continue?',
+  '强制重刮会把 TMDB 的值写进所有条目的未锁定字段（包括有 nfo 的）。\n锁住的字段与人工改过的字段不会被动。确定继续？':
+    'A forced re-scrape writes TMDB values into every item’s unlocked fields (including items with an nfo).\nLocked and hand-edited fields are left alone. Continue?',
   '已强制入队 {n} 条': 'Force-queued {n} items',
   '重置失败的': 'Reset failed',
   '已重置 {reset} 条失败记录，并重新入队 {enqueued} 条':
@@ -366,7 +374,8 @@ const en: Record<string, string> = {
   '已刷新': 'Refreshed',
   '去人工匹配': 'Open matching',
   '流信息探测': 'Stream probing',
-  '读取每个文件的编码与音轨/字幕信息。扫描结束后会自动排队，这里可以手动补跑。': 'Reads codec, audio and subtitle info for every file. Queued automatically after a scan; you can also run it manually here.',
+  'ffprobe 读取每个文件的容器/编码/位深/HDR/音轨/字幕/章节信息，写入数据库。\n扫描结束后会自动排队，这里可以手动补跑。':
+    'ffprobe reads each file’s container/codecs/bit depth/HDR/audio/subtitles/chapters and stores it in the database.\nProbes are queued automatically after a scan; you can also run them by hand here.',
   '已完成 {n}': 'Done {n}',
   '待探测 {n}': 'Pending {n}',
   '失败 {n}': 'Failed {n}',
@@ -379,6 +388,7 @@ const en: Record<string, string> = {
   '不致命但值得看一眼：文件过小、识别不了、nfo 解析失败等。':
     'Not fatal, but worth a look: tiny files, unrecognised names, unparseable nfo, and so on.',
   '级别': 'Level',
+  '条数': 'Entries',
   '路径': 'Path',
   '说明': 'Note',
   '收起': 'Collapse',
@@ -484,7 +494,8 @@ const en: Record<string, string> = {
   '起播失败': 'Failed to start playback',
   '播放出错（{detail}）': 'Playback error ({detail})',
   '浏览器拦了自动播放，点一下播放键开始': 'The browser blocked autoplay — hit play to start',
-  '这个浏览器放不了直播流。': 'This browser cannot play live streams.',
+  '这个浏览器既不支持原生 HLS，也不支持 MSE，放不了直播流':
+    'This browser supports neither native HLS nor MSE, so live streams cannot play',
   // 起播失败的「人话」（后端只给 code，文案在前端）——见 internal/api/livetv_play_text.go
   '同时播放的路数已达上限，先停掉一路再试':
     'Too many streams are playing right now — stop one and try again',
@@ -592,7 +603,141 @@ const en: Record<string, string> = {
 
   // ---------------------------------------------------------------- 设置页（Settings）
   '元数据与服务状态': 'Metadata & status',
-  '只有管理员能改全站设置。': 'Only administrators can change instance settings.',
+
+  // —— 转码与硬件（TranscodePanel）——
+  '转码与硬件': 'Transcoding & hardware',
+  '读取编码能力失败': 'Failed to load encoder capabilities',
+  '重新探测': 'Re-probe',
+  '正在重新探测…': 'Re-probing…',
+  '已重新探测（耗时 {ms} 毫秒）。': 'Re-probed (took {ms} ms).',
+  '重新探测失败': 'Re-probe failed',
+  '当前后端：{name}': 'Active backend: {name}',
+  '没有可用的硬件后端，走软件编码': 'No hardware backend available — using software encoding',
+  '探测时间': 'Probed at',
+  '耗时 {ms} 毫秒': '{ms} ms',
+  'ffmpeg': 'ffmpeg',
+  '设备节点': 'Device nodes',
+  '装好显卡驱动、换机器或升级 ffmpeg 之后点这里。':
+    'Use this after installing GPU drivers, moving to another machine, or upgrading ffmpeg.',
+  '后端能力': 'Backend capabilities',
+  '后端': 'Backend',
+  '设备': 'Device',
+  '编码': 'Encode',
+  '解码': 'Decode',
+  '码率模式': 'Rate control',
+  '实测倍速': 'Measured speed',
+  '低功耗': 'low power',
+  '可用': 'Available',
+  '注意事项': 'Notes',
+  '真跑失败的记录': 'Real-run failures',
+  '硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。':
+    'Which hardware backend really works is on the Transcoding & hardware page — every entry there comes from a real run.',
+
+  // —— 日志（LogsPanel）——
+  '日志': 'Logs',
+  '读取日志失败': 'Failed to load logs',
+  '全部级别': 'All levels',
+  'INFO 以上': 'INFO and above',
+  'WARN 以上': 'WARN and above',
+  '只有 ERROR': 'ERROR only',
+  '搜消息或字段…': 'Search messages or fields…',
+  '读取中…': 'Loading…',
+  '自动刷新（5 秒）': 'Auto-refresh (5s)',
+  '下载当前视图': 'Download view',
+  '显示最近 {n} 条（缓冲区共 {total} 条，容量 {cap}）':
+    'Showing the latest {n} (buffer holds {total}, capacity {cap})',
+  '更早的 {n} 条已被覆盖': '{n} older entries were overwritten',
+  '没有符合条件的日志。': 'No log entries match.',
+
+  // —— 扫描计划（ScanPlanPanel）——
+  '扫描计划': 'Scan schedule',
+  '扫描间隔': 'Scan interval',
+  '上次扫描': 'Last scan',
+  '下次扫描': 'Next scan',
+  '不自动': 'Manual only',
+  '每小时': 'Hourly',
+  '每 6 小时': 'Every 6 hours',
+  '每天': 'Daily',
+  '每周': 'Weekly',
+  '每 {n} 分钟': 'Every {n} min',
+  '立即扫描': 'Scan now',
+  '扫描中…': 'Scanning…',
+  '刚刚': 'just now',
+  '{n} 分钟前': '{n} min ago',
+  '{n} 小时前': '{n} h ago',
+  '马上': 'in a moment',
+  '{n} 分钟后': 'in {n} min',
+  '{n} 小时后': 'in {n} h',
+  '已把「{name}」设为{interval}扫一次。': '“{name}” will now scan {interval}.',
+  '已把「{name}」设为不自动扫描。': '“{name}” will no longer scan automatically.',
+  '保存扫描计划失败': 'Failed to save the scan schedule',
+  '已开始扫描「{name}」，进度在「库管理」里看。':
+    'Started scanning “{name}” — progress is on the Libraries page.',
+  '还没有媒体库 —— 先去「库管理」加一个。': 'No libraries yet — add one on the Libraries page.',
+  '扫描间隔是每个媒体库自己的设置。服务端会定期检查有没有库到期，到点就自动扫一次；不会因为「新加了一个文件」而立刻醒来（那是文件系统监控的事，属于二期）。':
+    'The scan interval belongs to each library. The server periodically checks which ones are due and scans them; it does not wake up the moment a file is added (that is filesystem watching, planned for later).',
+
+  // —— 审计日志（AuditPanel）——
+  '审计日志': 'Audit log',
+  '读取审计日志失败': 'Failed to load the audit log',
+  '谁在什么时候做了什么：登录、改口令、用户与媒体库的增删改、手动扫描、修改设置。口令与密钥不会出现在这里。':
+    'Who did what and when: sign-ins, password changes, user and library changes, manual scans, settings changes. Passwords and keys never appear here.',
+  '动作': 'Action',
+  '全部动作': 'All actions',
+  '搜操作者或对象…': 'Search actor or target…',
+  '只看失败': 'Failed only',
+  '没有符合条件的记录。': 'No matching entries.',
+  '时间': 'Time',
+  '操作者': 'Actor',
+  '对象': 'Target',
+  '细节': 'Detail',
+  '（未知）': '(unknown)',
+  '成功': 'OK',
+  '第 {from}–{to} 条，共 {total} 条': '{from}–{to} of {total}',
+  '新建用户': 'Create user',
+  '修改用户': 'Update user',
+  '调整可见库': 'Change library access',
+  '新建媒体库': 'Create library',
+  '修改媒体库': 'Update library',
+  '删除媒体库': 'Delete library',
+  '手动扫描': 'Manual scan',
+  '修改设置': 'Update settings',
+
+  // —— 缓存与清理（MaintenancePanel）——
+  '缓存与清理': 'Cache & cleanup',
+  '读取缓存占用失败': 'Failed to read cache usage',
+  '图片缓存': 'Image cache',
+  '转码分片': 'Transcode segments',
+  '探测工作目录': 'Probe workspace',
+  '叠加层': 'Overlay',
+  '叠加层孤儿': 'Overlay orphans',
+  '清理孤儿': 'Clean up orphans',
+  '项目': 'Item',
+  '占用': 'Usage',
+  '个文件': 'files',
+  '清空图片缓存后，下次访问会重新生成或重新下载。继续？':
+    'Clearing the image cache means images are regenerated or re-downloaded on the next visit. Continue?',
+  '已清理「{what}」：{files} 个文件 / {size}': 'Cleaned “{what}”: {files} files / {size}',
+  '没有需要清理的内容。': 'Nothing to clean.',
+  '清理失败': 'Cleanup failed',
+  '这里只处理缓存：图片缓存可以清空（下次访问重新生成），叠加层里「已经不在库里的条目」可以清掉。媒体文件本身以及还在库里的条目，这里一个字节都不会动。':
+    'This page only touches caches: the image cache can be cleared (images are regenerated on the next visit), and overlay data whose items are no longer in a library can be removed. Media files themselves — and any item still in a library — are never touched.',
+
+  // —— 管理 API 密钥（BotKeyCard）——
+  'API 密钥（给 bot / 脚本）': 'API key (for bots / scripts)',
+  '读取 API 密钥状态失败': 'Failed to read the API key status',
+  '用 Authorization: Bearer <密钥> 或 X-API-Key 调用。它只能用于用户管理接口（注册 / 修改 / 删除账号、改可见库、重置口令），其它接口一律 403 —— 明文只在生成时显示一次。':
+    'Call it with `Authorization: Bearer <key>` or `X-API-Key`. It only works on user-management endpoints (create / update / delete accounts, change library access, reset passwords) — every other endpoint returns 403. The key is shown in plaintext only once.',
+  '这是新密钥，只显示这一次，请立刻保存：': 'This is the new key — shown only once, save it now:',
+  '轮换': 'Rotate',
+  '生成密钥': 'Generate key',
+  '生成失败': 'Failed to generate',
+  '轮换后旧密钥会立刻失效，正在用它的 bot 需要换新的。继续？':
+    'Rotating invalidates the old key immediately; bots using it must be updated. Continue?',
+  '撤销后这把密钥立刻失效，正在用它的 bot 会开始报 401。继续？':
+    'Revoking invalidates this key immediately; bots using it will start getting 401. Continue?',
+  '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
+    'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',
   'TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。密钥只写不回显，保存后立刻生效、不必重启。数据库里的设置优先于 config.toml。':
     'TMDB is used to scrape metadata and fetch images. Provide a Read Access Token (v4, recommended) or an API key (v3) — either one works. Secrets are write-only (never echoed back), and changes take effect immediately with no restart. Settings in the database take precedence over config.toml.',
@@ -634,7 +779,8 @@ const en: Record<string, string> = {
   '，例如 {samples}': ', e.g. {samples}',
   '连接失败：{error}': 'Connection failed: {error}',
   '服务状态': 'Service status',
-  '实例自检：服务状态与数据库。': 'Self-check: service status and database.',
+  '实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 —— 它属于「出问题时才看」的信息，不该占首页的位置。':
+    'Self-check: status, database, ffmpeg (and its hardware acceleration backends). This panel moved here from the bottom of Home in M6 — it is troubleshooting information and does not deserve space on the home page.',
   '运行正常': 'Running',
   '降级运行': 'Degraded',
   '异常': 'Error',
@@ -643,7 +789,8 @@ const en: Record<string, string> = {
   '运行时长': 'Uptime',
   'ffmpeg 路径': 'ffmpeg path',
   '硬件加速后端': 'Hardware acceleration backends',
-  '能力探测会真跑一小段转码，确认后端真的可用。': 'Capability probing runs a short real transcode to confirm a backend actually works.',
+  '注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。':
+    'Note: backends being listed does not mean they work. Here, for instance, ffmpeg lists qsv but the iGPU lacks its runtime, so only vaapi is usable — which is why capability probing actually runs a short transcode to verify.',
   '系统信息': 'System information',
   '数据库字符集不对：encoding={enc}、lc_ctype={ctype}。中文搜索与模糊匹配会静默少结果。停掉服务后跑 {script} 就地重建。':
     'Wrong database character set: encoding={enc}, lc_ctype={ctype}. Chinese search and fuzzy matching will silently return fewer results. Stop the service and run {script} to rebuild in place.',
@@ -756,7 +903,7 @@ const en: Record<string, string> = {
   '转码 / 转封装会话': 'Transcode / remux sessions',
   '每一路 ffmpeg 的实时状态。速度低于 1x 就跟不上播放（画面会卡）；显示「节流中」是好事 —— 说明它已经跑在客户端前面，正歇着等，避免白烧 CPU。':
     'Live state of every ffmpeg process. A speed below 1x means it cannot keep up (playback stalls); “throttled” is good news — it means ffmpeg has run ahead of the client and is idle-waiting instead of burning CPU.',
-  '当前没有转码进程。': 'No transcoding sessions right now.',
+  '当前没有转码/转封装进程。': 'No transcode/remux processes right now.',
   '码率': 'Bitrate',
   '分片': 'Segments',
   '已生成': 'Generated',
@@ -764,7 +911,8 @@ const en: Record<string, string> = {
   '领先': 'Ahead',
   '（节流中）': ' (throttled)',
   '终止': 'Terminate',
-  '日志': 'Log',
+  'ffmpeg 日志尾巴（排查「为什么卡/为什么起不来」）':
+    'Tail of the ffmpeg log (to debug “why does it stall / why does it not start”)',
 
   // ---------------------------------------------------------------- 杂项（App / Setup / Browse / api）
   '正在加载 LMBY…': 'Loading LMBY…',
@@ -943,8 +1091,10 @@ const en: Record<string, string> = {
 
   '不显示': 'hidden',
   '新建并加入': 'Create & add',
-  '演职员信息来自媒体目录里的 nfo。': 'Cast & crew come from the nfo beside the media file.',
-  '这条的 nfo 里没有演职员信息。': 'This item has no cast & crew in its nfo.',
+  '演职员来自媒体同目录的 nfo（本地优先，不联网）。TMDB 的演职员还没接，所以没有 nfo 的条目这里是空的。':
+    'Cast and crew come from the nfo next to your media (local first, no network). TMDB people are not wired up yet, so titles without nfo show nothing here.',
+  '这条的同目录 nfo 里没有演职员信息。换成自带演职员的 nfo 之后，在「库管理」里勾上「重读 nfo」重扫一次就会出现（不必改媒体文件）。':
+    'The nfo next to this file has no cast information. Switch to an nfo that includes it, tick “re-read nfo” in Libraries and rescan (your media files stay untouched).',
   // ---------------------------------------------------------------- 播放器
   '载入中…': 'Loading…',
   '正在准备播放…': 'Preparing playback…',
@@ -964,7 +1114,8 @@ const en: Record<string, string> = {
   '字幕：自动': 'Subtitles: auto',
   '字幕：关闭': 'Subtitles: off',
   '（图形，需烧录）': ' (image-based, needs burning)',
-  '图形字幕需要重新编码后才能显示。': 'Bitmap subtitles must be re-encoded to be shown.',
+  '图形字幕是位图，只能烧进画面；服务端会重新编码一遍':
+    'Image-based subtitles are bitmaps — the server re-encodes to burn them in',
   '字幕将烧进画面（需重新编码）': 'Subtitles will be burned in (re-encode)',
   '画质': 'Quality',
   '选低于源分辨率的档会让服务端转码输出': 'Picking a lower resolution makes the server transcode',
@@ -981,7 +1132,8 @@ const en: Record<string, string> = {
   '开始播放失败': 'Failed to start playback',
   '浏览器拦截了自动播放，点一下 ▶ 开始': 'The browser blocked autoplay — press ▶ to start',
   '点一下 ▶ 开始播放': 'Press ▶ to start',
-  '这个浏览器放不了这条流。': 'This browser cannot play this stream.',
+  '这个浏览器既不支持原生 HLS，也不支持 MSE，无法播放转封装流':
+    'This browser supports neither native HLS nor MSE, so remuxed streams cannot play',
   '播放出错（{details}）': 'Playback error ({details})',
   '字幕提取失败，本次先不显示字幕': 'Subtitle extraction failed — playing without subtitles',
   '字幕还在抽取中，稍后重新打开播放器就能看到':
@@ -998,13 +1150,14 @@ const en: Record<string, string> = {
   '播放结束': 'Finished',
   '媒体加载失败（服务端可能已回收这段流），点「重新开始」再试':
     'Media failed to load (the server may have recycled the stream) — hit “Start over”',
-  '（拖动到尚未生成的区间时，需要一两秒重新生成）': '(Seeking past the generated window takes a second or two)',
+  '（转封装模式下拖动到已生成窗口之外时，服务端会从新位置重新生成一段，需要一两秒）':
+    '(In remux mode, seeking outside the generated window makes the server rebuild from the new position — takes a second or two)',
   '播放决策是「能直出就直出 → 不行就转封装 → 再不行才转码」。上面每一条都是服务端给出的具体原因（例如视频是 10bit HEVC，浏览器解不了，要重新编码成 h264）。':
     'The order is: direct play → remux → transcode (only if needed). Each line above is the concrete reason from the server (e.g. 10-bit HEVC the browser cannot decode, so it gets re-encoded to H.264).',
   '直接播放': 'Direct play',
   '转封装': 'Remux',
   '需要转码': 'Transcode',
-  '直接播放原文件，服务端不重新编码': 'Plays the original file as-is; no server-side re-encoding',
+  '原文件按 HTTP Range 分段送出，服务端零转码': 'Original file served via HTTP Range — no transcoding',
   '视频不重新编码，只换容器（HLS 分片）': 'Video is copied as-is, only the container changes (HLS segments)',
   '视频要重新编码（例如 10bit HEVC，或客户端选了更低的画质）':
     'Video must be re-encoded (e.g. 10-bit HEVC, or a lower quality was picked)',

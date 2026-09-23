@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -40,6 +42,8 @@ func (s *Server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取媒体库失败", err)
 		return
 	}
+	// 补上「上次 / 下次扫描」两个派生字段（扫描计划页要用）。
+	s.fillScanSchedule(ctx, libs)
 
 	out := make([]libraryResponse, 0, len(libs))
 	for _, lib := range libs {
@@ -119,6 +123,8 @@ func (s *Server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "创建媒体库失败", err)
 		return
 	}
+	s.audit(r.Context(), r, "library.create", fmt.Sprintf("library:%d", lib.ID),
+		map[string]any{"name": lib.Name, "kind": lib.Kind})
 	s.log.Info("已创建媒体库", "id", lib.ID, "name", lib.Name, "kind", lib.Kind, "paths", paths)
 	writeJSON(w, http.StatusCreated, libraryResponse{Library: *lib, Counts: map[string]int64{}})
 }
@@ -143,6 +149,7 @@ func (s *Server) handleGetLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	images, _ := s.store.CountImages(ctx, lib.ID)
+	s.fillScanScheduleOne(ctx, lib)
 
 	var lastRun *store.ScanRun
 	if run, err := s.store.LatestScanRun(ctx, lib.ID); err == nil {
@@ -191,6 +198,8 @@ type updateLibraryRequest struct {
 	// ReadOnly：网盘 / 只读挂载的库打开它 —— LMBY 就不再往库目录里写，
 	// 刮削产物（元数据快照 + 图片）落进数据目录的 overlay 层。
 	ReadOnly *bool `json:"readonly"`
+	// ScanIntervalMinutes：自动扫描间隔（分钟；0 = 不自动扫）。上限一周。
+	ScanIntervalMinutes *int `json:"scanIntervalMinutes"`
 }
 
 // scanRequest 是触发扫描时的可选请求体。
@@ -211,7 +220,8 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Name == nil && req.Kind == nil && req.ReadOnly == nil && req.Paths == nil {
+	if req.Name == nil && req.Kind == nil && req.ReadOnly == nil && req.Paths == nil &&
+		req.ScanIntervalMinutes == nil {
 		writeError(w, http.StatusBadRequest, "没有需要更新的字段")
 		return
 	}
@@ -274,7 +284,63 @@ func (s *Server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Info("媒体库只读开关已更新", "libraryId", id, "readonly", *req.ReadOnly)
 	}
+	if req.ScanIntervalMinutes != nil {
+		m := *req.ScanIntervalMinutes
+		// 范围检查在这里做（而不是只靠 store 里的那一层）：错了要回 400 加人话，
+		// 而不是一个 500。
+		if m < 0 || m > 10080 {
+			writeError(w, http.StatusBadRequest, "扫描间隔要在 0 到 10080 分钟之间（0 = 不自动扫）")
+			return
+		}
+		if err := s.store.SetLibraryScanInterval(ctx, id, m); err != nil {
+			s.notFoundOrError(w, err)
+			return
+		}
+		s.log.Info("媒体库扫描计划已更新", "libraryId", id, "intervalMinutes", m)
+	}
+	s.audit(r.Context(), r, "library.update", fmt.Sprintf("library:%d", id), nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// fillScanTimes 按「最近扫描时间表」给一个库补上上次 / 下次（都是派生字段，不进库）。
+//
+// 下次 = 上次 + 间隔；从没扫过的库从**建库时间**起算 —— 刚配好计划应该很快跑第一次。
+func fillScanTimes(lib *store.Library, last map[int64]time.Time) {
+	if at, ok := last[lib.ID]; ok {
+		t := at
+		lib.LastScanAt = &t
+	}
+	if lib.ScanIntervalMinutes > 0 {
+		base := lib.CreatedAt
+		if lib.LastScanAt != nil {
+			base = *lib.LastScanAt
+		}
+		next := base.Add(time.Duration(lib.ScanIntervalMinutes) * time.Minute)
+		lib.NextScanAt = &next
+	}
+}
+
+// fillScanSchedule 给一批库补上派生字段（只查一次库，不是每个库查一次）。
+//
+// 拿不到扫描记录时**不影响主流程**：界面少显示两列，比整个列表 500 好。
+func (s *Server) fillScanSchedule(ctx context.Context, libs []store.Library) {
+	last, err := s.store.LastScanTimes(ctx)
+	if err != nil {
+		s.log.Warn("读取最近扫描时间失败（界面上少显示上次/下次）", "err", err)
+		return
+	}
+	for i := range libs {
+		fillScanTimes(&libs[i], last)
+	}
+}
+
+// fillScanScheduleOne 是单个库的版本（库详情用）。
+func (s *Server) fillScanScheduleOne(ctx context.Context, lib *store.Library) {
+	last, err := s.store.LastScanTimes(ctx)
+	if err != nil {
+		return
+	}
+	fillScanTimes(lib, last)
 }
 
 // handleClearLibraryOverlay 清空某个只读库的叠加层（刮削产物）。
@@ -365,6 +431,7 @@ func (s *Server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		s.notFoundOrError(w, err)
 		return
 	}
+	s.audit(r.Context(), r, "library.delete", fmt.Sprintf("library:%d", id), nil)
 	s.log.Info("已删除媒体库", "id", id)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -395,6 +462,8 @@ func (s *Server) handleStartScan(w http.ResponseWriter, r *http.Request) {
 	})
 	if err == nil {
 		s.log.Info("已启动扫描", "libraryId", id, "scanRunId", runID, "refreshMetadata", req.RefreshMetadata)
+		s.audit(r.Context(), r, "library.scan", fmt.Sprintf("library:%d", id),
+			map[string]any{"refreshMetadata": req.RefreshMetadata, "scanRunId": runID})
 	}
 	if errors.Is(err, scan.ErrAlreadyRunning) {
 		writeJSON(w, http.StatusConflict, map[string]any{

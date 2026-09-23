@@ -5,6 +5,11 @@ import { useAuth } from '../auth';
 import { t, useI18n } from '../i18n';
 import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
 import { ChannelManager } from '../components/ChannelManager';
+import { TranscodePanel } from '../components/TranscodePanel';
+import { LogsPanel } from '../components/LogsPanel';
+import { ScanPlanPanel } from '../components/ScanPlanPanel';
+import { AuditPanel } from '../components/AuditPanel';
+import { MaintenancePanel } from '../components/MaintenancePanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -57,10 +62,28 @@ export function Settings() {
             {t('元数据与服务状态')}
           </NavLink>
           <NavLink
+            to="/settings/transcode"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('转码与硬件')}
+          </NavLink>
+          <NavLink
+            to="/settings/logs"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('日志')}
+          </NavLink>
+          <NavLink
             to="/settings/libraries"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
             {t('库管理')}
+          </NavLink>
+          <NavLink
+            to="/settings/scan"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('扫描计划')}
           </NavLink>
           <NavLink
             to="/settings/match"
@@ -86,6 +109,18 @@ export function Settings() {
           >
             {t('用户')}
           </NavLink>
+          <NavLink
+            to="/settings/audit"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('审计日志')}
+          </NavLink>
+          <NavLink
+            to="/settings/maintenance"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('缓存与清理')}
+          </NavLink>
         </nav>
       </div>
 
@@ -101,10 +136,36 @@ function NotAdmin() {
     <div className="card">
       <h2>{t('设置')}</h2>
       <p className="hint">
-        {t('只有管理员能改全站设置。')}
+        {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
       </p>
     </div>
   );
+}
+
+/** 设置页签：日志（最近的服务端日志；数据来自内存环形缓冲，见 internal/logbuf）。 */
+export function SettingsLogs() {
+  return <LogsPanel />;
+}
+
+/** 设置页签：扫描计划（间隔属于每个库；调度器只负责「谁到期了」）。 */
+export function SettingsScan() {
+  return <ScanPlanPanel />;
+}
+
+/** 设置页签：审计日志（持久的问责记录，见 internal/api/audit.go）。 */
+export function SettingsAudit() {
+  return <AuditPanel />;
+}
+
+/** 设置页签：缓存与清理（只碰缓存，见 internal/api/maintenance.go）。 */
+export function SettingsMaintenance() {
+  return <MaintenancePanel />;
+}
+
+/** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */
+export function SettingsTranscode() {
+  const { user } = useAuth();
+  return <TranscodePanel isAdmin={user?.isAdmin ?? false} />;
 }
 
 /** 设置页签：直播源与探测（M6 收尾从「直播」页搬过来的）。
@@ -113,8 +174,12 @@ function NotAdmin() {
  * 两个面板的完成回调在设置页没有要刷新列表，传空函数即可。
  */
 export function SettingsLiveTV() {
+  const { t } = useI18n();
   return (
     <>
+      <p className="hint">
+        {t('这里管直播源（导入 / 刷新 / 停用）、频道管理与失效源探测；看频道、起播与切台在「直播」页。')}
+      </p>
       <LiveSourcePanel onImported={() => {}} />
       <ChannelManager />
       <LiveProbePanel onFinished={() => {}} />
@@ -278,6 +343,9 @@ export function SettingsOverview() {
     <>
       <div className="card">
         <h2>{t('元数据源（TMDB）')}</h2>
+        <p className="hint">
+          {t('TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。密钥只写不回显，保存后立刻生效、不必重启。数据库里的设置优先于 config.toml。')}
+        </p>
 
         {!data && !error && <p className="muted">{t('正在读取…')}</p>}
         {error && <div className="alert alert-error">{error}</div>}
@@ -382,6 +450,10 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('只读库叠加层')}</h2>
+        <p className="hint">
+          {t('只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}',
+            { root: overlayStats?.root || '—' })}
+        </p>
         {overlayStats && (
           <>
             <p className="small">
@@ -419,6 +491,9 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('服务状态')}</h2>
+        <p className="hint">
+          {t('实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 —— 它属于「出问题时才看」的信息，不该占首页的位置。')}
+        </p>
         {!health && <p className="muted">{t('正在读取…')}</p>}
         {health && (
           <>
@@ -452,7 +527,7 @@ export function SettingsOverview() {
               <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
             </dl>
             <p className="faint" style={{ marginBottom: 0 }}>
-              {t('能力探测会真跑一小段转码，确认后端真的可用。')}
+              {t('硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。')}
             </p>
           </>
         )}

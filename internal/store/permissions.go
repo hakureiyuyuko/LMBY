@@ -5,7 +5,6 @@ import (
 	"errors"
 )
 
-
 // ViewerFor 组装某个用户的 Viewer。
 func (s *Store) ViewerFor(ctx context.Context, user *User) (Viewer, error) {
 	v := Viewer{

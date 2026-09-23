@@ -37,7 +37,11 @@ type Config struct {
 
 	Database DatabaseConfig `toml:"database"`
 	// Scan 是扫描器的小旋钮（M6 补：之前写在代码常量里，换不出手）。
-	Scan     ScanConfig     `toml:"scan"`
+	Scan ScanConfig `toml:"scan"`
+	// Audit 是审计日志的保留策略。
+	Audit AuditConfig `toml:"audit"`
+	// Backup 是备份/恢复用的外部工具路径（空 = 从 PATH 找）。
+	Backup   BackupConfig   `toml:"backup"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
@@ -195,6 +199,15 @@ type DatabaseConfig struct {
 	AutoMigrate bool `toml:"auto_migrate"`
 }
 
+// BackupConfig 是备份/恢复用到的外部工具（可选）。
+//
+// 默认从 PATH 找 `pg_dump` / `pg_restore`（它们跟 PostgreSQL 一起装）；
+// 找不到时用这里显式指定路径（例如只装了 server、客户端工具在别处）。
+type BackupConfig struct {
+	PgDump    string `toml:"pg_dump"`
+	PgRestore string `toml:"pg_restore"`
+}
+
 // FFmpegConfig 指向外部 ffmpeg 可执行文件。
 type FFmpegConfig struct {
 	Path      string `toml:"path"`
@@ -202,6 +215,15 @@ type FFmpegConfig struct {
 }
 
 // Default 返回带默认值的配置。
+// AuditConfig 是审计日志的保留策略。
+type AuditConfig struct {
+	// KeepDays 是审计记录保留多少天（0 = 永久保留）。
+	//
+	// 默认 365 天：一方面「翻旧账」总得有个实际边界，另一方面这张表只会一直长
+	//（每次登录、每次管理操作都是一条）。清理发生在服务启动时。
+	KeepDays int `toml:"keep_days"`
+}
+
 // ScanConfig 是扫描器的小旋钮。
 type ScanConfig struct {
 	// MinFileSize 是「小于该字节数的文件不当视频」的下限（0 = 用内置默认）。
@@ -210,6 +232,13 @@ type ScanConfig struct {
 	// **不是画质/时长过滤器** —— 实测有 28 秒的 1080p h264 短片只有 646 KB，
 	// 阈值开大了会把它们当成垃圾直接跳过（用户2026-09-22 真踩到：一个目录 63 个文件被跳）。
 	MinFileSize int64 `toml:"min_file_size"`
+
+	// ScheduleTickSeconds 是「扫描计划」调度器的检查间隔（秒；0 = 关掉自动扫描）。
+	//
+	// 它只决定「多久看一眼有没有库到期」，不决定每个库多勤 —— 间隔属于库
+	// （`libraries.scan_interval_minutes`，界面上可改）。默认 60 秒：
+	// 对「每天扫一次」这种计划精度足够了，也不至于频繁查库。
+	ScheduleTickSeconds int `toml:"schedule_tick_seconds"`
 }
 
 func Default() *Config {
@@ -252,6 +281,15 @@ func Default() *Config {
 			RefreshTickSeconds:  60,
 			ProbeTimeoutSeconds: 8,
 			ProbeConcurrency:    4,
+		},
+		// 扫描计划：默认开（每库自己决定间隔，见 libraries.scan_interval_minutes），
+		// 调度器每 60 秒看一眼有没有库到期。
+		Scan: ScanConfig{
+			ScheduleTickSeconds: 60,
+		},
+		// 审计日志：默认保留一年（启动时清理）。
+		Audit: AuditConfig{
+			KeepDays: 365,
 		},
 	}
 }
@@ -320,6 +358,8 @@ func applyEnv(cfg *Config) error {
 	setInt(&cfg.LiveTV.RefreshTickSeconds, "LMBY_LIVETV_REFRESH_TICK_SECONDS")
 	setInt(&cfg.LiveTV.ProbeTimeoutSeconds, "LMBY_LIVETV_PROBE_TIMEOUT_SECONDS")
 	setInt(&cfg.LiveTV.ProbeConcurrency, "LMBY_LIVETV_PROBE_CONCURRENCY")
+	setInt(&cfg.Scan.ScheduleTickSeconds, "LMBY_SCAN_SCHEDULE_TICK_SECONDS")
+	setInt(&cfg.Audit.KeepDays, "LMBY_AUDIT_KEEP_DAYS")
 
 	if v, ok := os.LookupEnv("LMBY_LIVETV_AUTO_REFRESH"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -424,6 +464,15 @@ func (c *Config) Validate() error {
 	}
 	if c.LiveTV.ProbeConcurrency < 1 || c.LiveTV.ProbeConcurrency > 32 {
 		c.LiveTV.ProbeConcurrency = 4
+	}
+	// 扫描计划：负数与超大值都归到默认；**0 保留**（那个值表示「关掉自动扫描」，
+	// 维护时想停掉调度就是它）。
+	if c.Scan.ScheduleTickSeconds < 0 || c.Scan.ScheduleTickSeconds > 3600 {
+		c.Scan.ScheduleTickSeconds = 60
+	}
+	// 审计保留天数：负数归到默认；**0 保留**（表示永久保留，不清理）。
+	if c.Audit.KeepDays < 0 {
+		c.Audit.KeepDays = 365
 	}
 	return nil
 }

@@ -2,7 +2,9 @@
 """界面解释性文案剥离（在 main 上跑；发布流程第 3 步）。
 
 做三件事：
-  1. 删掉 `<p className="hint">…</p>` 说明段落（保留 404 / 权限 / 当前状态三类短提示）；
+  1. 删掉说明性段落：`hint` 类一律删（保留 404 / 权限 / 当前状态三类短提示）；
+     其余 `faint*` 类**只删命中了 DROP_PARA_MARKERS 的解释性长句** —— 那个 class 同时
+     也用于短状态行（如详情页的「原名 / 制片 / 条目 #id」），不能整类删；
   2. 按下面的 RULES 把长篇机制解释压成一句事实、清掉里程碑代号与内部黑话（M2/M5/M6、
      overlay / ffprobe / ffmpeg 术语…）；
   3. 同步英文目录 `web/src/i18n.ts`（新增/替换键；被清空的条目直接删键）。
@@ -21,7 +23,26 @@ if not (ROOT / 'web/src/i18n.ts').exists():
     raise SystemExit('请在仓库根目录运行（找不到 web/src/i18n.ts）')
 
 # 保留的短提示：状态与权限说明，不是「解释」
-KEEP_HINTS = ('没有对应页面', '只有管理员能改全站设置', '现在这个人能看到全部媒体库')
+KEEP_HINTS = (
+    '没有对应页面',
+    '只有管理员能改全站设置',
+    '现在这个人能看到全部媒体库',
+    # 这句是「当前状态」而非解释：它和前面的说明句在同一段里，规则会把说明句清掉，
+    # 只留这一句（顺带保住它用到的 current 变量，否则 tsc 报未使用）。
+    '当前显示与本机选择不一致',
+)
+
+# 非 hint 类（faint / faint small …）里，命中任一子串的**整段**删掉。
+# 这些是 M6/M8 新页面的「这页是干什么的」长句；同 class 的短状态行不在列，因此不受影响。
+DROP_PARA_MARKERS = (
+    '谁在什么时候做了什么',          # 审计日志页
+    '它只能用于用户管理接口',        # 管理密钥卡片
+    '粘贴/上传的源只在导入这一刻',  # 直播源
+    '这里只处理缓存',                # 缓存与清理
+    '扫描间隔是每个媒体库自己的设置',  # 扫描计划
+    '语言影响标题/简介用哪种译名',  # 设置 - 元数据语言
+    '硬件后端能不能用要看',          # 设置 - 服务状态
+)
 
 # (中文原文, 新文案 或 None=整句清空, 英文)
 RULES = [
@@ -74,6 +95,19 @@ RULES = [
      '添加一个媒体库并扫描，海报、简介与演职员信息就会出现在这里。',
      'Add a library and run a scan — posters, overviews and cast will show up here.'),
     ('当前没有转码/转封装进程。', '当前没有转码进程。', 'No transcoding sessions right now.'),
+    # —— M6/M8 新增界面的解释性文案（页面提示语不在 <p> 里、需逐条压短的）——
+    ('这里还没有条目。先在「库管理」里扫描一次 —— 扫描会登记文件、导入同目录的 nfo 与图片。',
+     '这里还没有条目。先去「库管理」扫描一次。',
+     'No items yet — run a scan in Library management first.'),
+    ('已保存（{fields} 个字段{locked}）。锁住的字段重扫重刮都不会被覆盖。',
+     '已保存（{fields} 个字段{locked}）。', 'Saved ({fields} fields{locked}).'),
+    ('重新刮削：TMDB 的值会写进未锁定的字段（锁住的不动）。\\n队列里没有别的活时几秒内跑完，之后点「刷新」看结果。继续？',
+     '重新刮削：TMDB 的值会写进未锁定的字段（锁住的不动）。继续？',
+     'Rescrape: TMDB values go into unlocked fields (locked ones untouched). Continue?'),
+    ('清空「{name}」的叠加层？只删数据目录里这个库的刮削产物，媒体目录与数据库一个字都不动。',
+     '清空「{name}」的刮削产物？媒体目录与数据库不会动。',
+     'Clear scrape artifacts for “{name}”? The media directory and database are untouched.'),
+    ('右上角随时可以快速切换；这里的设置会同步到账号，换设备登录后同样生效。', None, None),
 ]
 
 files = subprocess.check_output(['git', 'ls-files', 'web/src'], text=True).strip().split('\n')
@@ -87,15 +121,27 @@ if ls2 != ls:
     layout.write_text(ls2, encoding='utf-8')
     print('  Layout.tsx：页脚里程碑去掉')
 
-# 1) 删 hint 段落
-hint = re.compile(r'[ \t]*<p className="hint">[\s\S]*?</p>\n')
+# 1) 删说明性段落（hint 一律删；其它 faint* 只在命中 DROP 标记时删）
+#    - `(?m)^[ \t]*<p …` 行首锚定：只删**独占整行**的段落，不碰
+#      `{cond && <p …>…</p>}` 这种行内的（删了会破坏 JSX）；
+#    - class 后面可能跟 style={{…}}，所以属性部分用 [^>]* 吃掉；
+#    - 结尾要求 `</p>` 后是行尾，保证不会跨段吞并后面的段落。
+para = re.compile(r'(?m)^[ \t]*<p className="([^"]+)"[^>]*>[\s\S]*?</p>[ \t]*\n')
 removed = 0
 for f in files:
     p = ROOT / f
     src = p.read_text(encoding='utf-8')
     out, last, n = [], 0, 0
-    for m in hint.finditer(src):
-        if any(k in m.group(0) for k in KEEP_HINTS):
+    for m in para.finditer(src):
+        cls, blk = m.group(1), m.group(0)
+        if cls == 'hint':
+            if any(k in blk for k in KEEP_HINTS):
+                continue
+        elif cls.startswith('faint'):
+            # faint* 也用于短状态行（详情页的「原名 / 制片 / 条目 #id」），只删命中标记的
+            if not any(k in blk for k in DROP_PARA_MARKERS):
+                continue
+        else:
             continue
         out.append(src[last:m.start()])
         last = m.end()
@@ -103,8 +149,19 @@ for f in files:
     if n:
         out.append(src[last:])
         p.write_text(''.join(out), encoding='utf-8')
-        print(f'  {f}：删 {n} 段 hint')
+        print(f'  {f}：删 {n} 段说明')
         removed += n
+
+# 1b) 段落删完可能出现「空的条件块」：`{cond && ( )}`（原文案是它唯一的子节点）。
+#     留着就是语法错误（实测 LiveSources.tsx 会被 tsc 拦下），整块删掉。
+empty_cond = re.compile(r'(?m)^[ \t]*\{[^\n{}]*?&&[ \t]*\(\s*\)\}[ \t]*\n')
+for f in files:
+    p = ROOT / f
+    src = p.read_text(encoding='utf-8')
+    out, n = empty_cond.subn('', src)
+    if n:
+        p.write_text(out, encoding='utf-8')
+        print(f'  {f}：删 {n} 个空条件块')
 
 # 2) 按规则替换文案（直接替换字符串本身，兼容 t('…', {…}) 这种带参数的形态）
 changed = 0
@@ -130,11 +187,28 @@ for old, new, en in RULES:
     if not pat.search(s):
         missing += 1
         continue
-    if new is None:
+    if new is None or ("'" + new + "':") in s:
+        # 目标键已存在（或本就该清空）：只删旧条目，避免生成重复键（tsc TS1117）
         s = pat.sub('', s)
     else:
         s = pat.sub("'" + new + "': '" + en.replace("'", "\\'") + "',\n", s)
 i18n.write_text(s, encoding='utf-8')
+
+# 4) 删段后的收尾：清掉因文案消失而变成「未使用」的变量（否则 tsc 报 TS6133）
+POST_CLEANUP = [
+    # SettingsLiveTV 的唯一文案是那段 hint，删掉后 t 就没人用了
+    ('export function SettingsLiveTV() {\n  const { t } = useI18n();\n  return (',
+     'export function SettingsLiveTV() {\n  return ('),
+]
+for f in files:
+    p = ROOT / f
+    src = p.read_text(encoding='utf-8')
+    orig = src
+    for old, new in POST_CLEANUP:
+        src = src.replace(old, new)
+    if src != orig:
+        p.write_text(src, encoding='utf-8')
+        print(f'  {f}：收尾清理（未使用变量）')
 
 print(f'\n完成：删 {removed} 段 hint、改 {changed} 个源文件；'
       f'i18n 里 {missing} 条规则未命中（可能已处理过或键名变了，属正常）。')

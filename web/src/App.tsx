@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsLiveTV, SettingsOverview } from './pages/Settings';
+import { Settings, SettingsAudit, SettingsLiveTV, SettingsLogs, SettingsMaintenance, SettingsOverview, SettingsScan, SettingsTranscode } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -101,11 +101,16 @@ function AppRoutes() {
         {/* 设置：库管理 / 人工匹配 / 会话监控都是它的子页签（M6 收尾把三个导航项收进来） */}
         <Route path="/settings" element={<Settings />}>
           <Route index element={<SettingsOverview />} />
+          <Route path="transcode" element={<SettingsTranscode />} />
+          <Route path="logs" element={<SettingsLogs />} />
           <Route path="libraries" element={<Libraries />} />
+          <Route path="scan" element={<SettingsScan />} />
           <Route path="match" element={<Match />} />
           <Route path="sessions" element={<Sessions />} />
           <Route path="livetv" element={<SettingsLiveTV />} />
           <Route path="users" element={<Users />} />
+          <Route path="audit" element={<SettingsAudit />} />
+          <Route path="maintenance" element={<SettingsMaintenance />} />
         </Route>
         {/* 旧地址重定向：老书签、浏览器历史、别人分享过的链接都还指向它们 */}
         <Route path="/libraries" element={<Navigate to="/settings/libraries" replace />} />
