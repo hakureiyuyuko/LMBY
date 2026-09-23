@@ -32,3 +32,7 @@
 # 属生成物，不入库。
 /web/public/
 /web/dist/subtitles-octopus/
+
+# Python 字节码缓存（scripts/release 下的发布脚本会生成）
+__pycache__/
+*.pyc
