@@ -70,9 +70,6 @@ export function BotKeyCard() {
     <div className="card">
       <h2>{t('API 密钥（给 bot / 脚本）')}</h2>
       {error && <div className="alert alert-error">{error}</div>}
-      <p className="faint small">
-        {t('用 Authorization: Bearer <密钥> 或 X-API-Key 调用。它只能用于用户管理接口（注册 / 修改 / 删除账号、改可见库、重置口令），其它接口一律 403 —— 明文只在生成时显示一次。')}
-      </p>
 
       {fresh && (
         <div className="alert alert-ok">

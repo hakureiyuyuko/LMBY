@@ -78,13 +78,13 @@ export function Home() {
   function rowSubtitle(s: HomeSection): string | undefined {
     switch (s.key) {
       case 'continue':
-        return t('进度按账号独立保存');
+        return undefined;
       case 'favorites':
         return t('你收藏过的 {n} 个条目', { n: s.items.length });
       case 'recent':
         return t('刚入库或元数据刚更新过的');
       case 'top':
-        return t('还没有观看记录，先从这些开始');
+        return undefined;
       case 'recommend': {
         const genres = (s.taste ?? [])
           .slice(0, 2)
@@ -94,12 +94,12 @@ export function Home() {
           return t('因为你看过《{title}》', { title: s.seedTitle });
         }
         if (genres) {
-          return t('因为你喜欢 {genres}（最近看过 {n} 部作品）', {
+          return t('因为你喜欢 {genres}', {
             genres,
             n: s.sourceWorks ?? 0,
           });
         }
-        return t('根据你最近看过的 {n} 部作品', { n: s.sourceWorks ?? 0 });
+        return t('根据你的观看记录', { n: s.sourceWorks ?? 0 });
       }
       default:
         return s.subtitle;
@@ -242,7 +242,7 @@ export function Home() {
       )}
 
       {data && data.continue.length > 0 && (
-        <RowBlock title={t('继续观看')} subtitle={t('进度按账号独立保存')} itemsKey="continue">
+        <RowBlock title={t('继续观看')} itemsKey="continue">
           {data.continue.map((e) => (
             <Link className="continue-card" key={e.item.id} to={`/play/${e.item.id}`}>
               <span className="continue-poster">

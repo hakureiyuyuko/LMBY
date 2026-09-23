@@ -124,9 +124,6 @@ export function AuditPanel() {
     <div className="card">
       <h2>{t('审计日志')}</h2>
       {error && <div className="alert alert-error">{error}</div>}
-      <p className="faint small">
-        {t('谁在什么时候做了什么：登录、改口令、用户与媒体库的增删改、手动扫描、修改设置。口令与密钥不会出现在这里。')}
-      </p>
 
       <div className="row">
         <select value={action} aria-label={t('动作')} onChange={(e) => setAction(e.target.value)}>

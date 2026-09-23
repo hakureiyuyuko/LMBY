@@ -108,6 +108,9 @@ RULES = [
      '清空「{name}」的刮削产物？媒体目录与数据库不会动。',
      'Clear scrape artifacts for “{name}”? The media directory and database are untouched.'),
     ('右上角随时可以快速切换；这里的设置会同步到账号，换设备登录后同样生效。', None, None),
+    # —— 首页行副标题：带「为什么 / 怎么存」的解释，压成一句事实或直接去掉 ——
+    ('因为你喜欢 {genres}（最近看过 {n} 部作品）', '因为你喜欢 {genres}', 'Because you like {genres}'),
+    ('根据你最近看过的 {n} 部作品', '根据你的观看记录', 'Based on your viewing history'),
 ]
 
 files = subprocess.check_output(['git', 'ls-files', 'web/src'], text=True).strip().split('\n')
@@ -199,6 +202,15 @@ POST_CLEANUP = [
     # SettingsLiveTV 的唯一文案是那段 hint，删掉后 t 就没人用了
     ('export function SettingsLiveTV() {\n  const { t } = useI18n();\n  return (',
      'export function SettingsLiveTV() {\n  return ('),
+    # 首页两行的副标题本身就是解释（“进度按账号独立保存”“还没有观看记录，先从这些开始”）：
+    # 直接去掉副标题（返回 undefined，RowBlock 就不渲染它）。
+    ("      case 'continue':\n        return t('进度按账号独立保存');\n",
+     "      case 'continue':\n        return undefined;\n"),
+    ("      case 'top':\n        return t('还没有观看记录，先从这些开始');\n",
+     "      case 'top':\n        return undefined;\n"),
+    # 「继续观看」那一行是独立渲染的（不走 rowSubtitle），副标题也硬编码在那里 —— 去掉。
+    ("        <RowBlock title={t('继续观看')} subtitle={t('进度按账号独立保存')} itemsKey=\"continue\">",
+     "        <RowBlock title={t('继续观看')} itemsKey=\"continue\">"),
 ]
 for f in files:
     p = ROOT / f

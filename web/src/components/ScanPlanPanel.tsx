@@ -103,9 +103,6 @@ export function ScanPlanPanel() {
       <h2>{t('扫描计划')}</h2>
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert alert-ok">{notice}</div>}
-      <p className="faint small">
-        {t('扫描间隔是每个媒体库自己的设置。服务端会定期检查有没有库到期，到点就自动扫一次；不会因为「新加了一个文件」而立刻醒来（那是文件系统监控的事，属于二期）。')}
-      </p>
 
       {!libs && !error && <p className="muted">{t('正在读取…')}</p>}
       {libs && libs.length === 0 && (

@@ -183,7 +183,7 @@ export function Browse() {
         )}
         {data && data.items.length === 0 && (
           <p className="muted">
-            {t('这里还没有条目。先在「库管理」里扫描一次 —— 扫描会登记文件、导入同目录的 nfo 与图片。')}
+            {t('这里还没有条目。先去「库管理」扫描一次。')}
           </p>
         )}
       </div>

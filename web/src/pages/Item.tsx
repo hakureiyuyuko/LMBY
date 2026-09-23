@@ -174,7 +174,7 @@ export function ItemEdit() {
 
       applyDetail(await api.updateItem(itemId, body));
       setNotice(
-        t('已保存（{fields} 个字段{locked}）。锁住的字段重扫重刮都不会被覆盖。', {
+        t('已保存（{fields} 个字段{locked}）。', {
           fields: Object.keys(fields).length,
           locked: locksDirty ? t('，锁定 {n} 个', { n: locks.length }) : '',
         }),
@@ -210,7 +210,7 @@ export function ItemEdit() {
     if (!detail) return;
     if (
       !window.confirm(
-        t('重新刮削：TMDB 的值会写进未锁定的字段（锁住的不动）。\n队列里没有别的活时几秒内跑完，之后点「刷新」看结果。继续？'),
+        t('重新刮削：TMDB 的值会写进未锁定的字段（锁住的不动）。继续？'),
       )
     ) {
       return;

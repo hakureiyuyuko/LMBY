@@ -136,7 +136,7 @@ function NotAdmin() {
     <div className="card">
       <h2>{t('设置')}</h2>
       <p className="hint">
-        {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
+        {t('只有管理员能改全站设置。')}
       </p>
     </div>
   );
@@ -174,12 +174,8 @@ export function SettingsTranscode() {
  * 两个面板的完成回调在设置页没有要刷新列表，传空函数即可。
  */
 export function SettingsLiveTV() {
-  const { t } = useI18n();
   return (
     <>
-      <p className="hint">
-        {t('这里管直播源（导入 / 刷新 / 停用）、频道管理与失效源探测；看频道、起播与切台在「直播」页。')}
-      </p>
       <LiveSourcePanel onImported={() => {}} />
       <ChannelManager />
       <LiveProbePanel onFinished={() => {}} />
@@ -250,7 +246,7 @@ export function SettingsOverview() {
   async function clearOverlay(libraryId: number, name: string) {
     if (
       !window.confirm(
-        t('清空「{name}」的叠加层？只删数据目录里这个库的刮削产物，媒体目录与数据库一个字都不动。',
+        t('清空「{name}」的刮削产物？媒体目录与数据库不会动。',
           { name }),
       )
     ) {
@@ -343,9 +339,6 @@ export function SettingsOverview() {
     <>
       <div className="card">
         <h2>{t('元数据源（TMDB）')}</h2>
-        <p className="hint">
-          {t('TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。密钥只写不回显，保存后立刻生效、不必重启。数据库里的设置优先于 config.toml。')}
-        </p>
 
         {!data && !error && <p className="muted">{t('正在读取…')}</p>}
         {error && <div className="alert alert-error">{error}</div>}
@@ -409,9 +402,6 @@ export function SettingsOverview() {
                 ))}
               </datalist>
             </label>
-            <p className="faint small" style={{ marginTop: -8 }}>
-              {t('语言影响标题/简介用哪种译名；改了会顺手清掉旧语言的缓存。')}
-            </p>
 
             <div className="row">
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
@@ -450,10 +440,6 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('只读库叠加层')}</h2>
-        <p className="hint">
-          {t('只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}',
-            { root: overlayStats?.root || '—' })}
-        </p>
         {overlayStats && (
           <>
             <p className="small">
@@ -491,9 +477,6 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('服务状态')}</h2>
-        <p className="hint">
-          {t('实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 —— 它属于「出问题时才看」的信息，不该占首页的位置。')}
-        </p>
         {!health && <p className="muted">{t('正在读取…')}</p>}
         {health && (
           <>
@@ -526,9 +509,6 @@ export function SettingsOverview() {
               <dt>{t('硬件加速后端')}</dt>
               <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
             </dl>
-            <p className="faint" style={{ marginBottom: 0 }}>
-              {t('硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。')}
-            </p>
           </>
         )}
       </div>

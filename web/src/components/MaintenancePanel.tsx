@@ -127,9 +127,6 @@ export function MaintenancePanel() {
       <h2>{t('缓存与清理')}</h2>
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert alert-ok">{notice}</div>}
-      <p className="faint small">
-        {t('这里只处理缓存：图片缓存可以清空（下次访问重新生成），叠加层里「已经不在库里的条目」可以清掉。媒体文件本身以及还在库里的条目，这里一个字节都不会动。')}
-      </p>
       {!data && !error && <p className="muted">{t('正在读取…')}</p>}
       {data && (
         <table>

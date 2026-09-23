@@ -255,9 +255,6 @@ export function LiveSourcePanel({ onImported }: { onImported: () => void }) {
               onChange={(e) => setIntervalMinutes(Math.max(0, Number(e.target.value) || 0))}
             />
           </label>
-          <p className="faint small" style={{ marginTop: -8 }}>
-            {t('粘贴/上传的源只在导入这一刻有内容，所以它们的「刷新」按钮不会有（要更新就再导入一次）。')}
-          </p>
 
           <div className="row">
             <button
