@@ -88,7 +88,7 @@ export function Layout() {
       </main>
 
       <footer className="footer">
-        LMBY {meta?.version ?? 'dev'} · {t('M5 播放（直出 / 转封装 / 转码 / 直播）')}
+        LMBY {meta?.version ?? 'dev'}
       </footer>    </div>
   );
 }

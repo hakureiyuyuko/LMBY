@@ -1,7 +1,7 @@
 # 转码（M4）
 
 这份文档记三件事：**这台机器能干什么**（实测，不是"ffmpeg 里有这个编码器"）、
-**参数怎么拼**（照 Jellyfin 参考代码的配方，见 `docs/notes/jellyfin-reference.md`）、
+**参数怎么拼**（照 Jellyfin 的参数配方）、
 **怎么验证**。
 
 ---
@@ -163,7 +163,7 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
   但画质档一变 ffmpeg 命令行就完全不同 —— 键相同会复用上一档的会话，用户切了档位
   画面却不变（真跑踩到过）。
 
-关键点（为什么这么写，见 `docs/notes/jellyfin-reference.md` 的 `文件:行`）：
+关键点：
 - **关键帧必须对齐分片边界**，否则分片长度漂、播放器起播慢、seek 不准
 - libx264 还要 `-sc_threshold 0`，不然场景切换会插关键帧
 - HDR 素材不能直接丢给 h264：颜色会发灰发暗，必须 tone mapping
@@ -308,7 +308,7 @@ ffmpeg 7.1.5，VAAPI 驱动 **Intel iHD 25.2.3**。
 4. **决策层要问「字幕是什么」而不是「用户点没点」**：选了烧录但选中的是**文本**字幕时
    不该重编（它走 WebVTT / libass 旁路）。这个顺序在被单测拓到之前是反的。
 
-验收：`scripts/dev/verify-transcode.sh` 第 15 节做**开/关对照** —— 同一时刻取一帧，
+验证方式：对同一时刻取一帧做**开/关对照** —— 
 烧录 vs 不烧录做像素差（`blend=difference` 的 YMAX）：有字幕的时刻差得很大
 （实例 208），没字幕的时刻只差管线噪声（实例 13）。另外还直接看**跑着那个 ffmpeg
 的命令行**，确认 `-filter_complex` / `[0:<字幕序号>]` / `-map [vout]` 真的在里面。
@@ -367,12 +367,6 @@ libass 只认「字体文件」：不给就只能拿兜底字体画 —— 用�
 # 1. 能力表（真跑探测）——接口是登录即可读
 curl -s -b <cookie> http://<host>:8099/api/v1/transcode/capabilities | jq '.best, .capabilities.warnings'
 curl -s -b <cookie> -X POST http://<host>:8099/api/v1/transcode/capabilities/refresh   # 管理员：装完驱动后手动刷
-
-# 2. 离线脚本：把探测结果和「这台机器实际能干什么」对一遍
-bash scripts/dev/verify-caps.sh
-
-# 3. 转码端到端（真转真播，含倍速与进程回收）
-bash scripts/dev/verify-transcode.sh
 ```
 
 能力表的探测耗时**实测约 6 秒**（其中大头是 QSV/NVENC 两个不可用后端各自的失败等待）——

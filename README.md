@@ -29,14 +29,7 @@ Emby / Jellyfin 功能齐全，代价是重量与兼容性负担。LMBY 反过�
 
 依赖纪律与取舍详见 [`docs/ADR/0001-stdlib-first.md`](docs/ADR/0001-stdlib-first.md)。
 
-## 进度与功能
-
-**M0（骨架）、M1（媒体库与扫描）、M2（元数据与刮削）、M3（播放核心）均已完成，并在真实容器 + 真实浏览器上实测验收；
-M4（转码）除 Trickplay、带宽自适应等少数项外也已完成（剩余项已按决定移到二期）；
-M5（直播电视）后端已完成并在真机验收：M3U 源与频道表、每频道共享一路 ffmpeg 的播放、外链出口；
-频道管理 GUI 与直播播放器随 M6 落地。** v0.2 在 M4 收尾后发布（v0.1 是 M3 完成时那个「能看片」的状态）。
-逐项清单与验收记录见 [`docs/ROADMAP.md`](docs/ROADMAP.md)，硬件加速的实测矩阵（含“什么能硬解、什么不行”）见
-[`docs/TRANSCODING.md`](docs/TRANSCODING.md)。
+## 功能
 
 现在能用的：
 
@@ -107,41 +100,6 @@ M5（直播电视）后端已完成并在真机验收：M3U 源与频道表、�
 | 播放器（转封装） | 图形字幕烧录（PGS/VobSub） | 放不了时的理由 | 首页继续观看 |
 |---|---|---|---|
 | ![播放器](docs/images/player-remux.png) | ![烧录](docs/images/player-burn-pgs.png) | ![理由](docs/images/player-reasons.png) | ![继续观看](docs/images/continue-watching.png) |
-
-### 验收（全部真环境实跑）
-
-| 脚本 | 结果 | 覆盖 |
-|---|---|---|
-| `scripts/dev/smoke-test.sh` | **42/42** | 接口与鉴权边界、会话、偏好、改口令踢设备、登出、静态兜底、非法输入 |
-| `scripts/dev/browser-test.mjs` | **26/26** | CDP 驱动真实 Chrome：首屏跟随系统主题、明暗切换与持久化、初始化向导、概览页、个人中心、主题同步账号、界面改口令、重新登录 |
-| `scripts/dev/m1-ui-test.mjs` | **18/18** | 媒体库页、扫描进度、条目表、主题 |
-| `scripts/dev/match-sample.sh` | **10 条样本 9 条 auto、0 条误配** | 真 TMDB 抽样，自动匹配率（DoD 要 ≥ 90%）|
-| `scripts/dev/verify-item-edit.sh` | **42/42** | 字段锁定的 DoD：改字段 → 锁住 → 重扫，**带对照组**（没锁的字段被 nfo 改写回去），跑完自还原 |
-| `scripts/dev/item-edit-ui-test.mjs` | **37/37** | 条目编辑界面：保存、非法输入被挡、加锁/解锁、切主题不丢状态 |
-| `scripts/dev/verify-search-sql.sh` | **15/15** | 中文切词、生成列、索引、索引侧与查询侧切法一致 |
-| `scripts/dev/verify-search.sh` | **26/26** | 真库搜索：整标题/中段/错字/单字、库与类型过滤、分页、改完标题立即可搜 |
-| `scripts/dev/verify-browse.sh` | **40/40** | 海报墙只给顶层、层级 parentId、每季集数、排序分页、批量入队/标记（跑完还原）|
-| `scripts/dev/verify-settings.sh` | **38/38** | 密钥不回显、非管理员 403、存库是密文、**保存即生效（填错 token → 真请求立刻失败）**、回落配置文件 |
-| `scripts/dev/m2-ui-test.mjs` | **34/34** | 海报墙、剧集视图、批量选择、设置页（测试连接/保存/恢复）|
-| `scripts/dev/search-ui-test.mjs` | **22/22** | 搜索界面：导航、查询、错字命中、进条目页、URL 参数、筛选、主题 |
-| `scripts/dev/verify-play.sh` | **108/108** | 播放后端：HTTP Range/ETag/条件请求/**字节与原文件逐字节一致**、mkv→HLS fMP4（**用 ffprobe 直接读服务发出的 m3u8 交叉验证编码**）、seek 换窗口、stop 后进程与分片回收、多版本选片、10bit HEVC 明确判「M4 才能放」、上报 Safari 能力后转为可转封装、字幕抽 WebVTT、进度与续播、继续观看 |
-| `scripts/dev/verify-transcode.sh` | **100/100** | 转码链路：能力表（能不能转由**运行时真跑探测**说话）、决策/目标编码/缩放/位深、**真转真播**（含倍速与超时）、用户画质档（本来能直出的也要转、切档换会话）、节流（`/proc` 里 `State=T` 取证 + 中途续播不该被卡死）、Hardware 解码降级（Hi10P）、监控与一键终止、ASS 交付、**图形字幕烧录的帧级开/关对照**（有字幕 YMAX 208 / 无字幕 0） |
-| `scripts/dev/play-ui-test.mjs` | **50/50** | 真浏览器播起来：直出起播+拖动、HLS 分片起播（hls.js）、**拖到窗口末端自动续段**、进度落库、离开页面回收会话、放不了的条目给出理由、快捷键、画质档菜单、**ASS 走 libass 渲染**、**图形字幕标「需烧录」+ 前端真带上 `burnSubtitle`** |
-| `scripts/dev/verify-livetv.sh` | **32/32** | 直播源与频道：导入（粘贴 / 订阅 URL）、按地址增量更新**不冲用户状态**（停用、收藏、探测结果）、分组与筛选、收藏切换、导出 m3u、删源后频道仍在、非管理员不能改源、空内容被拒且不留空源 |
-| `scripts/dev/verify-livetv-play.sh` | **30/30** | 直播播放：起播耗时（DoD < 2 秒）、滚动窗口在动、分片 `no-store`、**两人同看只跑一路 ffmpeg**、停一路不全灭、无人观看 45s 回收、外链 token 可用 / 篡改被拒 / 伪造被拒、未登录被拒（真实列表里有死源，脚本会自动跳过它）|
-
-这些脚本都不依赖测试框架（curl + jq / Node 内置 `WebSocket` 直连 Chrome DevTools Protocol）。
-用法与数据库字符集坑见 [`docs/DEV-ENV.md`](docs/DEV-ENV.md)。
-
-文档：
-
-| 文件 | 内容 |
-|---|---|
-| [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) | 需求、范围边界、设计取舍 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | M0~M9 路线图与逐项验收标准 |
-| [`docs/ADR/`](docs/ADR/) | 技术决策记录（为什么只用标准库） |
-| [`docs/DEV-ENV.md`](docs/DEV-ENV.md) | 开发环境、部署流程、验收脚本用法 |
-| [`docs/TRANSCODING.md`](docs/TRANSCODING.md) | 硬件加速实测矩阵与已踩过的坑 |
 
 ## 快速开始
 
@@ -216,25 +174,7 @@ sudo systemctl enable --now lmby
 | `LMBY_SECURE_COOKIES` | 走 HTTPS 时置 `true` |
 | `LMBY_SESSION_TTL_HOURS` | 会话有效期（小时）|
 
-刮削与匹配的取舍（为什么给搜索不传年份、为什么必须取详情看别名）见
-[`docs/ROADMAP.md`](docs/ROADMAP.md) 的验收记录。
-
-## 开发
-
-```bash
-bash scripts/dev/setup-pg.sh   # 准备 PostgreSQL 角色/库（UTF8 + C.UTF-8）与 /etc/lmby/config.toml
-task web:dev    # 终端 1：Vite 开发服务器（前端热更新）
-task run        # 终端 2：后端
-task check      # 提交前：vet + test + 前端构建
-```
-
-容器里的完整开发流程（编译 / golangci-lint / 各阶段验收脚本）见
-[`docs/DEV-ENV.md`](docs/DEV-ENV.md)。
-
-数据库迁移就是往 `migrations/` 加一个 `NNNN_描述.sql`，格式与注意事项见
-[`migrations/embed.go`](migrations/embed.go) 的包注释。
-
-### 硬件加速实测（结论）
+## 硬件加速（实测结论）
 
 在 Intel UHD 630（Comet Lake，Gen9.5）+ Debian 13 上：
 

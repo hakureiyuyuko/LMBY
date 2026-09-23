@@ -200,15 +200,6 @@ export function Search() {
     <>
       <div className="card">
         <h2>{t('搜索')}</h2>
-        <p className="hint">
-          {t('中文按二元组切词（「炼金」能搜到《钢之炼金术师》），英文按整词，并且')}
-          <strong>{t('容忍错字')}</strong>
-          {t('（「钢之炼金术土」也能命中）。搜的既有')}
-          <strong>{t('作品')}</strong>
-          {t('（标题 / 原始标题），也有')}
-          <strong>{t('演职员')}</strong>
-          {t('的名字 —— 敲几个字就会有联想，点人名可以只看他的作品。')}
-        </p>
 
         <form
           className="row"
@@ -484,7 +475,7 @@ export function Search() {
 
           {people.people.length === 0 && (
             <p className="muted">
-              {t('没有匹配的演职员。演职员数据来自媒体同目录的 nfo（本地优先）。')}
+              {t('没有匹配的演职员。')}
             </p>
           )}
 

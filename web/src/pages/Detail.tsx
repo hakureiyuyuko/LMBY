@@ -523,11 +523,11 @@ export function Detail() {
                 </li>
               ))}
             </ul>
-            <p className="faint small" style={{ marginTop: 8 }}>{t('演职员来自媒体同目录的 nfo（本地优先，不联网）。TMDB 的演职员还没接，所以没有 nfo 的条目这里是空的。')}
+            <p className="faint small" style={{ marginTop: 8 }}>{t('演职员信息来自媒体目录里的 nfo。')}
             </p>
           </>
         ) : (
-          <p className="muted small">{t('这条的同目录 nfo 里没有演职员信息。换成自带演职员的 nfo 之后，在「库管理」里勾上「重读 nfo」重扫一次就会出现（不必改媒体文件）。')}
+          <p className="muted small">{t('这条的 nfo 里没有演职员信息。')}
           </p>
         )}
       </div>
@@ -536,7 +536,6 @@ export function Detail() {
       {related.length > 0 && (
         <div className="card">
           <h2>{t('相关推荐')}</h2>
-          <p className="hint">{t('同库里与它流派相近的（评分高的在前）—— 没配 TMDB 也算得出来。')}</p>
           <div className="poster-grid">
             {related.map((r) => (
               <Link key={r.id} className="poster-card" to={`/item/${r.id}`}>

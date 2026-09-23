@@ -92,12 +92,6 @@ export function Lists() {
     <>
       <div className="card">
         <h2>{t('我的列表')}</h2>
-        <p className="hint">
-          {t('播放列表是私人的（只有你自己看得到）；')}
-          <strong>{t('合集')}</strong>
-          {t('对所有人可见，由管理员维护。')}
-          {t('条目是在影片详情页的「加入列表」里加进来的。')}
-        </p>
         <form className="row" onSubmit={create}>
           <input
             value={name}

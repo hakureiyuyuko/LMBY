@@ -101,7 +101,7 @@ function NotAdmin() {
     <div className="card">
       <h2>{t('设置')}</h2>
       <p className="hint">
-        {t('只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。')}
+        {t('只有管理员能改全站设置。')}
       </p>
     </div>
   );
@@ -113,12 +113,8 @@ function NotAdmin() {
  * 两个面板的完成回调在设置页没有要刷新列表，传空函数即可。
  */
 export function SettingsLiveTV() {
-  const { t } = useI18n();
   return (
     <>
-      <p className="hint">
-        {t('这里管直播源（导入 / 刷新 / 停用）、频道管理与失效源探测；看频道、起播与切台在「直播」页。')}
-      </p>
       <LiveSourcePanel onImported={() => {}} />
       <ChannelManager />
       <LiveProbePanel onFinished={() => {}} />
@@ -282,9 +278,6 @@ export function SettingsOverview() {
     <>
       <div className="card">
         <h2>{t('元数据源（TMDB）')}</h2>
-        <p className="hint">
-          {t('TMDB 用来刮削元数据与回源图片。填 Read Access Token（v4，推荐）或 API Key（v3），二选一即可。密钥只写不回显，保存后立刻生效、不必重启。数据库里的设置优先于 config.toml。')}
-        </p>
 
         {!data && !error && <p className="muted">{t('正在读取…')}</p>}
         {error && <div className="alert alert-error">{error}</div>}
@@ -389,10 +382,6 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('只读库叠加层')}</h2>
-        <p className="hint">
-          {t('只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}',
-            { root: overlayStats?.root || '—' })}
-        </p>
         {overlayStats && (
           <>
             <p className="small">
@@ -430,9 +419,6 @@ export function SettingsOverview() {
 
       <div className="card">
         <h2>{t('服务状态')}</h2>
-        <p className="hint">
-          {t('实例自检：状态、数据库、ffmpeg（与它的硬件加速后端）。首页那份自检面板 M6 搬到了这里 —— 它属于「出问题时才看」的信息，不该占首页的位置。')}
-        </p>
         {!health && <p className="muted">{t('正在读取…')}</p>}
         {health && (
           <>
@@ -466,7 +452,7 @@ export function SettingsOverview() {
               <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
             </dl>
             <p className="faint" style={{ marginBottom: 0 }}>
-              {t('注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。')}
+              {t('能力探测会真跑一小段转码，确认后端真的可用。')}
             </p>
           </>
         )}

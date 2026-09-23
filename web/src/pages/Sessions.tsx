@@ -61,9 +61,6 @@ export function Sessions() {
 
       <div className="card">
         <h2>{t('播放会话')}</h2>
-        <p className="hint">
-          {t('当前正在播放的会话。直出与转封装/转码都会出现在这里；转码那一路的实时状态见下表。')}
-        </p>
         {sessions.length === 0 ? (
           <p className="faint">{loaded ? t('当前没有人在播放。') : t('正在读取…')}</p>
         ) : (
@@ -98,11 +95,8 @@ export function Sessions() {
 
       <div className="card">
         <h2>{t('转码 / 转封装会话')}</h2>
-        <p className="hint">
-          {t('每一路 ffmpeg 的实时状态。速度低于 1x 就跟不上播放（画面会卡）；显示「节流中」是好事 —— 说明它已经跑在客户端前面，正歇着等，避免白烧 CPU。')}
-        </p>
         {streams.length === 0 ? (
-          <p className="faint">{loaded ? t('当前没有转码/转封装进程。') : t('正在读取…')}</p>
+          <p className="faint">{loaded ? t('当前没有转码进程。') : t('正在读取…')}</p>
         ) : (
           <table>
             <thead>
@@ -152,7 +146,7 @@ export function Sessions() {
         {streams.some((st) => st.log) && (
           <details>
             <summary className="hint">
-              {t('ffmpeg 日志尾巴（排查「为什么卡/为什么起不来」）')}
+              {t('日志')}
             </summary>
             {streams.map((st) =>
               st.log ? (

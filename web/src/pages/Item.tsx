@@ -320,9 +320,6 @@ export function ItemEdit() {
 
       <div className="card">
         <h2>{t('播放')}</h2>
-        <p className="hint">
-          {t('服务端会在开播前做一次播放决策：能直出就直出（原文件 + HTTP Range，最省资源），否则就只换容器（转封装，视频不重新编码），两者都不行才需要转码 —— 具体选了哪条、为什么，播放器里点「为什么这么播」看得到。')}
-        </p>
         {file && (
           <p className="muted small">
             {t('文件 {container} · 视频 {video} · 音频 {audio}', {
@@ -364,9 +361,6 @@ export function ItemEdit() {
 
       <div className="card">
         <h2>{t('字段')}</h2>
-        <p className="hint">
-          {t('改完点上面的「保存」。勾上「锁定」的字段，重新扫描（nfo 重读）与重新刮削（TMDB）都不会覆盖它 —— 这是「人工改过的数据不被机器冲掉」的唯一保证。没锁的字段会被自动流程补上。留空表示清空（与自动刮削的「空值不覆盖」相反，人工编辑写什么就是什么）。')}
-        </p>
         <table className="edit-table">
           <thead>
             <tr>

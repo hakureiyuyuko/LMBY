@@ -98,7 +98,7 @@ export function Libraries() {
       setError('');
       setNotice(
         next
-          ? t('已把「{name}」设为只读：刮削产物写进数据目录的 overlay 层，不写媒体目录。', {
+          ? t('已把「{name}」设为只读：刮削产物写进数据目录，不写媒体目录。', {
               name: lib.name,
             })
           : t('已把「{name}」改为可写。', { name: lib.name }),
@@ -132,9 +132,6 @@ export function Libraries() {
 
       <div className="card">
         <h2>{t('媒体库')}</h2>
-        <p className="hint">
-          {t('扫描只读取文件系统与本地 nfo，不会修改你的文件；图片只登记路径，不入库。')}
-        </p>
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert alert-ok">{notice}</div>}
         {!libraries && <p className="muted">{t('正在读取…')}</p>}
@@ -186,7 +183,7 @@ export function Libraries() {
                 <button
                   type="button"
                   className="btn btn-sm"
-                  title={t('网盘 / 只读挂载的库打开它：LMBY 不再写媒体目录，刮削产物落进数据目录的 overlay 层')}
+                  title={t('网盘 / 只读挂载的库打开它：不再写媒体目录，刮削产物落进数据目录')}
                   onClick={() => void toggleReadOnly(lib)}
                 >
                   {lib.readonly ? t('改为可写') : t('设为只读')}
@@ -293,9 +290,6 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
   return (
     <div className="card">
       <h2>{t('添加媒体库')}</h2>
-      <p className="hint">
-        {t('根路径是服务器上的绝对路径。多个路径可以指向不同磁盘；目录约定与 Emby 一致，现有库可以零改名接管。')}
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
       <label className="field">
         <span>{t('名称')}</span>
@@ -422,9 +416,6 @@ function EditLibraryForm({
           }}
         />
       </label>
-      <p className="hint">
-        {t('改类型只影响以后扫描怎么认条目（已入库的条目不变）；移除一条根路径不会删掉已入库的条目。改动要重扫一次才生效。')}
-      </p>
       <div className="row">
         <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => void submit()}>
           {busy ? t('保存中…') : t('保存')}
@@ -496,7 +487,7 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
         </h2>
         {detail.library.readonly && (
           <div className="alert">
-            {t('这个库是只读的：LMBY 不会往它的目录里写任何东西。刮削到的元数据快照与图片写在数据目录的 overlay 层（每库一块、不参与图片缓存淘汰），当前 {files} 个文件 / {size}。',
+            {t('这个库是只读的：不往媒体目录写入任何东西。刮削产物存在数据目录，当前 {files} 个文件 / {size}。',
               {
                 files: detail.overlay?.files ?? 0,
                 size: sizeText(detail.overlay?.bytes ?? 0),
@@ -559,7 +550,6 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
 
       <div className="card">
         <h2>{t('条目（{n}）', { n: total })}</h2>
-        <p className="hint">{t('扫描入库的原始条目。matching 与海报墙属于 M2 / M5。')}</p>
         <div className="row" style={{ marginBottom: 12 }}>
           {[
             { v: '', l: t('全部') },
@@ -692,9 +682,6 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
   return (
     <div className="card">
       <h2>{t('元数据刮削')}</h2>
-      <p className="hint">
-        {t('有本地 nfo 的条目默认不会被刮削（nfo 是当初人工整理的，最权威）；只有没 nfo 的才会去 TMDB 找，找不到或拿不准的进「人工匹配」。')}
-      </p>
       {message && <div className="alert">{message}</div>}
 
       {data && !data.configured && (
@@ -735,7 +722,7 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
           onClick={() => {
             if (
               !window.confirm(
-                t('强制重刮会把 TMDB 的值写进所有条目的未锁定字段（包括有 nfo 的）。\n锁住的字段与人工改过的字段不会被动。确定继续？'),
+                t('强制重刮会覆盖所有条目的未锁定字段（锁住的与人工改过的不动）。确定继续？'),
               )
             ) {
               return;
@@ -807,9 +794,6 @@ function ProbeCard({
   return (
     <div className="card">
       <h2>{t('流信息探测')}</h2>
-      <p className="hint">
-        {t('ffprobe 读取每个文件的容器/编码/位深/HDR/音轨/字幕/章节信息，写入数据库。\n扫描结束后会自动排队，这里可以手动补跑。')}
-      </p>
       {message && <div className="alert">{message}</div>}
 
       <div className="row" style={{ marginBottom: 10 }}>
@@ -880,7 +864,6 @@ function IssuesCard({ issues }: { issues: ScanIssue[] }) {
   return (
     <div className="card">
       <h2>{t('扫描问题（{n}）', { n: issues.length })}</h2>
-      <p className="hint">{t('不致命但值得看一眼：文件过小、识别不了、nfo 解析失败等。')}</p>
       <table>
         <thead>
           <tr>

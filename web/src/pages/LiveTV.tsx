@@ -202,7 +202,7 @@ export function LiveTV() {
         return;
       }
       if (!Hls.isSupported()) {
-        setPlayErr(t('这个浏览器既不支持原生 HLS，也不支持 MSE，放不了直播流'));
+        setPlayErr(t('这个浏览器放不了直播流。'));
         setStarting(false);
         return;
       }

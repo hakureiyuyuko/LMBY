@@ -60,7 +60,6 @@ function ProfileCard() {
   return (
     <div className="card">
       <h2>{t('资料')}</h2>
-      <p className="hint">{t('显示名会出现在界面右上角。')}</p>
       <form onSubmit={onSubmit}>
         {msg && <div className="alert alert-ok">{msg}</div>}
         {err && <div className="alert alert-error">{err}</div>}
@@ -122,9 +121,6 @@ function PasswordCard() {
   return (
     <div className="card">
       <h2>{t('修改口令')}</h2>
-      <p className="hint">
-        {t('需要先验证当前口令。修改成功后，除当前设备外的其它登录会话都会立即失效。')}
-      </p>
       <form onSubmit={onSubmit}>
         {msg && <div className="alert alert-ok">{msg}</div>}
         {err && <div className="alert alert-error">{err}</div>}
@@ -172,7 +168,7 @@ function PasswordCard() {
 
 // ---------------------------------------------------------------- 外观
 
-function AppearanceCard({ current, language }: { current: ThemeMode; language: string }) {
+function AppearanceCard({ language }: { current: ThemeMode; language: string }) {
   const { t } = useI18n();
   const { mode, setMode } = useTheme();
   const { applyMe } = useAuth();
@@ -201,10 +197,6 @@ function AppearanceCard({ current, language }: { current: ThemeMode; language: s
   return (
     <div className="card">
       <h2>{t('外观')}</h2>
-      <p className="hint">
-        {t('右上角随时可以快速切换；这里的设置会同步到账号，换设备登录后同样生效。')}
-        {current !== mode && t('（当前显示与本机选择不一致，已按本机选择显示）')}
-      </p>
       {err && <div className="alert alert-error">{err}</div>}
       <div className="seg">
         {options.map((o) => (
@@ -256,9 +248,6 @@ function SessionsCard() {
   return (
     <div className="card">
       <h2>{t('我的设备')}</h2>
-      <p className="hint">
-        {t('当前有效的登录会话。撤销某个会话会立即让对应设备退出登录。')}
-      </p>
       {err && <div className="alert alert-error">{err}</div>}
       {!sessions && <p className="muted">{t('正在读取…')}</p>}
       {sessions && sessions.length === 0 && <p className="muted">{t('没有有效会话。')}</p>}

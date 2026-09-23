@@ -149,7 +149,7 @@ import { t } from './i18n';
 export function modeLabel(mode: string): { label: string; hint: string } {
   switch (mode) {
     case 'direct':
-      return { label: t('直接播放'), hint: t('原文件按 HTTP Range 分段送出，服务端零转码') };
+      return { label: t('直接播放'), hint: t('直接播放原文件，服务端不重新编码') };
     case 'remux':
       return { label: t('转封装'), hint: t('视频不重新编码，只换容器（HLS 分片）') };
     case 'transcode':

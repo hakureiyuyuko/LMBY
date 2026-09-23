@@ -56,9 +56,6 @@ export function Users() {
     <>
       <div className="card">
         <h2>{t('用户')}</h2>
-        <p className="hint">
-          {t('权限只有四项：管理员、能看到哪些媒体库、并发播放数（0 = 用全局上限）、以及能不能转码 / 看直播。改口令、禁用或收紧库范围后，对方的登录会立刻失效。')}
-        </p>
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert">{notice}</div>}
         {!users && <p className="muted">{t('正在读取…')}</p>}

@@ -410,7 +410,7 @@ export function Player() {
       return;
     }
     if (!Hls.isSupported()) {
-      setError(t('这个浏览器既不支持原生 HLS，也不支持 MSE，无法播放转封装流'));
+      setError(t('这个浏览器放不了这条流。'));
       setLoading(false);
       return;
     }
@@ -967,8 +967,6 @@ export function Player() {
                     <li key={i}>{r}</li>
                   ))}
                 </ul>
-                <p className="hint">{t('播放决策是「能直出就直出 → 不行就转封装 → 再不行才转码」。上面每一条都是服务端给出的具体原因（例如视频是 10bit HEVC，浏览器解不了，要重新编码成 h264）。')}
-                </p>
               </>
             )}
             <div className="row">
@@ -1116,7 +1114,7 @@ export function Player() {
         {/* 图形字幕只能烧进画面（服务端要重编一遍）——这是有代价的选择，
             所以不在菜单里偷偷做，而是选完就把代价写出来。 */}
         {subBurn && (
-          <span className="faint" title={t('图形字幕是位图，只能烧进画面；服务端会重新编码一遍')}>
+          <span className="faint" title={t('图形字幕需要重新编码后才能显示。')}>
             {t('字幕将烧进画面（需重新编码）')}
           </span>
         )}
@@ -1168,7 +1166,7 @@ export function Player() {
         <p className="faint player-hint">
           {t('快捷键：空格 播放/暂停 · ←/→ 快退快进 10 秒 · F 全屏 · M 静音。')}
           {state?.mode === 'remux' &&
-            t('（转封装模式下拖动到已生成窗口之外时，服务端会从新位置重新生成一段，需要一两秒）')}
+            t('（拖动到尚未生成的区间时，需要一两秒重新生成）')}
         </p>
       )}
     </div>

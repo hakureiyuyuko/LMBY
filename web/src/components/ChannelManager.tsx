@@ -72,9 +72,6 @@ export function ChannelManager({ onChanged }: { onChanged?: () => void }) {
   return (
     <div className="card">
       <h2>{t('频道管理')}</h2>
-      <p className="hint">
-        {t('这里改的是「怎么用」（名字 / 分组 / 排序 / logo）与「启用状态」。改名与分组下次刷新订阅源时会按播放列表还原 —— 播放列表才是频道的来源；「启用状态」与「收藏」不会被刷新覆盖。')}
-      </p>
       {error && <div className="alert alert-error">{error}</div>}
       {message && <div className="alert">{message}</div>}
 

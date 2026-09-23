@@ -183,12 +183,6 @@ export function LiveSourcePanel({ onImported }: { onImported: () => void }) {
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert alert-ok">{notice}</div>}
 
-      {!open && (
-        <p className="hint">
-          {t('订阅源会按各自的间隔自动刷新（间隔 0 = 只手动刷）。展开可以导入新的播放列表、改间隔、看上次刷新结果。')}
-        </p>
-      )}
-
       {open && (
         <>
           <h3>{t('导入播放列表')}</h3>
@@ -407,9 +401,6 @@ export function LiveProbePanel({ onFinished }: { onFinished: () => void }) {
   return (
     <div className="card">
       <h2>{t('频道探测（失效源标记）')}</h2>
-      <p className="hint">
-        {t('真连一次源站看它出不出得来流（死源常常 TCP 连得上，是在协议握手那一步挂掉的），结果写回每条频道的「通 / 失效」。全量探测每个频道都要连一次，以分钟计；关掉页面不会中断，回来接着看进度。')}
-      </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 

@@ -161,13 +161,6 @@ export function Match() {
     <>
       <div className="card">
         <h2>{t('人工匹配')}</h2>
-        <p className="hint">
-          {t('覆盖顺序是「本地 nfo / 本地图优先 → 缺的才去 TMDB 刮」。这里只处理机器拿不准的：')}
-          <strong>{t('待确认')}</strong>
-          {t('（有候选但不够确定，多半是 TMDB 上有多条同名条目）与')}
-          <strong>{t('没找到')}</strong>
-          {t('（搜不到候选）。候选连同打分明细是刮削时存下来的，打开就能选，不用重新搜。')}
-        </p>
 
         <div className="row">
           <label className="field">

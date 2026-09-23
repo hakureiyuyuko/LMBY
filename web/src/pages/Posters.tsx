@@ -49,9 +49,6 @@ export function Posters() {
     return (
       <div className="card">
         <h2>{t('还没有媒体库')}</h2>
-        <p className="hint">
-          {t('媒体库是「一个目录树 = 一面海报墙」。先在库管理里把服务器上的目录加进来，扫一次就有了。')}
-        </p>
         <Link className="btn btn-primary" to="/settings/libraries">
           {t('去建媒体库')}
         </Link>
@@ -66,7 +63,6 @@ export function Posters() {
   return (
     <div className="card">
       <h2>{t('选择媒体库')}</h2>
-      <p className="hint">{t('每个库是一面独立的墙。')}</p>
       <div className="row">
         {libs.map((l) => (
           <Link key={l.id} className="btn" to={`/library/${l.id}`}>
