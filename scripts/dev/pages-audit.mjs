@@ -234,9 +234,15 @@ async function main() {
   log(`样本：库 #${lib.id}「${lib.name}」、条目 #${movie.id}「${movie.title}」、剧集 #${series.id || '-'}`);
 
   const problems = [];
-  const record = async (name, r) => {
+  // soft=true：这一页的正文**本来就**会有「失败 / error」字样（日志页、审计页），
+  // 只查页面异常，不做正文关键字判断。
+  const record = async (name, r, soft = false) => {
     if (r.errs.length) problems.push(`${name}: ${r.errs[0]}`);
-    if (/读取.*失败|加载失败|出错了|Error/.test(r.info.text) && !/失败重试|暂无/.test(r.info.text)) {
+    if (
+      !soft &&
+      /读取.*失败|加载失败|出错了|Error/.test(r.info.text) &&
+      !/失败重试|暂无/.test(r.info.text)
+    ) {
       // 正文里出现「失败」多半是页面级错误（比如「读取首页失败」）——记下来给人看
       problems.push(`${name}: 正文里出现「失败」字样 → ${r.info.text.slice(0, 120)}`);
     }
@@ -259,10 +265,44 @@ async function main() {
   await record('13-设置-会话', await visit('13-设置-会话', '/settings/sessions', null));
   await record('14-设置-直播源', await visit('14-设置-直播源', '/settings/livetv', null, true));
   await record('15-设置-用户', await visit('15-设置-用户', '/settings/users', '.user-list'));
+  // 设置页的新页签（M6/M8）：转码与硬件、日志、扫描计划、审计日志、缓存与清理。
+  await record('15a-设置-转码与硬件', await visit('15a-设置-转码与硬件', '/settings/transcode', null, true));
+  await record('15b-设置-日志', await visit('15b-设置-日志', '/settings/logs', null), true);
+  await record('15c-设置-扫描计划', await visit('15c-设置-扫描计划', '/settings/scan', null));
+  await record('15d-设置-审计日志', await visit('15d-设置-审计日志', '/settings/audit', null), true);
+  await record('15e-设置-缓存与清理', await visit('15e-设置-缓存与清理', '/settings/maintenance', null));
+  // 列表详情（临时建一个私人列表，放一条样本，用完删掉）
+  {
+    const pl = await evaluate(
+      apiCall('/api/v1/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: '巡检临时列表' }),
+      }),
+    );
+    const plId = pl.body && pl.body.playlist && pl.body.playlist.id;
+    if (plId) {
+      if (movie.id) {
+        await evaluate(
+          apiCall(`/api/v1/playlists/${plId}/items`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ itemIds: [movie.id] }),
+          }),
+        );
+      }
+      await record('15f-列表详情', await visit('15f-列表详情', `/list/${plId}`, null));
+      await evaluate(apiCall(`/api/v1/playlists/${plId}`, { method: 'DELETE' }));
+      log('   已删除巡检临时列表');
+    }
+  }
   if (movie.id) {
     await record('16-播放器', await visit('16-播放器', `/play/${movie.id}`, '.player-shell, video'));
+    // 人工编辑（字段锁定）页：/items/{id}
+    await record('16b-条目编辑', await visit('16b-条目编辑', `/items/${movie.id}`, null, true));
   }
   await record('17-表单页-登录（已登录时应重定向回首页）', await visit('17-登录页', '/login', null));
+  await record('17b-404（不存在的路径应给「没有对应页面」）', await visit('17b-404', '/no-such-page-audit', null));
 
   // 入口清单：顶栏 + 设置页签 + 首页每行的「更多」
   await send('Page.navigate', { url: `${BASE}/` });
