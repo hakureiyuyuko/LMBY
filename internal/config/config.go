@@ -210,6 +210,13 @@ type ScanConfig struct {
 	// **不是画质/时长过滤器** —— 实测有 28 秒的 1080p h264 短片只有 646 KB，
 	// 阈值开大了会把它们当成垃圾直接跳过（用户2026-09-22 真踩到：一个目录 63 个文件被跳）。
 	MinFileSize int64 `toml:"min_file_size"`
+
+	// ScheduleTickSeconds 是「扫描计划」调度器的检查间隔（秒；0 = 关掉自动扫描）。
+	//
+	// 它只决定「多久看一眼有没有库到期」，不决定每个库多勤 —— 间隔属于库
+	// （`libraries.scan_interval_minutes`，界面上可改）。默认 60 秒：
+	// 对「每天扫一次」这种计划精度足够了，也不至于频繁查库。
+	ScheduleTickSeconds int `toml:"schedule_tick_seconds"`
 }
 
 func Default() *Config {
@@ -252,6 +259,11 @@ func Default() *Config {
 			RefreshTickSeconds:  60,
 			ProbeTimeoutSeconds: 8,
 			ProbeConcurrency:    4,
+		},
+		// 扫描计划：默认开（每库自己决定间隔，见 libraries.scan_interval_minutes），
+		// 调度器每 60 秒看一眼有没有库到期。
+		Scan: ScanConfig{
+			ScheduleTickSeconds: 60,
 		},
 	}
 }
@@ -320,6 +332,7 @@ func applyEnv(cfg *Config) error {
 	setInt(&cfg.LiveTV.RefreshTickSeconds, "LMBY_LIVETV_REFRESH_TICK_SECONDS")
 	setInt(&cfg.LiveTV.ProbeTimeoutSeconds, "LMBY_LIVETV_PROBE_TIMEOUT_SECONDS")
 	setInt(&cfg.LiveTV.ProbeConcurrency, "LMBY_LIVETV_PROBE_CONCURRENCY")
+	setInt(&cfg.Scan.ScheduleTickSeconds, "LMBY_SCAN_SCHEDULE_TICK_SECONDS")
 
 	if v, ok := os.LookupEnv("LMBY_LIVETV_AUTO_REFRESH"); ok && v != "" {
 		b, err := strconv.ParseBool(v)
@@ -424,6 +437,11 @@ func (c *Config) Validate() error {
 	}
 	if c.LiveTV.ProbeConcurrency < 1 || c.LiveTV.ProbeConcurrency > 32 {
 		c.LiveTV.ProbeConcurrency = 4
+	}
+	// 扫描计划：负数与超大值都归到默认；**0 保留**（那个值表示「关掉自动扫描」，
+	// 维护时想停掉调度就是它）。
+	if c.Scan.ScheduleTickSeconds < 0 || c.Scan.ScheduleTickSeconds > 3600 {
+		c.Scan.ScheduleTickSeconds = 60
 	}
 	return nil
 }

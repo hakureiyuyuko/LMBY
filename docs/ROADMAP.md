@@ -1175,6 +1175,14 @@ staticcheck 1、errorlint 1）。以后改 lint 相关的东西，先在容器�
     ② **发版前把每一页真打开看一遍**：`scripts/dev/pages-audit.mjs`（逐页截图 +
     页面异常 + 顶栏 / 设置页签 / 首页各行的入口清单 + 普通用户视角对照）。
     各页 ui-test 都绿、而这个巡检一遍就把它翻出来了。
+58. **改「列清单常量」时必须搜所有 Scan 点**（扫描计划这轮踩到两次）：`libraryColumns`
+    加一列（`scan_interval_minutes`）之后，`ListLibraries` 里一处**手写 Scan** 没跟上 →
+    8 列 vs 7 个目标 → **库列表整个 500**（`number of field descriptions must equal
+    number of destinations, got 8 and 7`）。同一次里 `CreateLibrary` 也是这个毛病（早一轮刚修过）。
+    根治只能是**统一入口**：库走 `scanLibrary`、用户走 `scanUser`、条目走 `scanItems`；
+    改完常量列清单后，`grep` 一遍还有没有手写的 `rows.Scan(&x.` 在同一批查询上，
+    然后跑一遍覆盖读路径的验收（`verify-users.sh` 的 1.5 节正好干这个 —— 它会把
+    库列表/条目/搜索/首页都打一遍，这次如果先跑它就不会把 500 带上去）。
 
 - [ ] 设置页：扫描计划、转码/硬件、日志查看
       （库管理与直播源已随前几轮进设置；用户与权限见下一条）

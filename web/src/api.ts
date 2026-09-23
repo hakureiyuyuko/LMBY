@@ -171,7 +171,7 @@ export const api = {
   createLibrary: (name: string, kind: string, paths: string[]) =>
     request<LibrarySummary>('/api/v1/libraries', { method: 'POST', ...json({ name, kind, paths }) }),
   /** 改名 / 改类型 / 替换根路径 / 只读开关，共用一个 PATCH。 */
-  updateLibrary: (id: number, body: { name?: string; kind?: string; paths?: string[]; readonly?: boolean }) =>
+  updateLibrary: (id: number, body: { name?: string; kind?: string; paths?: string[]; readonly?: boolean; scanIntervalMinutes?: number }) =>
     request<{ ok: boolean }>(`/api/v1/libraries/${id}`, { method: 'PATCH', ...json(body) }),
   /** 清空某个只读库的叠加层（只删数据目录里那一块，媒体目录与数据库不动）。 */
   clearLibraryOverlay: (id: number) =>
@@ -683,6 +683,12 @@ export interface LibrarySummary {
   scanRunning: boolean;
   /** 只读（网盘 / 只读挂载）：LMBY 不往库目录里写，刮削产物落进 overlay。 */
   readonly?: boolean;
+  /** 自动扫描间隔（分钟；0 = 不自动扫）。 */
+  scanIntervalMinutes?: number;
+  /** 上次扫描开始时间（派生字段）。 */
+  lastScanAt?: string;
+  /** 下次扫描时间（派生字段，按间隔算出来）。 */
+  nextScanAt?: string;
 }
 
 export interface ScanRun {

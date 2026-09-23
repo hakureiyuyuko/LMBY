@@ -37,6 +37,7 @@ import (
 	"github.com/hakureiyuyuko/lmby/internal/probe"
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/provider/tmdb"
+	"github.com/hakureiyuyuko/lmby/internal/scan"
 	"github.com/hakureiyuyuko/lmby/internal/scrape"
 	"github.com/hakureiyuyuko/lmby/internal/secrets"
 	"github.com/hakureiyuyuko/lmby/internal/settings"
@@ -569,6 +570,14 @@ func cmdServe(args []string) error {
 	// 后台任务不能挂在某次请求上（请求一返回 ctx 就取消了）——
 	// 把服务的生命周期 ctx 交给 Server，直播频道探测用它。
 	srv.SetBaseContext(ctx)
+
+	// 扫描计划：调度器按**每个库自己的间隔**触发（间隔存在库里，见
+	// store.ListLibrariesDueForScan）。tick = 0 表示关掉自动扫描（维护时用）。
+	if tick := cfg.Scan.ScheduleTickSeconds; tick > 0 {
+		go scan.NewScheduler(srv.Scans(), log, time.Duration(tick)*time.Second).Run(ctx)
+	} else {
+		log.Info("扫描计划调度器已关闭（[scan] schedule_tick_seconds = 0）")
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,

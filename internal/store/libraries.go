@@ -25,6 +25,17 @@ type Library struct {
 	// 将来启用「写回媒体目录」时也会先看这个开关。
 	ReadOnly bool `json:"readonly"`
 
+	// ScanIntervalMinutes 是自动扫描间隔（0 = 不自动扫，只手动）。
+	//
+	// 间隔属于**库**而不是调度器（与直播源的刷新间隔一个路子）：
+	// 「这个库每小时扫、那个库每天扫」应该是数据，不是代码。
+	ScanIntervalMinutes int `json:"scanIntervalMinutes"`
+
+	// LastScanAt / NextScanAt 是**派生字段**（不进库）：由 api 层按 scan_runs 里
+	// 最近一次扫描时间与扫描间隔算出来，只为界面显示「上次 / 下次」。
+	LastScanAt *time.Time `json:"lastScanAt,omitempty"`
+	NextScanAt *time.Time `json:"nextScanAt,omitempty"`
+
 	Paths []LibraryPath `json:"paths,omitempty"`
 }
 
@@ -46,11 +57,12 @@ func ValidLibraryKind(k string) bool {
 	return false
 }
 
-const libraryColumns = `id, name, kind, options, created_at, updated_at, readonly`
+const libraryColumns = `id, name, kind, options, created_at, updated_at, readonly, scan_interval_minutes`
 
 func scanLibrary(row pgx.Row) (*Library, error) {
 	var l Library
-	err := row.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt, &l.ReadOnly)
+	err := row.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt, &l.ReadOnly,
+		&l.ScanIntervalMinutes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -128,11 +140,14 @@ func (s *Store) ListLibraries(ctx context.Context, libs []int64) ([]Library, err
 
 	var out []Library
 	for rows.Next() {
-		var l Library
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Options, &l.CreatedAt, &l.UpdatedAt, &l.ReadOnly); err != nil {
+		// 走 scanLibrary（唯一入口）：手写 Scan 会在"加了列"时静默错位
+		//（`number of field descriptions must equal number of destinations`）——
+		// 这一处就是这么漏的（库列表整个 500）。
+		l, err := scanLibrary(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, l)
+		out = append(out, *l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -180,6 +195,77 @@ func (s *Store) UpdateLibrary(ctx context.Context, id int64, name string) error 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetLibraryScanInterval 设置自动扫描间隔（分钟；0 = 不自动扫）。
+//
+// 上限一周（10080 分钟）与迁移里的约束一致 —— 在这里先挡一道，
+// 好给出人话的错误（而不是把 check 约束的报错原样抛给用户）。
+func (s *Store) SetLibraryScanInterval(ctx context.Context, id int64, minutes int) error {
+	if minutes < 0 || minutes > 10080 {
+		return fmt.Errorf("扫描间隔要在 0 到 10080 分钟之间（0 = 不自动扫）")
+	}
+	tag, err := s.pool.Exec(ctx,
+		`update libraries set scan_interval_minutes = $2, updated_at = now() where id = $1`,
+		id, minutes)
+	if err != nil {
+		return fmt.Errorf("更新扫描计划失败: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListLibrariesDueForScan 取「该自动扫了」的库（调度器用）。
+//
+// 到期 = 这个库开了自动扫（间隔 > 0），而且「最近一次扫描开始时间 + 间隔」已经过去。
+// 从没扫过的库立即到期（coalesce 到 -infinity）—— 刚配好计划就该跑第一次。
+func (s *Store) ListLibrariesDueForScan(ctx context.Context) ([]Library, error) {
+	rows, err := s.pool.Query(ctx,
+		`select `+libraryColumns+`
+		 from libraries l
+		 where l.scan_interval_minutes > 0
+		   and coalesce((select max(r.started_at) from scan_runs r where r.library_id = l.id),
+		                '-infinity'::timestamptz)
+		       + make_interval(mins => l.scan_interval_minutes) <= now()
+		 order by l.id`)
+	if err != nil {
+		return nil, fmt.Errorf("查询待扫描的媒体库失败: %w", err)
+	}
+	defer rows.Close()
+	var out []Library
+	for rows.Next() {
+		l, err := scanLibrary(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *l)
+	}
+	return out, rows.Err()
+}
+
+// LastScanTimes 返回每个库最近一次扫描的开始时间（界面用它算「上次 / 下次」）。
+//
+// 现算而不在 libraries 上存一列：扫描记录本来就是真相，多存一列就多一种
+// 「两个地方对不上」的可能。
+func (s *Store) LastScanTimes(ctx context.Context) (map[int64]time.Time, error) {
+	rows, err := s.pool.Query(ctx,
+		`select library_id, max(started_at) from scan_runs group by library_id`)
+	if err != nil {
+		return nil, fmt.Errorf("查询最近扫描时间失败: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var id int64
+		var at time.Time
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, err
+		}
+		out[id] = at
+	}
+	return out, rows.Err()
 }
 
 // UpdateLibraryKind 改库类型（movie | tv | homevideo | mixed），不改动任何条目。

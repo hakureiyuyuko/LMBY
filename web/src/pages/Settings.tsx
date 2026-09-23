@@ -7,6 +7,7 @@ import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
 import { ChannelManager } from '../components/ChannelManager';
 import { TranscodePanel } from '../components/TranscodePanel';
 import { LogsPanel } from '../components/LogsPanel';
+import { ScanPlanPanel } from '../components/ScanPlanPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -77,6 +78,12 @@ export function Settings() {
             {t('库管理')}
           </NavLink>
           <NavLink
+            to="/settings/scan"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('扫描计划')}
+          </NavLink>
+          <NavLink
             to="/settings/match"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
@@ -124,6 +131,11 @@ function NotAdmin() {
 /** 设置页签：日志（最近的服务端日志；数据来自内存环形缓冲，见 internal/logbuf）。 */
 export function SettingsLogs() {
   return <LogsPanel />;
+}
+
+/** 设置页签：扫描计划（间隔属于每个库；调度器只负责「谁到期了」）。 */
+export function SettingsScan() {
+  return <ScanPlanPanel />;
 }
 
 /** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */
