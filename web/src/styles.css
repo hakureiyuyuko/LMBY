@@ -477,9 +477,15 @@ th {
   display: flex;
   gap: 6px;
   align-items: center;
+  /* 页签数量已经上双（设置页 10 个），让它横向滚动而不是换行：
+     换行会把卡片挤成两行、手机上更乱。 */
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
 }
 
 .tab {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   background: var(--bg-elev-2);
   color: var(--fg);

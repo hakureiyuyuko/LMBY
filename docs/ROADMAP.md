@@ -866,7 +866,9 @@ recent 前 10 条与 hero 逐条一致；**自造一条观看记录**后验推�
 - [x] 【发布流程：release workflow 交叉编译 4 平台（linux amd64/arm64/armv7 + windows amd64）
       + `SHA256SUMS.txt` + GitHub Release（说明用 `docs/releases/<tag>.md`）—— 每个 tag 自动出，
       已经跑过 v0.2.0 / v0.3.x / v0.9.0】
-- [ ] 缓存与清理策略：转码分片（孤立会话残留）、图片缓存、孤儿文件清理、日志
+- [x] 缓存与清理策略 —— 2026-09-23：叠加层孤儿清理（`overlay.PurgeOrphans`，
+      查库出错时**一律不删**）+ 缓存占用与一键清理（设置 → 缓存与清理）；
+      转码分片由 `stream.NewManager` 启动时清，图片缓存由 LRU 管；`verify-maintenance.sh` 12/0
 - [ ] `lmby backup` / `lmby restore`（PG dump + 配置 + 数据目录清单）
 - [ ] `/metrics`（Prometheus，可选）
 - [ ] 文档：`docs/CONFIG.md`、`docs/ARCHITECTURE.md`（README / TRANSCODING / ADR 已有）

@@ -9,6 +9,7 @@ import { TranscodePanel } from '../components/TranscodePanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { ScanPlanPanel } from '../components/ScanPlanPanel';
 import { AuditPanel } from '../components/AuditPanel';
+import { MaintenancePanel } from '../components/MaintenancePanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -114,6 +115,12 @@ export function Settings() {
           >
             {t('审计日志')}
           </NavLink>
+          <NavLink
+            to="/settings/maintenance"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('缓存与清理')}
+          </NavLink>
         </nav>
       </div>
 
@@ -148,6 +155,11 @@ export function SettingsScan() {
 /** 设置页签：审计日志（持久的问责记录，见 internal/api/audit.go）。 */
 export function SettingsAudit() {
   return <AuditPanel />;
+}
+
+/** 设置页签：缓存与清理（只碰缓存，见 internal/api/maintenance.go）。 */
+export function SettingsMaintenance() {
+  return <MaintenancePanel />;
 }
 
 /** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */

@@ -174,6 +174,14 @@ export const api = {
     const qs = sp.toString();
     return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
   },
+
+  // 维护：缓存占用与清理（设置 → 缓存与清理）。
+  maintenance: () => request<MaintenancePayload>('/api/v1/maintenance'),
+  cleanMaintenance: (body: { images?: boolean; overlayOrphans?: boolean }) =>
+    request<{ cleaned: Record<string, { files: number; bytes: number }> }>(
+      '/api/v1/maintenance/clean',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   revokeSession: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -1310,6 +1318,24 @@ export type AuditPayload = {
   total: number;
   limit: number;
   offset: number;
+};
+
+/** 某个缓存目录的占用（`GET /api/v1/maintenance`）。 */
+export type CacheUsage = {
+  dir?: string;
+  files: number;
+  bytes: number;
+  /** 目录的用途与「清了会怎样」（界面直接显示）。 */
+  note: string;
+};
+
+export type MaintenancePayload = {
+  images: CacheUsage;
+  streams: CacheUsage;
+  probe: CacheUsage;
+  overlay: CacheUsage;
+  /** 库或条目已经不在库里的叠加层数据（可以清）。 */
+  overlayOrphans: CacheUsage;
 };
 
 /** 一条活跃播放会话（监控页用）。 */

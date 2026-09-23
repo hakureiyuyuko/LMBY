@@ -702,6 +702,26 @@ const en: Record<string, string> = {
   '删除媒体库': 'Delete library',
   '手动扫描': 'Manual scan',
   '修改设置': 'Update settings',
+
+  // —— 缓存与清理（MaintenancePanel）——
+  '缓存与清理': 'Cache & cleanup',
+  '读取缓存占用失败': 'Failed to read cache usage',
+  '图片缓存': 'Image cache',
+  '转码分片': 'Transcode segments',
+  '探测工作目录': 'Probe workspace',
+  '叠加层': 'Overlay',
+  '叠加层孤儿': 'Overlay orphans',
+  '清理孤儿': 'Clean up orphans',
+  '项目': 'Item',
+  '占用': 'Usage',
+  '个文件': 'files',
+  '清空图片缓存后，下次访问会重新生成或重新下载。继续？':
+    'Clearing the image cache means images are regenerated or re-downloaded on the next visit. Continue?',
+  '已清理「{what}」：{files} 个文件 / {size}': 'Cleaned “{what}”: {files} files / {size}',
+  '没有需要清理的内容。': 'Nothing to clean.',
+  '清理失败': 'Cleanup failed',
+  '这里只处理缓存：图片缓存可以清空（下次访问重新生成），叠加层里「已经不在库里的条目」可以清掉。媒体文件本身以及还在库里的条目，这里一个字节都不会动。':
+    'This page only touches caches: the image cache can be cleared (images are regenerated on the next visit), and overlay data whose items are no longer in a library can be removed. Media files themselves — and any item still in a library — are never touched.',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',
