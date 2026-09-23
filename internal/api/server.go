@@ -211,6 +211,10 @@ func (s *Server) Handler() http.Handler {
 	// 维护：缓存占用与清理（设置 → 缓存与清理）。
 	mux.Handle("GET /api/v1/maintenance", s.requireAdmin(s.handleMaintenance))
 	mux.Handle("POST /api/v1/maintenance/clean", s.requireAdmin(s.handleMaintenanceClean))
+	// 管理 API 密钥（给 bot / 脚本用的长期凭据；只能开用户管理那几个接口）。
+	mux.Handle("GET /api/v1/settings/bot-key", s.requireAdmin(s.handleGetBotKey))
+	mux.Handle("POST /api/v1/settings/bot-key", s.requireAdmin(s.handleCreateBotKey))
+	mux.Handle("DELETE /api/v1/settings/bot-key", s.requireAdmin(s.handleDeleteBotKey))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
@@ -348,7 +352,7 @@ func (s *Server) Handler() http.Handler {
 	// ---- 前端静态资源（必须最后注册，作为兜底）----
 	mux.Handle("/", s.staticHandler())
 
-	return s.recoverPanic(s.logRequests(s.securityHeaders(mux)))
+	return s.recoverPanic(s.logRequests(s.securityHeaders(s.withBotAuth(mux))))
 }
 
 // serverError 记录内部错误并返回 500，避免把细节泄露给客户端。

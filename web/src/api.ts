@@ -175,6 +175,16 @@ export const api = {
     return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
   },
 
+  // 管理 API 密钥（给 bot / 脚本用的长期凭据；只能开用户管理那几个接口）。
+  botKey: () =>
+    request<{ configured: boolean; prefix?: string; createdAt?: string }>('/api/v1/settings/bot-key'),
+  createBotKey: () =>
+    request<{ key: string; prefix: string; note: string }>('/api/v1/settings/bot-key', {
+      method: 'POST',
+    }),
+  deleteBotKey: () =>
+    request<{ revoked: boolean }>('/api/v1/settings/bot-key', { method: 'DELETE' }),
+
   // 维护：缓存占用与清理（设置 → 缓存与清理）。
   maintenance: () => request<MaintenancePayload>('/api/v1/maintenance'),
   cleanMaintenance: (body: { images?: boolean; overlayOrphans?: boolean }) =>

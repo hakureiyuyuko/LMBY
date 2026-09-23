@@ -28,8 +28,15 @@ func currentAuth(r *http.Request) *authContext {
 }
 
 // requireAuth 校验会话 Cookie，把登录态注入 context。
+//
+// 如果 context 里**已经**有登录态（比如外层中间件用管理密钥注入了「系统操作者」），
+// 就直接放行 —— 那种请求本来就没有 cookie，再去要 cookie 就会把 bot 挡在门外。
 func (s *Server) requireAuth(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a := currentAuth(r); a != nil {
+			next(w, r)
+			return
+		}
 		token := readSessionCookie(r)
 		if token == "" {
 			writeError(w, http.StatusUnauthorized, "未登录")

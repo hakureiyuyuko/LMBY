@@ -722,6 +722,20 @@ const en: Record<string, string> = {
   '清理失败': 'Cleanup failed',
   '这里只处理缓存：图片缓存可以清空（下次访问重新生成），叠加层里「已经不在库里的条目」可以清掉。媒体文件本身以及还在库里的条目，这里一个字节都不会动。':
     'This page only touches caches: the image cache can be cleared (images are regenerated on the next visit), and overlay data whose items are no longer in a library can be removed. Media files themselves — and any item still in a library — are never touched.',
+
+  // —— 管理 API 密钥（BotKeyCard）——
+  'API 密钥（给 bot / 脚本）': 'API key (for bots / scripts)',
+  '读取 API 密钥状态失败': 'Failed to read the API key status',
+  '用 Authorization: Bearer <密钥> 或 X-API-Key 调用。它只能用于用户管理接口（注册 / 修改 / 删除账号、改可见库、重置口令），其它接口一律 403 —— 明文只在生成时显示一次。':
+    'Call it with `Authorization: Bearer <key>` or `X-API-Key`. It only works on user-management endpoints (create / update / delete accounts, change library access, reset passwords) — every other endpoint returns 403. The key is shown in plaintext only once.',
+  '这是新密钥，只显示这一次，请立刻保存：': 'This is the new key — shown only once, save it now:',
+  '轮换': 'Rotate',
+  '生成密钥': 'Generate key',
+  '生成失败': 'Failed to generate',
+  '轮换后旧密钥会立刻失效，正在用它的 bot 需要换新的。继续？':
+    'Rotating invalidates the old key immediately; bots using it must be updated. Continue?',
+  '撤销后这把密钥立刻失效，正在用它的 bot 会开始报 401。继续？':
+    'Revoking invalidates this key immediately; bots using it will start getting 401. Continue?',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',
