@@ -29,8 +29,9 @@ DROP_FILES=(
 )
 DROP_DIRS=(
   docs/notes
-  docs/local-tools
 )
+# 注意：`docs/local-tools/`、`docs/local-*.md` 是**本机 gitignored 文件**（内网坐标与小工具），
+# 它们不属于任何分支 —— 发布脚本不该碰它们（早前把它写进删除清单，等于误删本机文件）。
 # scripts/dev 里只留这三个：部署闸门、CI 守卫、建库字符集自救（交付路径上要用）
 KEEP_SCRIPTS=(check-web-built.sh i18n-coverage.mjs fix-db-encoding.sh)
 
@@ -82,4 +83,8 @@ echo "== 3. 剩下两步要人来做 =="
 echo "   a) python3 scripts/release/strip-ui-notes.py   # 界面解释性文案（跑完人工过一遍 diff / 截图）"
 echo "   b) 写 docs/releases/vX.Y.Z.md，提交，打 tag（tag 触发发布）"
 echo
-[[ $DRY == 1 ]] && echo "（dry-run 结束：没有改动任何文件）"
+# 用 if 而不是 `[[ ... ]] && echo`：后者在非 dry-run 时返回 1，会让
+# `bash publish-main.sh && python3 strip-ui-notes.py` 这样的链式调用在脚本“成功”后断掉。
+if [[ $DRY == 1 ]]; then
+  echo "（dry-run 结束：没有改动任何文件）"
+fi
