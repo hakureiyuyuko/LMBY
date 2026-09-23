@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import { t, useI18n } from '../i18n';
 import { LiveProbePanel, LiveSourcePanel } from './../components/LiveSources';
 import { ChannelManager } from '../components/ChannelManager';
+import { TranscodePanel } from '../components/TranscodePanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -57,6 +58,12 @@ export function Settings() {
             {t('元数据与服务状态')}
           </NavLink>
           <NavLink
+            to="/settings/transcode"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('转码与硬件')}
+          </NavLink>
+          <NavLink
             to="/settings/libraries"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
@@ -105,6 +112,12 @@ function NotAdmin() {
       </p>
     </div>
   );
+}
+
+/** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */
+export function SettingsTranscode() {
+  const { user } = useAuth();
+  return <TranscodePanel isAdmin={user?.isAdmin ?? false} />;
 }
 
 /** 设置页签：直播源与探测（M6 收尾从「直播」页搬过来的）。
@@ -466,7 +479,7 @@ export function SettingsOverview() {
               <dd>{health.ffmpeg.hw_accels?.join(', ') || '—'}</dd>
             </dl>
             <p className="faint" style={{ marginBottom: 0 }}>
-              {t('注意：「列出的后端」不等于「真的能用」。例如本机 ffmpeg 列出了 qsv，但核显缺运行时，实际只能用 vaapi —— 所以能力探测会真跑一小段转码来验证。')}
+              {t('硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。')}
             </p>
           </>
         )}

@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsLiveTV, SettingsOverview } from './pages/Settings';
+import { Settings, SettingsLiveTV, SettingsOverview, SettingsTranscode } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -101,6 +101,7 @@ function AppRoutes() {
         {/* 设置：库管理 / 人工匹配 / 会话监控都是它的子页签（M6 收尾把三个导航项收进来） */}
         <Route path="/settings" element={<Settings />}>
           <Route index element={<SettingsOverview />} />
+          <Route path="transcode" element={<SettingsTranscode />} />
           <Route path="libraries" element={<Libraries />} />
           <Route path="match" element={<Match />} />
           <Route path="sessions" element={<Sessions />} />

@@ -144,6 +144,12 @@ export const api = {
     }),
 
   sessions: () => request<{ sessions: SessionInfo[] }>('/api/v1/auth/sessions'),
+
+  // 转码与硬件：本机编码能力表。每一条都是**真跑过**的结论（拿 1 秒小样真编一遍），
+  // 所以它能回答「这台机器到底能不能硬解 HEVC」—— 每台机器都不一样，只能实测。
+  capabilities: () => request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities'),
+  refreshCapabilities: () =>
+    request<TranscodeCapabilitiesPayload>('/api/v1/transcode/capabilities/refresh', { method: 'POST' }),
   revokeSession: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/auth/sessions/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -1184,6 +1190,56 @@ export interface TranscodeSessionStat {
   error?: string;
   log?: string;
 }
+
+/**
+ * 一个转码后端的能力（`GET /api/v1/transcode/capabilities`）。
+ *
+ * 里面的 encode / decode / quality 都是**真跑过**的结论：拿 1 秒小样真编一遍，
+ * 只有跑通的才会是 true —— `ffmpeg -encoders` 列出某个编码器不代表这台机器能用它。
+ */
+export type TranscodeBackend = {
+  kind: string;
+  name: string;
+  device?: string;
+  available: boolean;
+  /** "h264"/"hevc"/"av1" → 是否真跑通过。 */
+  encode?: Record<string, boolean>;
+  /** "h264"/"hevc" → 是否真跑通过。 */
+  decode?: Record<string, boolean>;
+  /** 真跑通过的码率模式（cqp/vbr/cbr/icq…）。 */
+  quality?: string[];
+  /** 上面第一个能用的：运行时直接用，不再猜。 */
+  preferQuality?: string;
+  lowPower?: boolean;
+  filters?: string[];
+  /** 不可用的原因（真跑失败时 ffmpeg 的原话）。 */
+  notes?: string[];
+};
+
+/** 本机能力表全貌。 */
+export type TranscodeCapabilities = {
+  probedAt: string;
+  elapsedMs: number;
+  ffmpeg: string;
+  version: string;
+  /** ffmpeg 声明支持的（≠ 能用）。 */
+  hwaccels: string[];
+  encoders: string[];
+  filters: string[];
+  devices: string[];
+  software: TranscodeBackend;
+  backends: TranscodeBackend[];
+  warnings?: string[];
+  samplePath?: string;
+  /** "vaapi/h264" → 实测倍速（比实时快多少倍）。 */
+  speeds?: Record<string, number>;
+};
+
+export type TranscodeCapabilitiesPayload = {
+  capabilities: TranscodeCapabilities;
+  /** 当前会用的后端（都不可用时为 null）。 */
+  best: TranscodeBackend | null;
+};
 
 /** 一条活跃播放会话（监控页用）。 */
 export interface PlaySessionInfo {

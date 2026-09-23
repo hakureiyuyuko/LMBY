@@ -602,6 +602,35 @@ const en: Record<string, string> = {
 
   // ---------------------------------------------------------------- 设置页（Settings）
   '元数据与服务状态': 'Metadata & status',
+
+  // —— 转码与硬件（TranscodePanel）——
+  '转码与硬件': 'Transcoding & hardware',
+  '读取编码能力失败': 'Failed to load encoder capabilities',
+  '重新探测': 'Re-probe',
+  '正在重新探测…': 'Re-probing…',
+  '已重新探测（耗时 {ms} 毫秒）。': 'Re-probed (took {ms} ms).',
+  '重新探测失败': 'Re-probe failed',
+  '当前后端：{name}': 'Active backend: {name}',
+  '没有可用的硬件后端，走软件编码': 'No hardware backend available — using software encoding',
+  '探测时间': 'Probed at',
+  '耗时 {ms} 毫秒': '{ms} ms',
+  'ffmpeg': 'ffmpeg',
+  '设备节点': 'Device nodes',
+  '装好显卡驱动、换机器或升级 ffmpeg 之后点这里。':
+    'Use this after installing GPU drivers, moving to another machine, or upgrading ffmpeg.',
+  '后端能力': 'Backend capabilities',
+  '后端': 'Backend',
+  '设备': 'Device',
+  '编码': 'Encode',
+  '解码': 'Decode',
+  '码率模式': 'Rate control',
+  '实测倍速': 'Measured speed',
+  '低功耗': 'low power',
+  '可用': 'Available',
+  '注意事项': 'Notes',
+  '真跑失败的记录': 'Real-run failures',
+  '硬件后端能不能用要看「转码与硬件」页：那里每一条都是真跑过的结论。':
+    'Which hardware backend really works is on the Transcoding & hardware page — every entry there comes from a real run.',
   '只有管理员能改全站设置。需要修改时请让管理员登录，或用管理员账号看这一页。':
     'Only administrators can change server-wide settings. Ask an administrator to sign in, or open this page with an admin account.',
   '元数据源（TMDB）': 'Metadata provider (TMDB)',
