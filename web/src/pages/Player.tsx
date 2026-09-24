@@ -252,6 +252,10 @@ export function Player() {
   const [audioSel, setAudioSel] = useState(0);
   const [subSel, setSubSel] = useState(0);
   const [subReady, setSubReady] = useState(false);
+  // 用户明确选了字幕、但服务端还在抽（首次播这个文件）：先不放画面，等字幕好了自动开。
+  const [subPreparing, setSubPreparing] = useState(false);
+  // 当前该显示的字幕文本（自己按绝对时间挑 cue，不交给原生 <track> 渲染）。
+  const [subLines, setSubLines] = useState<string[]>([]);
   // 这个文件内封的字体（mkv 附件）的地址，交给 libass 渲染 \fn 引用的特效字体。
   // 没有就空数组：字幕退化成兑底字体，不影响播放。
   const [attFonts, setAttFonts] = useState<string[]>([]);
@@ -336,6 +340,23 @@ export function Player() {
       setNotice('');
       setLoading(true);
       setSubReady(false);
+      setSubPreparing(false);
+      setSubLines([]);
+
+      // 字幕语言偏好：浏览器声明的语言列表（有序）。服务端「自动」选字幕时按它匹配，
+      // 匹配不上就用文件里标了默认的那条。
+      const preferredSubtitleLanguages = (): string[] => {
+        const out: string[] = [];
+        const push = (v: string) => {
+          const s = (v || '').trim();
+          if (s && !out.includes(s)) out.push(s);
+        };
+        if (typeof navigator !== 'undefined') {
+          for (const l of navigator.languages || []) push(l);
+          push(navigator.language);
+        }
+        return out;
+      };
 
       const prev = sessionIdRef.current;
       sessionIdRef.current = '';
@@ -351,6 +372,7 @@ export function Player() {
           fileId: fileOnceRef.current,
           audioStreamIndex: opts.audio || undefined,
           subtitleStreamIndex: opts.sub,
+          subtitleLanguages: preferredSubtitleLanguages(),
           burnSubtitle: opts.burn,
           restart: opts.restart,
           startPositionTicks: opts.position > 0 ? secondsToTicks(opts.position) : undefined,
@@ -366,6 +388,20 @@ export function Player() {
         syncSubtitleOffset();
         durationRef.current = st.durationSeconds;
         windowEndRef.current = st.windowEndSeconds ?? 0;
+        // 用户**明确选**了字幕（sub > 0）但服务端还没抽好：先不放画面，等字幕出来再开。
+        // 免得出现「选了字幕、结果先播一段没字幕的」，让人以为坏了。
+        // 自动选中的不拦：字幕是锦上添花，不该挡住片子起播。
+        if (opts.sub > 0 && st.subtitleUrl && st.subtitleState !== 'ready') {
+          setSubPreparing(true);
+          // 可能是「播着的时候换字幕」：把旧画面停掉，免得缓冲页底下还在出声。
+          videoRef.current?.pause();
+          void pollSubtitle(st.subtitleUrl).then(() => {
+            setSubPreparing(false);
+            attach(st);
+          });
+          return;
+        }
+        if (st.subtitleUrl && st.subtitleState === 'ready') setSubReady(true);
         attach(st);
         if (st.subtitleUrl) void pollSubtitle(st.subtitleUrl);
       } catch (e) {
@@ -396,17 +432,27 @@ export function Player() {
   const attach = useCallback((st: PlaybackState) => {
     const v = videoRef.current;
     if (!v) return;
+    // 起播。换源那一瞬间上一次 play() 会被打断（AbortError）—— 那不是失败，不弹提示。
+    const startPlayback = (blockedMsg: string) => {
+      void v
+        .play()
+        .then(() => setNotice(''))
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          setNotice(blockedMsg);
+        });
+    };
     if (st.mode === 'direct' && st.directUrl) {
       v.src = st.directUrl;
       v.load();
-      void v.play().catch(() => setNotice(t('浏览器拦截了自动播放，点一下 ▶ 开始')));
+      startPlayback(t('浏览器拦截了自动播放，点一下 ▶ 开始'));
       return;
     }
     if (!st.hlsUrl) return;
     if (hasNativeHls(v)) {
       v.src = st.hlsUrl;
       v.load();
-      void v.play().catch(() => setNotice(t('点一下 ▶ 开始播放')));
+      startPlayback(t('点一下 ▶ 开始播放'));
       return;
     }
     if (!Hls.isSupported()) {
@@ -428,7 +474,7 @@ export function Player() {
     hls.loadSource(st.hlsUrl);
     hls.attachMedia(v);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      void v.play().catch(() => setNotice(t('点一下 ▶ 开始播放')));
+      startPlayback(t('点一下 ▶ 开始播放'));
     });
   }, []);
 
@@ -644,6 +690,28 @@ export function Player() {
     [doSeek],
   );
 
+  // 文本字幕自己画：从已解析好的 cues 里按**绝对时间**（窗口起点 + 当前位置）挑。
+  //
+  // 不能让浏览器原生渲染：原生是按 video.currentTime 匹配 cue 的，而我们的 MSE 时间轴
+  // 是窗口相对的（seekable 从 0 起），VTT 却是片源绝对时间轴 —— 只要起播不是 0
+  // （续播 / 拖动 / 窗口推进过），字幕就会整条错位一个窗口起点。
+  const syncSubLines = useCallback((v: HTMLVideoElement) => {
+    const track = v.textTracks && v.textTracks[0];
+    const cues = track ? track.cues : null;
+    const abs = baseRef.current + v.currentTime;
+    const out: string[] = [];
+    if (cues) {
+      for (let i = 0; i < cues.length; i++) {
+        const c = cues[i] as VTTCue;
+        if (c.startTime <= abs && abs < c.endTime) {
+          const txt = (c.text || '').trim();
+          if (txt) out.push(txt);
+        }
+      }
+    }
+    setSubLines((prev) => (prev.length === out.length && prev.every((x, i) => x === out[i]) ? prev : out));
+  }, []);
+
   const onTimeUpdate = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -714,13 +782,39 @@ export function Player() {
     return () => window.removeEventListener('keydown', onKey);
   }, [togglePlay, toggleFullscreen, nudge]);
 
-  // 字幕开关（<track> 用 textTracks 控制显示）
+  // 字幕显示开关。
+  //
+  // 轨道 mode 永远是 hidden：<track> 只负责把 WebVTT 解析成 cues，真正的显示交给
+  // subLines（见 onTimeUpdate / syncSubLines）—— 因为原生渲染是按 video.currentTime
+  // 匹配 cue 的，窗口相对时间轴会让字幕整条错位。
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     const tracks = v.textTracks;
-    for (let i = 0; i < tracks.length; i++) tracks[i].mode = subSel === -1 ? 'disabled' : 'showing';
+    if (subSel === -1) {
+      for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
+      setSubLines((prev) => (prev.length ? [] : prev));
+      return;
+    }
+    for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'hidden';
   }, [subReady, subSel]);
+
+  // 字幕跟着播放位置走：用 rAF 兜底刷新。
+  //
+  // 只靠 timeupdate 会有漏：暂停 / 缓冲 / 拖到未缓冲位置时没有 timeupdate，上一句会
+  // 留在画面上；拖到新位置后也要等下一次 timeupdate 才更新。
+  // 这里用底层状态（不能引 subtitleOn：它在本文件后面才声明，依赖数组会在渲染期取到它）。
+  useEffect(() => {
+    if (subSel === -1 || !subReady || state?.subtitleFormat === 'ass') return;
+    let raf = 0;
+    const tick = () => {
+      const v = videoRef.current;
+      if (v) syncSubLines(v);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [subSel, subReady, state?.subtitleFormat, syncSubLines]);
 
   // 内封字体（mkv 附件）：只在字幕交给 libass 时才需要。
   // 服务端要把源文件读一遍才抽得出来，所以这里耐心轮询；拿不到就空着（退化成兜底字体）。
@@ -946,13 +1040,33 @@ export function Player() {
             setLoading(false);
           }}
         >
-          {/* ASS/SSA 由 libass 画在 canvas 上，不走原生轨道 */}
+          {/* ASS/SSA 由 libass 画在 canvas 上；文本字幕由 subLines 自己画（轨道只用来拿 cues） */}
           {subtitleOn && state?.subtitleUrl && state.subtitleFormat !== 'ass' && (
-            <track kind="subtitles" src={state.subtitleUrl} srcLang="zh" label={t('字幕')} default />
+            <track kind="subtitles" src={state.subtitleUrl} srcLang="zh" label={t('字幕')} />
           )}
         </video>
 
-        {loading && canPlay && <div className="player-spinner">{t('载入中…')}</div>}
+        {subtitleOn && state?.subtitleFormat !== 'ass' && subLines.length > 0 && (
+          <div className="player-subs" aria-live="off">
+            {subLines.map((line, i) => (
+              <div key={i} className="player-sub-line">
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {subPreparing && (
+          <div className="player-wait">
+            <div className="player-wait-spin" />
+            <h3>{t('字幕正在准备…')}</h3>
+            <p className="muted">
+              {t('这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。')}
+            </p>
+          </div>
+        )}
+
+        {loading && canPlay && !subPreparing && <div className="player-spinner">{t('载入中…')}</div>}
 
         {!canPlay && !state && <div className="player-spinner">{t('正在准备播放…')}</div>}
 

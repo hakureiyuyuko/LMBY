@@ -231,6 +231,11 @@ type playRequest struct {
 	AudioStreamIndex    *int `json:"audioStreamIndex,omitempty"`
 	SubtitleStreamIndex *int `json:"subtitleStreamIndex,omitempty"`
 
+	// SubtitleLanguages 是客户端的语言偏好（有序，如 navigator.languages）：
+	// SubtitleStreamIndex 省略/为 0（自动）时，服务端按它挑字幕轨，匹配不上
+	// 再用文件里标了默认的那条。
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+
 	// StartPositionTicks 为 0 或省略时用库里的续播位置。
 	StartPositionTicks int64 `json:"startPositionTicks,omitempty"`
 	// Restart 为真时忽略续播位置（「从头播放」）。
@@ -418,6 +423,7 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		VideoIndex:         intValue(req.VideoStreamIndex),
 		AudioIndex:         intValue(req.AudioStreamIndex),
 		SubtitleIndex:      intValueOr(req.SubtitleStreamIndex, 0),
+		SubtitleLanguages:  req.SubtitleLanguages,
 		BurnSubtitle:       req.BurnSubtitle,
 		StartTicks:         startTicks,
 	})

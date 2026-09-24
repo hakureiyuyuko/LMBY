@@ -1097,6 +1097,9 @@ const en: Record<string, string> = {
     'The nfo next to this file has no cast information. Switch to an nfo that includes it, tick “re-read nfo” in Libraries and rescan (your media files stay untouched).',
   // ---------------------------------------------------------------- 播放器
   '载入中…': 'Loading…',
+  '字幕正在准备…': 'Preparing subtitles…',
+  '这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。':
+    'Embedded subtitles for this file are extracted on first play, which can take a little while (tens of seconds). Playback starts automatically once they are ready, and the same title loads instantly afterwards.',
   '正在准备播放…': 'Preparing playback…',
   '这个条目现在放不了': 'This title cannot be played right now',
   '重新开始': 'Start over',

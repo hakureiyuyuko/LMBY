@@ -1416,8 +1416,13 @@ export interface StartPlaybackBody {
   fileId?: number;
   videoStreamIndex?: number;
   audioStreamIndex?: number;
-  /** -1 = 明确不要字幕，0/缺省 = 自动（只选强制字幕轨）。 */
+  /**
+   * -1 = 明确不要字幕；0/缺省 = 自动（先按 subtitleLanguages 匹配，匹配不上就用文件里
+   * 标了默认的那条）；> 0 = 指定的流序号。
+   */
   subtitleStreamIndex?: number;
+  /** 字幕语言偏好（有序，如 navigator.languages）。只在「自动」时起作用。 */
+  subtitleLanguages?: string[];
   startPositionTicks?: number;
   restart?: boolean;
   /**
