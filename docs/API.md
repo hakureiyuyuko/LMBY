@@ -903,6 +903,47 @@ PUT 请求体（三个字段都是**指针语义**：`nil` = 不改，指向空�
 
 用法与最小权限白名单见 [§2.2](#22-管理密钥机器用)，面向使用者的说明见 [`docs/BOT-API.md`](BOT-API.md)。
 
+### 15.5 检查更新
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| GET | `/api/v1/update` | 管理员 | 查有没有新版本（默认查本项目 GitHub 的 latest release）；`?refresh=1` 表示“用户点了按钮”，但服务端仍按最小间隔（10 分钟）回缓存 |
+
+**由服务端去查**，不是浏览器直接打 GitHub —— 看片的人浏览器在什么网络环境（内网 / 没外网）
+不该决定服务端能不能检查更新；而且服务端查得出原因、结果能缓存（保护上游的
+匿名限流：GitHub 是 60 次/小时/IP）。默认**不自动查**，只有点按钮才出网。
+
+响应（HTTP **200**）：
+
+```json
+{
+  "enabled": true,
+  "ok": true,
+  "state": "update-available",
+  "current": "v1.0.0",
+  "commit": "288f486",
+  "built": "2026-09-23T...",
+  "latest": "v1.0.1",
+  "publishedAt": "2026-09-24T00:00:00Z",
+  "releaseUrl": "https://github.com/.../releases/tag/v1.0.1",
+  "notes": "发布说明（压成一行，最多 600 字）",
+  "assets": ["lmby-linux-amd64", "SHA256SUMS.txt"],
+  "checkedAt": "2026-09-24T01:00:00Z",
+  "cached": false
+}
+```
+
+- `state` 是给界面用的结论：`up-to-date` / `update-available` / `dev`（当前是
+  `dev-xxxx` 这类开发构建，不参与版本比较）/ `unknown`。
+- **`ok:false` + `error:"人话原因"` 也是 200**：请求本身是合法的，只是没查成
+  （没配更新源、服务器没有外网出口、上游超时 / 限流、上游返回的不是 release JSON）。
+  界面要把原因显示给管理员看，所以不走统一的 `{error, code}` 错误格式（那套是给
+  「请求非法」用的：400 / 401 / 403）。
+- `cached:true` 表示这次是回合成的缓存（距上次真查不到 10 分钟）。
+- 更新源可配：`config.toml` 的 `[update] source_url` 指向任何返回 GitHub 形状
+  release JSON 的地址（镜像 / 自建）；留空则 `enabled:false`、不做检查。
+  `timeout_seconds` 默认 8。
+
 ---
 
 ## 16. 维护（缓存与清理）

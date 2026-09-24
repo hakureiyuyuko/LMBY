@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import { useAuth } from '../auth';
@@ -10,6 +10,7 @@ import { LogsPanel } from '../components/LogsPanel';
 import { ScanPlanPanel } from '../components/ScanPlanPanel';
 import { AuditPanel } from '../components/AuditPanel';
 import { MaintenancePanel } from '../components/MaintenancePanel';
+import { AboutPanel } from '../components/AboutPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
 
 /**
@@ -49,6 +50,20 @@ export function Settings() {
   const { t } = useI18n();
   const { user } = useAuth();
   const isAdmin = user?.isAdmin ?? false;
+  const navRef = useRef<HTMLElement | null>(null);
+
+  // 页签多了（现在 12 个）横向会溢出：把当前页签滚进视野，
+  // 否则「从别处点进来」会看不见哪个是当前页签，像是走错了页面。
+  // 不动页面滚动，只调这条页签栏自己的 scrollLeft。
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>('.tab.active');
+    if (!nav || !active) return;
+    const nr = nav.getBoundingClientRect();
+    const ar = active.getBoundingClientRect();
+    if (ar.right > nr.right) nav.scrollLeft += ar.right - nr.right + 16;
+    else if (ar.left < nr.left) nav.scrollLeft -= nr.left - ar.left + 16;
+  });
 
   if (!isAdmin) return <NotAdmin />;
 
@@ -57,7 +72,7 @@ export function Settings() {
       {/* 管理面页签：库管理 / 人工匹配 / 会话监控都收在这里（顶栏只留一个「设置」） */}
       <div className="card">
         <h2>{t('设置')}</h2>
-        <nav className="tabs" data-settings-tabs>
+        <nav className="tabs" data-settings-tabs ref={navRef}>
           <NavLink to="/settings" end className={({ isActive }) => (isActive ? 'tab active' : 'tab')}>
             {t('元数据与服务状态')}
           </NavLink>
@@ -121,6 +136,12 @@ export function Settings() {
           >
             {t('缓存与清理')}
           </NavLink>
+          <NavLink
+            to="/settings/about"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('关于')}
+          </NavLink>
         </nav>
       </div>
 
@@ -160,6 +181,11 @@ export function SettingsAudit() {
 /** 设置页签：缓存与清理（只碰缓存，见 internal/api/maintenance.go）。 */
 export function SettingsMaintenance() {
   return <MaintenancePanel />;
+}
+
+/** 设置页签：关于（版本信息 + 检查更新；检查由服务端出网，见 internal/api/update.go）。 */
+export function SettingsAbout() {
+  return <AboutPanel />;
 }
 
 /** 设置页签：转码与硬件（本机编码能力表 —— 每台机器不一样，只能实测）。 */

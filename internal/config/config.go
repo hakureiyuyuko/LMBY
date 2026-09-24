@@ -14,6 +14,10 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// defaultUpdateSource 是「检查更新」的默认信息源：本项目公开仓库的 latest release。
+// 无需凭据；想指到镜像或自己的地址就改 [update] source_url。
+const defaultUpdateSource = "https://api.github.com/repos/hakureiyuyuko/LMBY/releases/latest"
+
 // Config 是 LMBY 的全部可配置项。
 type Config struct {
 	// Listen 是 HTTP 监听地址，例如 ":8099" 或 "127.0.0.1:8099"。
@@ -40,6 +44,8 @@ type Config struct {
 	Scan ScanConfig `toml:"scan"`
 	// Audit 是审计日志的保留策略。
 	Audit AuditConfig `toml:"audit"`
+	// Update 是「设置 → 关于 → 检查更新」的信息源。
+	Update UpdateConfig `toml:"update"`
 	// Backup 是备份/恢复用的外部工具路径（空 = 从 PATH 找）。
 	Backup   BackupConfig   `toml:"backup"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
@@ -214,7 +220,6 @@ type FFmpegConfig struct {
 	ProbePath string `toml:"probe_path"`
 }
 
-// Default 返回带默认值的配置。
 // AuditConfig 是审计日志的保留策略。
 type AuditConfig struct {
 	// KeepDays 是审计记录保留多少天（0 = 永久保留）。
@@ -222,6 +227,19 @@ type AuditConfig struct {
 	// 默认 365 天：一方面「翻旧账」总得有个实际边界，另一方面这张表只会一直长
 	//（每次登录、每次管理操作都是一条）。清理发生在服务启动时。
 	KeepDays int `toml:"keep_days"`
+}
+
+// UpdateConfig 是设置里「检查更新」用的。
+//
+// 默认查本项目的 GitHub latest release（公开仓库，无需凭据）。做成可配是因为
+// 内网 / 镜像环境可以指到自己的地址；留空则关闭检查（界面按钮会置灰并说明）。
+type UpdateConfig struct {
+	// SourceURL 返回一个 GitHub API 形状的 release JSON（tag_name / html_url /
+	// published_at / body / assets[]）。“最新版本”就从它来。
+	SourceURL string `toml:"source_url"`
+	// TimeoutSeconds 是单次检查的超时，默认 8 秒。上游连不上只影响这一个按钮，
+	// 不会拖累别的东西。
+	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
 // ScanConfig 是扫描器的小旋钮。
@@ -241,6 +259,7 @@ type ScanConfig struct {
 	ScheduleTickSeconds int `toml:"schedule_tick_seconds"`
 }
 
+// Default 返回带默认值的配置。
 func Default() *Config {
 	return &Config{
 		Listen:          ":8099",
@@ -290,6 +309,11 @@ func Default() *Config {
 		// 审计日志：默认保留一年（启动时清理）。
 		Audit: AuditConfig{
 			KeepDays: 365,
+		},
+		// 检查更新：默认查本项目 GitHub 的 latest release，8 秒超时。
+		Update: UpdateConfig{
+			SourceURL:      defaultUpdateSource,
+			TimeoutSeconds: 8,
 		},
 	}
 }

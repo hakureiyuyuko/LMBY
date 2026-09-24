@@ -77,6 +77,9 @@ type Server struct {
 	// logBuf 是「最近日志」的内存缓冲（设置 → 日志 页读它）。
 	// 可为 nil（未接入时那个接口返回空表，不报错）。
 	logBuf *logbuf.Buffer
+
+	// update 是「检查更新」的进程内缓存（零值可用，见 update.go）。
+	update updateCache
 }
 
 // newScanManager 构造扫描管理器并注入 config 里的小旋钮。
@@ -204,6 +207,9 @@ func (s *Server) Handler() http.Handler {
 
 	// ---- 设置（管理员）----
 	mux.Handle("GET /api/v1/settings", s.requireAdmin(s.handleGetSettings))
+	// 检查更新（设置 → 关于）：默认查本项目 GitHub 的 latest release，源可配。
+	// ?refresh=1 表示「用户点了按钮」，但服务端仍会按最小间隔回缓存，保护上游限流。
+	mux.Handle("GET /api/v1/update", s.requireAdmin(s.handleCheckUpdate))
 	// 最近日志（内存环形缓冲）：只给管理员 —— 里面有用户名、路径与错误详情。
 	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
 	// 审计日志（持久）：谁在什么时候做了什么。同样只给管理员。
