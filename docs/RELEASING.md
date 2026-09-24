@@ -4,8 +4,8 @@
 
 | 分支 | 角色 | 内容 |
 |---|---|---|
-| `dev` | 开发主线 | 全部开发成果 + 内部文档（设计笔记、路线图、开发环境说明）+ 验收脚本 |
-| `main` | 交付 / 发布分支 | 只带交付所需：源码、README、CHANGELOG、`docs/{ADR,TRANSCODING.md,images,releases}`、`deploy/`、`migrations/` |
+| `dev` | 开发主线 | 全部开发成果 + 内部文档（设计笔记、路线图、开发环境说明）+ 验收脚本。**根 README 面向改仓库的人** |
+| `main` | 交付 / 发布分支 | 只带交付所需：源码、交付版 README、CHANGELOG、`docs/{ADR,API.md,BOT-API.md,TRANSCODING.md,images,releases}`、`deploy/`、`migrations/` |
 
 **规矩：所有开发都在 `dev` 上做。** 经人工检查后，把**界面上的内部文案**去掉，再合并进
 `main`，然后打 tag 发版。
@@ -16,6 +16,10 @@
 
 `scripts/release/publish-main.sh`：
 
+- **装交付 README**：`README.md` 有两个角色 —— dev 的面向改仓库的人，交付的面向装来用的人。
+  交付 README 的**单一来源**是 `docs/README.release.md`（在 dev 上维护、评审），发布时它被装成
+  `README.md`，源文件不随交付携带。因此「合并 dev → main」时 `README.md` 可能冲突：
+  **随便取哪边都行**，脚本随后会覆盖。
 - 删掉不随交付携带的东西：`docs/notes/`、`docs/ROADMAP.md`、`docs/DEV-ENV.md`、
   `docs/LIBRARY-NOTES.md`、`docs/REQUIREMENTS.md`、`docs/local-tools/`（本来就不入库）、
   以及 `scripts/dev/` 下的验收脚本；

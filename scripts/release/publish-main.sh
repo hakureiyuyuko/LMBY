@@ -26,6 +26,8 @@ DROP_FILES=(
   docs/DEV-ENV.md
   docs/LIBRARY-NOTES.md
   docs/REQUIREMENTS.md
+  # 交付 README 的源文件：第 1 步会把它装成 README.md，这里兜底以免残留。
+  docs/README.release.md
 )
 DROP_DIRS=(
   docs/notes
@@ -35,7 +37,26 @@ DROP_DIRS=(
 # scripts/dev 里只留这三个：部署闸门、CI 守卫、建库字符集自救（交付路径上要用）
 KEEP_SCRIPTS=(check-web-built.sh i18n-coverage.mjs fix-db-encoding.sh)
 
-echo "== 1. 删掉不随交付携带的文档与验收脚本 =="
+echo "== 1. 装交付 README =="
+# README 有两个角色，分开维护：
+#   · dev 的 README.md 面向**改仓库的人**（怎么构建、怎么验收、分支模型）；
+#   · 交付 README（给装来用的人看）的单一来源是 docs/README.release.md，
+#     发布时把它装成 README.md（源文件本身不随交付携带）。
+# 先做这一步再做删除：这样一来 docs/README.release.md 也能留在 DROP_FILES 里兜底。
+# 另外，dev → main 的合并里 README.md 可能冲突 —— 随便取哪边都行，这里会覆盖掉。
+if [[ -f docs/README.release.md ]]; then
+  if [[ $DRY == 1 ]]; then
+    echo "   会用 docs/README.release.md 覆盖 README.md，然后删掉那个源文件"
+  else
+    cp docs/README.release.md README.md
+    echo "   已用 docs/README.release.md 覆盖 README.md（$(wc -l < README.md) 行）"
+  fi
+else
+  echo "   注意：没有 docs/README.release.md，跳过（README.md 保持原样）"
+fi
+
+echo
+echo "== 2. 删掉不随交付携带的文档与验收脚本 =="
 for d in "${DROP_DIRS[@]}"; do
   [[ -e "$d" ]] || continue
   echo "   删目录 $d"
@@ -58,7 +79,7 @@ if [[ -d scripts/dev ]]; then
 fi
 
 echo
-echo "== 2. 生成 CHANGELOG.md（汇总 docs/releases/*.md） =="
+echo "== 3. 生成 CHANGELOG.md（汇总 docs/releases/*.md） =="
 if [[ $DRY == 1 ]]; then
   echo "   （dry-run：会收录这些版本）"
   for f in $(ls docs/releases/*.md 2>/dev/null | sort -rV); do echo "   $f"; done
@@ -79,7 +100,7 @@ else
 fi
 
 echo
-echo "== 3. 剩下两步要人来做 =="
+echo "== 4. 剩下两步要人来做 =="
 echo "   a) python3 scripts/release/strip-ui-notes.py   # 界面解释性文案（跑完人工过一遍 diff / 截图）"
 echo "   b) 写 docs/releases/vX.Y.Z.md，提交，打 tag（tag 触发发布）"
 echo
