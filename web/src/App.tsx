@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsAudit, SettingsLiveTV, SettingsLogs, SettingsMaintenance, SettingsOverview, SettingsScan, SettingsTranscode } from './pages/Settings';
+import { Settings, SettingsAbout, SettingsAudit, SettingsLiveTV, SettingsLogs, SettingsMaintenance, SettingsOverview, SettingsScan, SettingsTranscode } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -111,6 +111,7 @@ function AppRoutes() {
           <Route path="users" element={<Users />} />
           <Route path="audit" element={<SettingsAudit />} />
           <Route path="maintenance" element={<SettingsMaintenance />} />
+          <Route path="about" element={<SettingsAbout />} />
         </Route>
         {/* 旧地址重定向：老书签、浏览器历史、别人分享过的链接都还指向它们 */}
         <Route path="/libraries" element={<Navigate to="/settings/libraries" replace />} />

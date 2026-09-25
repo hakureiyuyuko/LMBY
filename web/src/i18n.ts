@@ -1073,6 +1073,9 @@ const en: Record<string, string> = {
   '这条的 nfo 里没有演职员信息。': 'This item has no cast & crew in its nfo.',
   // ---------------------------------------------------------------- 播放器
   '载入中…': 'Loading…',
+  '字幕正在准备…': 'Preparing subtitles…',
+  '这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。':
+    'Embedded subtitles for this file are extracted on first play, which can take a little while (tens of seconds). Playback starts automatically once they are ready, and the same title loads instantly afterwards.',
   '正在准备播放…': 'Preparing playback…',
   '这个条目现在放不了': 'This title cannot be played right now',
   '重新开始': 'Start over',
@@ -1155,6 +1158,21 @@ const en: Record<string, string> = {
   '播放失败': 'Playback failed',
   '这个条目放不了：': 'This title cannot be played:',
   '重试一次': 'Try again',
+  '关于': 'About',
+  '当前版本': 'Current version',
+  '正在检查…': 'Checking…',
+  '检查更新': 'Check for updates',
+  '打开发布页': 'Open release page',
+  '检查更新失败：{msg}': 'Update check failed: {msg}',
+  '这台服务没有配置更新源（config.toml 里的 [update] source_url 为空），所以不做检查。': 'This instance has no update source configured ([update] source_url in config.toml is empty), so the check is skipped.',
+  '没能查到最新版本：{msg}': 'Could not determine the latest version: {msg}',
+  '有新版本：{version}': 'New version available: {version}',
+  '发布于 {time}': 'published {time}',
+  '下载：{assets}': 'Downloads: {assets}',
+  '当前是开发构建（不参与版本比较），最新发布是 {version}': 'This is a development build (not compared by version); the latest release is {version}',
+  '已是最新版本（{version}）': 'Up to date ({version})',
+  '（刚查过，这里是上次的结果）': '(Checked recently — showing the previous result)',
+
 };
 /** 中文目录：中文没有「翻译表」，但保留这一层让 `translate` 的语义一致。 */
 const zh: Record<string, string> = {};

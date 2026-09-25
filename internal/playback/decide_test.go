@@ -327,3 +327,97 @@ func TestSubtitleDelivery(t *testing.T) {
 		t.Errorf("SSA 应当交给 libass，得到 %q", got.Subtitle.DeliverAs)
 	}
 }
+
+// TestSubtitleAutoSelect 盖「自动」怎么选字幕。
+//
+// 回归点：以前要求 Default && Forced，于是普通内封字幕（Default=true / forced=false）
+// 永远选不出来 —— 用户看到的是「字幕明明有却什么都不显示」。
+func TestSubtitleAutoSelect(t *testing.T) {
+	chiDefault := probe.SubtitleStream{Index: 2, Codec: "subrip", Default: true, Language: "chi"}
+	engPlain := probe.SubtitleStream{Index: 3, Codec: "subrip", Language: "eng"}
+	chiForced := probe.SubtitleStream{Index: 4, Codec: "subrip", Default: true, Forced: true, Language: "chi"}
+	jpnDefault := probe.SubtitleStream{Index: 5, Codec: "ass", Default: true, Language: "jpn"}
+
+	cases := []struct {
+		name  string
+		subs  []probe.SubtitleStream
+		want  int
+		langs []string
+		pick  int
+		how   string
+	}{
+		{
+			name: "回归：Default 但不 forced 的字幕轨，自动也要挂上",
+			subs: []probe.SubtitleStream{chiDefault, engPlain},
+			pick: 2, how: "default",
+		},
+		{
+			name: "语言偏好命中",
+			subs: []probe.SubtitleStream{chiDefault, engPlain}, langs: []string{"zh-CN"},
+			pick: 2, how: "language",
+		},
+		{
+			name: "语言偏好压过默认轨",
+			subs: []probe.SubtitleStream{chiDefault, engPlain}, langs: []string{"en-US"},
+			pick: 3, how: "language",
+		},
+		{
+			name: "偏好没命中就回落默认轨",
+			subs: []probe.SubtitleStream{jpnDefault, engPlain}, langs: []string{"ko"},
+			pick: 5, how: "default",
+		},
+		{
+			name: "同一语言有强制轨与完整轨时优先完整轨",
+			subs: []probe.SubtitleStream{chiForced, chiDefault}, langs: []string{"zh"},
+			pick: 2, how: "language",
+		},
+		{
+			name: "没有默认轨也没有命中 → 不挂字幕",
+			subs: []probe.SubtitleStream{engPlain},
+			pick: -1,
+		},
+		{
+			name: "显式指定优先于语言偏好",
+			subs: []probe.SubtitleStream{chiDefault, engPlain}, want: 3, langs: []string{"zh"},
+			pick: 3, how: "explicit",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := movie("/m/a.mkv", "matroska,webm",
+				[]probe.VideoStream{h264(1920, 1080, 8, true)},
+				[]probe.AudioStream{audio(1, "aac", 2, true)}, tc.subs)
+			got, how, ok := pickSubtitle(&f, tc.want, tc.langs)
+			idx := -1
+			if ok {
+				idx = got.Index
+			}
+			if idx != tc.pick {
+				t.Fatalf("选中 #%d，期望 #%d", idx, tc.pick)
+			}
+			if ok && how != tc.how {
+				t.Errorf("选中方式 = %q，期望 %q", how, tc.how)
+			}
+		})
+	}
+}
+
+// TestSubtitleAutoSelectReason 盖「为什么这么播」里的自动选择说明。
+func TestSubtitleAutoSelectReason(t *testing.T) {
+	f := movie("/m/a.mkv", "matroska,webm",
+		[]probe.VideoStream{h264(1920, 1080, 8, true)},
+		[]probe.AudioStream{audio(1, "aac", 2, true)},
+		[]probe.SubtitleStream{{Index: 2, Codec: "subrip", Default: true, Language: "chi"}})
+
+	hit := Decide(Request{Profile: BrowserProfile(), Files: []File{f}, SubtitleLanguages: []string{"zh-CN"}})
+	if !strings.Contains(hit.Subtitle.Reason, "命中语言偏好") {
+		t.Errorf("语言命中时理由应说明原因，得到 %q", hit.Subtitle.Reason)
+	}
+	miss := Decide(Request{Profile: BrowserProfile(), Files: []File{f}, SubtitleLanguages: []string{"de"}})
+	if !strings.Contains(miss.Subtitle.Reason, "文件默认字幕轨") {
+		t.Errorf("回落默认轨时理由应说明原因，得到 %q", miss.Subtitle.Reason)
+	}
+	if hit.Subtitle.Index != 2 || miss.Subtitle.Index != 2 {
+		t.Errorf("两种情况都应选 #2，得到 %d / %d", hit.Subtitle.Index, miss.Subtitle.Index)
+	}
+}

@@ -369,6 +369,9 @@ export const api = {
 
   // ---------------------------------------------------------------- 设置（管理员）
   settings: () => request<SettingsPayload>('/api/v1/settings'),
+  /** 检查更新。refresh=true 表示「用户点了按钮」；服务端仍按最小间隔回缓存。 */
+  checkUpdate: (refresh = true) =>
+    request<UpdateInfo>(`/api/v1/update${refresh ? '?refresh=1' : ''}`),
   updateTMDBSettings: (body: { readToken?: string; apiKey?: string; language?: string }) =>
     request<{ ok: boolean; tmdb: TMDBSettings; clearedCache: number }>('/api/v1/settings/tmdb', {
       method: 'PUT',
@@ -874,6 +877,27 @@ export interface TMDBSettings {
 }
 
 /** 系统信息（只读）。 */
+export interface UpdateInfo {
+  /** 是否配了更新源（false = 界面把按钮置灰并说明原因）。 */
+  enabled: boolean;
+  /** 请求本身合法但没查成时为 false，原因在 error 里（人话）。 */
+  ok: boolean;
+  /** 结论：up-to-date / update-available / dev（开发构建不参与比较）/ unknown。 */
+  state: 'up-to-date' | 'update-available' | 'dev' | 'unknown';
+  error?: string;
+  current: string;
+  commit?: string;
+  built?: string;
+  latest?: string;
+  publishedAt?: string;
+  releaseUrl?: string;
+  notes?: string;
+  assets?: string[];
+  checkedAt: string;
+  /** true = 这次是服务端回的缓存（没真去访问上游）。 */
+  cached: boolean;
+}
+
 export interface SystemInfo {
   databaseEncoding: string;
   databaseCollate: string;
@@ -1416,8 +1440,13 @@ export interface StartPlaybackBody {
   fileId?: number;
   videoStreamIndex?: number;
   audioStreamIndex?: number;
-  /** -1 = 明确不要字幕，0/缺省 = 自动（只选强制字幕轨）。 */
+  /**
+   * -1 = 明确不要字幕；0/缺省 = 自动（先按 subtitleLanguages 匹配，匹配不上就用文件里
+   * 标了默认的那条）；> 0 = 指定的流序号。
+   */
   subtitleStreamIndex?: number;
+  /** 字幕语言偏好（有序，如 navigator.languages）。只在「自动」时起作用。 */
+  subtitleLanguages?: string[];
   startPositionTicks?: number;
   restart?: boolean;
   /**

@@ -66,7 +66,8 @@ type Request struct {
 	// VideoIndex / AudioIndex 是用户显式指定的流序号（ffprobe 的 index），0 表示自动。
 	VideoIndex int
 	AudioIndex int
-	// SubtitleIndex：-1 表示「明确不要字幕」，0 表示自动（有强制字幕轨就选，否则不选）。
+	// SubtitleIndex：-1 表示「明确不要字幕」；0 表示自动 —— 先按 SubtitleLanguages
+	// 匹配，匹配不上就挂文件里标了默认的那条（都不满足才不挂）；>0 是指定的流序号。
 	SubtitleIndex int
 
 	// StartTicks 是起播位置（续播用）。
@@ -98,6 +99,11 @@ type Request struct {
 	// HighBitrate 为真 = 用户选了「Premium」档：同分辨率、更高码率。
 	// 只在真的要转码时有意义（直出不会重编码，码率跟着源走）。
 	HighBitrate bool
+
+	// SubtitleLanguages 是客户端的语言偏好（有序，如 ["zh-CN", "zh", "en"]）。
+	// 只在 SubtitleIndex == 0（自动）时用：先按它匹配字幕轨，匹配不上再挂文件里
+	// 标了默认的那条。空列表 = 没有偏好，直接走默认轨。
+	SubtitleLanguages []string
 }
 
 // StreamPlan 是一条流的处理决定。
@@ -242,7 +248,7 @@ func decideForFile(p Profile, req Request, file *File) Plan {
 	// 字幕先算：烧录是**图形字幕专属**的事（文本字幕走 WebVTT / libass 旁路，
 	// 根本不需要重编画面），所以「要不要因为烧录把画面重编一遍」得看字幕决策的
 	// 结果，而不是看用户点没点烧录。
-	plan.Subtitle = planSubtitle(file, req.SubtitleIndex, req.BurnSubtitle)
+	plan.Subtitle = planSubtitle(file, req.SubtitleIndex, req.BurnSubtitle, req.SubtitleLanguages)
 	plan.Video = planVideo(p, req, file, vs, vReason, plan.Subtitle.Action == ActionBurn)
 	plan.Audio = planAudio(p, file, req.AudioIndex, plan.Video)
 	plan.Mode, plan.SegmentFormat, plan.Playable = planMode(p, file, plan)
@@ -570,24 +576,41 @@ func pickAudio(file *File, want int) (probe.AudioStream, bool) {
 
 // planSubtitle 决定字幕怎么处理。
 //
-// 默认**不烧录也不自动开字幕**：浏览器原生只有 WebVTT 一条路，
-// 而自动开一条中英双语字幕（用户没要）比不开更烦人。
+// 「自动」（want == 0）会尽量挑一条挂上：先按客户端给的语言列表匹配，匹配不上就
+// 挂文件里标了默认的那条（详见 pickSubtitle）。**不再要求"Default 且 Forced"** ——
+// 那个条件让绝大多数内封字幕都选不出来（普通全片字幕是 Default 但不 Forced），
+// 用户看到的是"字幕明明有却什么都不显示"。
 //
 // 这里不接 Profile：字幕走的是独立 WebVTT 旁路，与客户端解码能力无关
 // （客户端最后也只用得着 WebVTT 一种形式）。
-func planSubtitle(file *File, want int, burn bool) StreamPlan {
-	out := StreamPlan{Action: ActionNone, Index: -1}
+func planSubtitle(file *File, want int, burn bool, langs []string) (out StreamPlan) {
+	out = StreamPlan{Action: ActionNone, Index: -1}
+	// 自动挑的，把「为什么是这条」补在解释后面（"为什么这么播"里看得到）。
+	note := ""
+	defer func() {
+		if note != "" {
+			out.Reason += note
+		}
+	}()
 	if want < 0 {
 		out.Reason = "按用户设置关闭字幕"
 		return out
 	}
 
-	ss, ok := pickSubtitle(file, want)
+	ss, how, ok := pickSubtitle(file, want, langs)
 	if !ok {
 		if want > 0 {
 			out.Reason = fmt.Sprintf("指定的字幕轨 #%d 不存在", want)
 		}
 		return out
+	}
+	if want == 0 {
+		switch how {
+		case "language":
+			note = "（自动选中：命中语言偏好）"
+		case "default":
+			note = "（自动选中：文件默认字幕轨）"
+		}
 	}
 	out.Index = ss.Index
 	out.Codec = ss.Codec
@@ -624,22 +647,85 @@ func planSubtitle(file *File, want int, burn bool) StreamPlan {
 	return out
 }
 
-// pickSubtitle 选字幕轨：显式指定 > 默认且强制 > 无。
-func pickSubtitle(file *File, want int) (probe.SubtitleStream, bool) {
+// pickSubtitle 选字幕轨：显式指定 > 语言偏好命中 > 文件默认轨 > 无。
+//
+// 返回的 how 是"怎么选中的"（explicit / language / default），供解释文案区分。
+// 语言匹配优先非强制轨：强制轨通常只翻外语台词，用户真要完整字幕时不该先用它。
+func pickSubtitle(file *File, want int, langs []string) (probe.SubtitleStream, string, bool) {
 	if want > 0 {
 		for _, s := range file.Subtitle {
 			if s.Index == want {
-				return s, true
+				return s, "explicit", true
 			}
 		}
-		return probe.SubtitleStream{}, false
+		return probe.SubtitleStream{}, "", false
 	}
-	for _, s := range file.Subtitle {
-		if s.Default && s.Forced {
-			return s, true
+	// 1) 语言偏好命中（先非强制，再强制）
+	for _, forced := range []bool{false, true} {
+		for _, s := range file.Subtitle {
+			if s.Forced == forced && subtitleLangMatches(s.Language, langs) {
+				return s, "language", true
+			}
 		}
 	}
-	return probe.SubtitleStream{}, false
+	// 2) 匹配不上：挂文件里标了默认的那条（同样先非强制）
+	for _, forced := range []bool{false, true} {
+		for _, s := range file.Subtitle {
+			if s.Forced == forced && s.Default {
+				return s, "default", true
+			}
+		}
+	}
+	return probe.SubtitleStream{}, "", false
+}
+
+// subtitleLangMatches 判断某个字幕轨的语言是否命中偏好列表里的任意一项。
+func subtitleLangMatches(track string, wants []string) bool {
+	base := langBase(track)
+	if base == "" || len(wants) == 0 {
+		return false
+	}
+	for _, w := range wants {
+		if b := langBase(w); b != "" && b == base {
+			return true
+		}
+	}
+	return false
+}
+
+// langBase 把语言码归一成两字母基码。
+//
+// 片源里多是 ISO-639-2 三字母（chi/eng/jpn…），浏览器给的是 BCP-47（zh-CN/en-US…）。
+// 表里没有的原样返回（只小写、只去掉地区/文字后缀，不做前缀猜测）。
+func langBase(code string) string {
+	c := strings.ToLower(strings.TrimSpace(code))
+	if c == "" || c == "und" || c == "unknown" || c == "mul" {
+		return ""
+	}
+	if i := strings.IndexAny(c, "-_"); i > 0 { // zh-Hans / en_US
+		c = c[:i]
+	}
+	if v, ok := iso639Table[c]; ok {
+		return v
+	}
+	return c
+}
+
+// iso639Table：常见语言的 ISO-639-2 → ISO-639-1（只收媒体里真会碰到的那些）。
+var iso639Table = map[string]string{
+	"chi": "zh", "zho": "zh", "eng": "en", "jpn": "ja", "kor": "ko",
+	"fra": "fr", "fre": "fr", "deu": "de", "ger": "de", "spa": "es", "ita": "it",
+	"por": "pt", "rus": "ru", "tha": "th", "vie": "vi", "ind": "id", "ara": "ar",
+	"hin": "hi", "tur": "tr", "pol": "pl", "nld": "nl", "dut": "nl", "swe": "sv",
+	"nor": "no", "dan": "da", "fin": "fi", "ces": "cs", "cze": "cs", "ell": "el",
+	"gre": "el", "heb": "he", "ukr": "uk", "ron": "ro", "rum": "ro", "hun": "hu",
+	"bul": "bg", "hrv": "hr", "slk": "sk", "slo": "sk", "cat": "ca", "fil": "tl",
+	"tgl": "tl", "msa": "ms", "may": "ms", "ben": "bn", "tam": "ta", "tel": "te",
+	"mal": "ml", "kan": "kn", "mar": "mr", "guj": "gu", "pan": "pa", "urd": "ur",
+	"fas": "fa", "per": "fa", "mya": "my", "bur": "my", "khm": "km", "lao": "lo",
+	"nep": "ne", "sin": "si", "kat": "ka", "geo": "ka", "hye": "hy", "arm": "hy",
+	"aze": "az", "kaz": "kk", "uzb": "uz", "swa": "sw", "amh": "am", "yue": "yue",
+	"srp": "sr", "slv": "sl", "lit": "lt", "lav": "lv", "est": "et", "epo": "eo",
 }
 
 // planMode 汇总出播放方式与分片格式。
