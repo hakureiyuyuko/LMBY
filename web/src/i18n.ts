@@ -1074,8 +1074,7 @@ const en: Record<string, string> = {
   // ---------------------------------------------------------------- 播放器
   '载入中…': 'Loading…',
   '字幕正在准备…': 'Preparing subtitles…',
-  '这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。':
-    'Embedded subtitles for this file are extracted on first play, which can take a little while (tens of seconds). Playback starts automatically once they are ready, and the same title loads instantly afterwards.',
+  '内封字幕要先抽出来，第一次会慢一些（几十秒），抽好后会自动开始播放。': 'Embedded subtitles are extracted before playback — the first time can take a few tens of seconds. Playback then starts automatically.',
   '正在准备播放…': 'Preparing playback…',
   '这个条目现在放不了': 'This title cannot be played right now',
   '重新开始': 'Start over',
@@ -1169,7 +1168,7 @@ const en: Record<string, string> = {
   '有新版本：{version}': 'New version available: {version}',
   '发布于 {time}': 'published {time}',
   '下载：{assets}': 'Downloads: {assets}',
-  '当前是开发构建（不参与版本比较），最新发布是 {version}': 'This is a development build (not compared by version); the latest release is {version}',
+  '当前是开发构建，最新发布是 {version}': 'This is a development build; the latest release is {version}',
   '已是最新版本（{version}）': 'Up to date ({version})',
   '（刚查过，这里是上次的结果）': '(Checked recently — showing the previous result)',
 

@@ -97,7 +97,7 @@ function Outcome({ info }: { info: UpdateInfo }) {
   if (info.state === 'dev') {
     return (
       <div className="alert">
-        {t('当前是开发构建（不参与版本比较），最新发布是 {version}', { version: info.latest || '' })}
+        {t('当前是开发构建，最新发布是 {version}', { version: info.latest || '' })}
       </div>
     );
   }
