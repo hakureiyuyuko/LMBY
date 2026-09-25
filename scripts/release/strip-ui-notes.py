@@ -95,6 +95,13 @@ RULES = [
      '添加一个媒体库并扫描，海报、简介与演职员信息就会出现在这里。',
      'Add a library and run a scan — posters, overviews and cast will show up here.'),
     ('当前没有转码/转封装进程。', '当前没有转码进程。', 'No transcoding sessions right now.'),
+    # —— v1.0.1 新增界面的解释性文案 ——
+    ('这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。',
+     '内封字幕要先抽出来，第一次会慢一些（几十秒），抽好后会自动开始播放。',
+     'Embedded subtitles are extracted before playback — the first time can take a few tens of seconds. Playback then starts automatically.'),
+    ('当前是开发构建（不参与版本比较），最新发布是 {version}',
+     '当前是开发构建，最新发布是 {version}',
+     'This is a development build; the latest release is {version}'),
     # —— M6/M8 新增界面的解释性文案（页面提示语不在 <p> 里、需逐条压短的）——
     ('这里还没有条目。先在「库管理」里扫描一次 —— 扫描会登记文件、导入同目录的 nfo 与图片。',
      '这里还没有条目。先去「库管理」扫描一次。',
