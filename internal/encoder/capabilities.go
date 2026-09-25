@@ -22,6 +22,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // Kind 是转码后端种类（与 ffmpeg 的 -hwaccels 命名对齐）。
@@ -470,7 +472,7 @@ func (p *prober) smoke(args ...string) (bool, string) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		msg = "超时（" + p.timeout.String() + "）"
 	}
-	return false, truncate(msg, 160)
+	return false, textutil.Truncate(msg, 160)
 }
 
 // parseHWAccels 解析 `ffmpeg -hwaccels`。
@@ -569,11 +571,4 @@ func lastLine(s string) string {
 		}
 	}
 	return ""
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

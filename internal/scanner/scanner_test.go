@@ -1,12 +1,76 @@
 package scanner
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
 )
 
+// TestBadNameReason 是 2026-09-25 那次事故的回归测试。
+//
+// 背景：库是 UTF-8 的，而 SMB / 网盘共享上的文件名不保证是 UTF-8。以前这种名字
+// 会一路带进数据库：先让那个文件插不进 media_files，再让**整批扫描问题**写失败 ——
+// 扫描于是被判成「失败」，后面几百条问题全丢（实测只留下失败前写进去的 63 条）。
+// 现在在遍历时就把它们挑出来跳过，所以这个判断必须可靠。
+func TestBadNameReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		wantNote string // 空串 = 应当被判为「没问题」
+	}{
+		{"中文目录名", "「Z」折纸Se丶", ""},
+		{"带年份的剧集目录", "致不灭的你 (2021)", ""},
+		{"emoji", "🎬 特典", ""},
+		{"组合字符", "バクロ", ""},
+		{"空名字", "", ""},
+		{"CIFS 上真实存在的坏字节", "x\xde y.mkv", "0xde 0x20"},
+		{"被切断的三字节汉字", "\xe3\x80", "0xe3 0x80"},
+		{"合法名字后面跟着坏字节", "白色相簿\xff", "0xff"},
+	}
+	for _, c := range cases {
+		got := badNameReason(c.in)
+		if c.wantNote == "" {
+			if got != "" {
+				t.Errorf("%s：合法名字不该被判为坏名字，实际 %q", c.name, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, c.wantNote) {
+			t.Errorf("%s：说明里应带上坏字节的十六进制 %s，实际 %q", c.name, c.wantNote, got)
+		}
+		// 说明本身要写进数据库，所以必须是合法 UTF-8 —— 否则「提示」本身就会把扫描搞挂。
+		if !utf8.ValidString(got) {
+			t.Errorf("%s：说明本身不是合法 UTF-8：%q", c.name, got)
+		}
+	}
+}
+
+// TestIssueSanitizes 守住「问题清单是入库前的最后一道」：
+// 即使某个调用点忘了净化，写进 w.issues 的文本也必须是合法 UTF-8。
+func TestIssueSanitizes(t *testing.T) {
+	w := &walker{}
+	// 真实的错误信息会把文件名原样带进来（内核/ffprobe 都可能）
+	w.issue("warning", "/mnt/media/x\xde y.mkv", "访问失败: open /mnt/media/x\xde y.mkv: Host is down")
+
+	if len(w.issues) != 1 {
+		t.Fatalf("应当记录 1 条问题，实际 %d", len(w.issues))
+	}
+	got := w.issues[0]
+	if got.Severity != "warning" {
+		t.Errorf("严重级别应原样保留，实际 %q", got.Severity)
+	}
+	if !utf8.ValidString(got.Path) || !utf8.ValidString(got.Message) {
+		t.Errorf("入库前必须净化：path=%q message=%q", got.Path, got.Message)
+	}
+	if !strings.Contains(got.Path, "\uFFFD") {
+		t.Errorf("坏字节应换成 U+FFFD（看得出这里坏过），实际 %q", got.Path)
+	}
+}
+
+// 空 nfo 不能把条目钉成 nfo 状态，否则那条就永远不会被刮削。
 // TestNFOHasMetadata 守住「什么样的 nfo 算人工元数据」：
 // 空 nfo 不能把条目钉成 nfo 状态，否则那条就永远不会被刮削。
 func TestNFOHasMetadata(t *testing.T) {

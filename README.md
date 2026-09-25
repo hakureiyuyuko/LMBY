@@ -53,6 +53,7 @@ psql -h 127.0.0.1 -U lmby -d lmby -c 'select count(*) from media_items'
 | `internal/scrape` `internal/metadata` `internal/provider` `internal/match` | TMDB 刮削与人工匹配 |
 | `internal/store` | PostgreSQL 存取（手写 SQL）；迁移在 `migrations/` |
 | `internal/images` `overlay` `backup` `logbuf` `secrets` `settings` | 图片缓存 / 只读库叠加层 / 备份恢复 / 内存日志 / 密钥加密 / 设置 |
+| `internal/textutil` | 文本入库前的净化与 rune 安全截断（见 `docs/notes/text-encoding.md`） |
 | `internal/livetv` `livetvsync` | 直播源导入、探测、同步 |
 | `internal/worker` `scanner` `scan` | 后台任务队列与扫描调度 |
 | `web/src` | 前端（React + TS + Vite），构建产物由 `go:embed` 进二进制 |
@@ -106,6 +107,13 @@ node scripts/dev/i18n-coverage.mjs --max 0
 | `docs/LIBRARY-NOTES.md` | 媒体库目录约定 |
 | `docs/notes/*.md` | 专题笔记（搜索、直播、权限、Jellyfin 参考…） |
 | `docs/ADR/` | 技术选型的「为什么」（例如：为什么只用标准库） |
+| `docs/README.release.md` | 交付 README 的单一来源 |
+| `docs/local-*.md` | 本机真值（gitignored）：实例地址、口令、部署细节 |
+
+## 许可
+
+AGPL-3.0-only。
+�么」（例如：为什么只用标准库） |
 | `docs/README.release.md` | 交付 README 的单一来源 |
 | `docs/local-*.md` | 本机真值（gitignored）：实例地址、口令、部署细节 |
 

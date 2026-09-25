@@ -20,10 +20,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
 	"github.com/hakureiyuyuko/lmby/internal/store"
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // Progress 是扫描进度快照，会通过 SSE 推给前端。
@@ -166,12 +168,15 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		w.stats.ProbesEnqueued = n
 	}
 
+	// 这两项要在 finish 之前填好：finish 里会写扫描问题，万一它失败，失败记录也得带上
+	// 真实的问题数与耗时 —— 以前它们在 finish 之后才赋值，于是界面上出现「耗时 0.0 秒 /
+	// 问题 0」却列着 63 条问题的自相矛盾记录（2026-09-25 实测）。
+	w.stats.Issues = len(w.issues)
+	w.stats.ElapsedMS = time.Since(w.started).Milliseconds()
+
 	if err := w.finish(ctx); err != nil {
 		return w.stats, err
 	}
-
-	w.stats.Issues = len(w.issues)
-	w.stats.ElapsedMS = time.Since(w.started).Milliseconds()
 	return w.stats, nil
 }
 
@@ -258,7 +263,31 @@ func (w *walker) issue(severity, path, msg string) {
 	if len(w.issues) >= maxIssues {
 		return
 	}
-	w.issues = append(w.issues, store.ScanIssue{Severity: severity, Path: path, Message: msg})
+	// 这里做一次净化：文本可能来自文件系统，也可能内嵌在系统调用的错误信息里
+	// （`open /mnt/media/…: Host is down` 这种会把文件名原样带进来），而库是 UTF-8 的。
+	// 集中在这一处，后面所有 w.issue(...) 的调用点就不用各自留神。
+	w.issues = append(w.issues, store.ScanIssue{
+		Severity: severity,
+		Path:     textutil.Valid(path),
+		Message:  textutil.Valid(msg),
+	})
+}
+
+// badNameReason 回答「这个目录项的名字能不能进数据库」，空串表示能。
+//
+// 为什么要单独判断：库是 UTF-8 的，路径里只要有非法字节就写不进去。而坏的不只是
+// 这一个文件 —— 扫描问题是**整批**写的，2026-09-25 实测一条坏路径就让整批失败、
+// 扫描被判成「失败」，后面几百条问题全部丢失（界面只留下失败前面写进去的 63 条）。
+// 所以宁可在遍历时就把它挑出来跳过，连探测/播放都别去试。
+//
+// 坏名字的十六进制写进说明里：界面只能把非法字节显示成 U+FFFD，看不出到底是什么，
+// 给了十六进制，用户可以照着 `ls | xxd` 找到那个文件（改名后重扫即可入库）。
+func badNameReason(name string) string {
+	if utf8.ValidString(name) {
+		return ""
+	}
+	return fmt.Sprintf("文件名含非 UTF-8 字节（%s），已跳过：数据库是 UTF-8，存不下这个路径；把文件改名后重扫即可",
+		textutil.FirstInvalid(name))
 }
 
 func (w *walker) report(phase, current string) {
@@ -325,6 +354,16 @@ func (w *walker) walkPath(ctx context.Context, root string) error {
 		}
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
+		}
+
+		// 名字不是合法 UTF-8 的目录项：不入库（也跳过整棵目录）——
+		// 详见 badNameReason 的注释，这是「一条坏名字搞挂整个扫描」的修复点。
+		if reason := badNameReason(d.Name()); reason != "" {
+			w.issue("warning", path, reason)
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 
 		dir := filepath.Dir(path)

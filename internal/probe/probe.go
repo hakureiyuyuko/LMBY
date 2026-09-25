@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // TicksPerSecond 是 .NET tick（1 tick = 100ns）。数据库里统一用 tick 存时长。
@@ -209,13 +211,13 @@ func Run(ctx context.Context, probePath, path string) (*Info, error) {
 	if runErr != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if isFileProblem(msg) {
-			return nil, fmt.Errorf("%w: %s", ErrUnsupported, truncate(msg, 200))
+			return nil, fmt.Errorf("%w: %s", ErrUnsupported, textutil.Truncate(msg, 200))
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		// 文件明明存在却读不了（例如网络盘掉了），也归为环境问题
-		return nil, fmt.Errorf("执行 ffprobe 失败: %w（%s）", runErr, truncate(msg, 200))
+		return nil, fmt.Errorf("执行 ffprobe 失败: %w（%s）", runErr, textutil.Truncate(msg, 200))
 	}
 
 	info, err := Normalize(stdout.Bytes())
@@ -504,11 +506,4 @@ func chapterSeconds(units int64, timeString, timeBase string) float64 {
 		return 0
 	}
 	return float64(units) * unit
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

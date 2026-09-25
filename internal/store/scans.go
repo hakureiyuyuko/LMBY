@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // ScanRun 是一次扫描运行。
@@ -57,6 +59,13 @@ func (s *Store) FinishScanRun(ctx context.Context, runID int64, state string, st
 }
 
 // AddScanIssues 批量写入扫描问题。
+//
+// 入库前对 path / message 做一次净化：这两个字段可能来自文件系统（SMB / 网盘共享上的
+// 文件名不保证是 UTF-8）或内嵌在错误信息里，而库是 UTF-8 的。净化是**兜底** ——
+// 扫描器已经会跳过非法名字，但这里的代价只有一次 utf8.ValidString，值得。
+//
+// 为什么必须兜住：以前 `CopyFrom` 失败后逐条兜底的实现会在坏行**中断并返回错误**，
+// 于是一条坏路径就让整批问题写不进去，扫描被判定为「失败」（2026-09-25 实测）。
 func (s *Store) AddScanIssues(ctx context.Context, runID, libraryID int64, issues []ScanIssue) error {
 	if len(issues) == 0 {
 		return nil
@@ -68,7 +77,7 @@ func (s *Store) AddScanIssues(ctx context.Context, runID, libraryID int64, issue
 		if sev == "" {
 			sev = "warning"
 		}
-		batch = append(batch, []any{runID, libraryID, sev, is.Path, is.Message})
+		batch = append(batch, []any{runID, libraryID, sev, textutil.Valid(is.Path), textutil.Valid(is.Message)})
 	}
 
 	_, err := s.pool.CopyFrom(ctx,
@@ -77,11 +86,15 @@ func (s *Store) AddScanIssues(ctx context.Context, runID, libraryID int64, issue
 		pgx.CopyFromRows(batch))
 	if err != nil {
 		// CopyFrom 失败时退化成逐条插入，保证流程不中断
-		for _, row := range batch {
+		for i, row := range batch {
 			if _, e := s.pool.Exec(ctx,
 				`insert into scan_issues (scan_run_id, library_id, severity, path, message)
 				 values ($1, $2, $3, $4, $5)`, row...); e != nil {
-				return fmt.Errorf("写入扫描问题失败: %w", e)
+				// 把出问题的条目说出来：否则界面只有一句「写入扫描问题失败」，
+				// 根本不知道是哪一条、也就无从下手（这是本次事故最费时间的地方）。
+				path, _ := row[3].(string)
+				return fmt.Errorf("写入扫描问题失败（第 %d/%d 条：%s）: %w",
+					i+1, len(batch), textutil.Truncate(path, 160), e)
 			}
 		}
 	}
