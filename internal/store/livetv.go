@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hakureiyuyuko/lmby/internal/livetv"
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // ---------------------------------------------------------------- 订阅源
@@ -157,7 +158,7 @@ func (s *Store) MarkTVSourceRefreshed(ctx context.Context, id int64, status stri
 	_, err := s.pool.Exec(ctx,
 		`update tv_sources set last_refresh_at = now(), last_status = $2, last_channel_count = $3,
 		        updated_at = now()
-		 where id = $1`, id, truncate(status, 500), channelCount)
+		 where id = $1`, id, textutil.Truncate(status, 500), channelCount)
 	if err != nil {
 		return fmt.Errorf("记录刷新结果失败: %w", err)
 	}
@@ -393,7 +394,7 @@ func (s *Store) SetTVChannelProbe(ctx context.Context, id int64, probe string, o
 	_, err := s.pool.Exec(ctx,
 		`update tv_channels set probe = $2, probe_ok = $3, probe_at = now(), updated_at = now(),
 		 video_codec = nullif($4, ''), video_height = $5
-		 where id = $1`, id, truncate(probe, 500), ok, strings.ToLower(strings.TrimSpace(videoCodec)), videoHeight)
+		 where id = $1`, id, textutil.Truncate(probe, 500), ok, strings.ToLower(strings.TrimSpace(videoCodec)), videoHeight)
 	if err != nil {
 		return fmt.Errorf("保存频道探测结果失败: %w", err)
 	}

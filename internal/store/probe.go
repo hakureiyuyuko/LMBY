@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // 任务类型常量。集中放在这里，避免各处手写字符串。
@@ -108,9 +110,9 @@ func (s *Store) SaveFileProbe(ctx context.Context, fileID int64, r ProbeRecord) 
 // 用于「文件本身有问题」的情况（不是媒体文件、损坏、格式不支持）——
 // 这类失败重试多少次都一样，所以标记后不再重试，让用户能在界面上看到。
 func (s *Store) MarkFileProbeFailed(ctx context.Context, fileID int64, msg string) error {
-	if len(msg) > 500 {
-		msg = msg[:500]
-	}
+	// 探测失败的原因里会带 ffprobe 的 stderr 尾巴（本身可能存在非 UTF-8 字节），
+	// 也可能内嵌一个文件名 —— 两者都进不了 UTF-8 的库，所以先净化 + rune 安全截断。
+	msg = textutil.Truncate(textutil.Valid(msg), 500)
 	_, err := s.pool.Exec(ctx,
 		`update media_files set probe_state = 'failed', probe_error = $2, probed_at = now(), updated_at = now()
 		 where id = $1`, fileID, msg)

@@ -20,10 +20,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
 	"github.com/hakureiyuyuko/lmby/internal/store"
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // Progress 是扫描进度快照，会通过 SSE 推给前端。
@@ -54,16 +56,23 @@ type Stats struct {
 	MovedFiles   int `json:"movedFiles"`
 	DeletedFiles int `json:"deletedFiles"`
 	Unchanged    int `json:"unchanged"`
-	ItemsNew     int `json:"itemsNew"`
-	SeriesNew    int `json:"seriesNew"`
-	SeasonsNew   int `json:"seasonsNew"`
-	EpisodesNew  int `json:"episodesNew"`
-	MoviesNew    int `json:"moviesNew"`
-	NFORead      int `json:"nfoRead"`
-	Images       int `json:"images"`
-	Subtitles    int `json:"subtitles"`
-	Unrecognized int `json:"unrecognized"`
-	Issues       int `json:"issues"`
+	// RevivedFiles 是本轮「复活」的文件数：以前被扫成消失（软删）过、这轮又见到了。
+	RevivedFiles int `json:"revivedFiles"`
+	// SkippedDeletions 是本轮**本该删但没删**的文件数（命中安全阀或目录读不到）。
+	// 大于 0 说明这次结果不完整，界面上要看得到。
+	SkippedDeletions int `json:"skippedDeletions"`
+	// UnreadableRoots 是读不到的库根路径数（网盘掉线的典型症状）。
+	UnreadableRoots int `json:"unreadableRoots"`
+	ItemsNew        int `json:"itemsNew"`
+	SeriesNew       int `json:"seriesNew"`
+	SeasonsNew      int `json:"seasonsNew"`
+	EpisodesNew     int `json:"episodesNew"`
+	MoviesNew       int `json:"moviesNew"`
+	NFORead         int `json:"nfoRead"`
+	Images          int `json:"images"`
+	Subtitles       int `json:"subtitles"`
+	Unrecognized    int `json:"unrecognized"`
+	Issues          int `json:"issues"`
 	// ProbesEnqueued 是本轮扫描后入队的探测任务数。
 	ProbesEnqueued int64 `json:"probesEnqueued"`
 	ElapsedMS      int64 `json:"elapsedMs"`
@@ -83,6 +92,10 @@ type Options struct {
 	RefreshMetadata bool
 
 	MinFileSize int64 // 小于该字节数的视频跳过；<=0 表示用默认值
+
+	// MaxDeleteRatio 是「一次扫描最多能删掉存活文件的比例」（<=0 表示用内置默认；
+	// 负数 = 不限制，见 config.ScanConfig.MaxDeleteRatio 的说明）。
+	MaxDeleteRatio float64
 }
 
 const (
@@ -96,6 +109,12 @@ const (
 	defaultMinFileSize = 64 * 1024
 	// maxIssues 是单次扫描记录的问题数上限，防止畸形库把表写爆。
 	maxIssues = 2000
+	// defaultMaxDeleteRatio 是「一次扫描最多能删掉存活文件的比例」的默认安全阀。
+	defaultMaxDeleteRatio = 0.2
+	// minFilesForDeleteGuard 是安全阀生效的**最小规模**：要删的文件不到这么多时
+	// 不看比例。小库（测试库、家庭照片库）本来是「删两个只就少一半」，
+	// 按比例卡会把正常删文件也拦下来，不值当。
+	minFilesForDeleteGuard = 20
 )
 
 var skipDirNames = map[string]bool{
@@ -138,6 +157,7 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		imagesSeen:       map[int64]map[string]bool{},
 		metaApplied:      map[int64]bool{},
 		dirMetaChecked:   map[int64]bool{},
+		unreadableRoots:  map[string]bool{},
 	}
 
 	if err := w.loadExisting(ctx); err != nil {
@@ -166,12 +186,25 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		w.stats.ProbesEnqueued = n
 	}
 
+	w.stats.UnreadableRoots = len(w.unreadableRoots)
+	w.stats.Issues = len(w.issues)
+	w.stats.ElapsedMS = time.Since(w.started).Milliseconds()
+
 	if err := w.finish(ctx); err != nil {
 		return w.stats, err
 	}
 
-	w.stats.Issues = len(w.issues)
-	w.stats.ElapsedMS = time.Since(w.started).Milliseconds()
+	// 安全阀拦下了删除（比例闸）→ 扫描结果不可信，标成失败让界面说出来。
+	if w.guardMsg != "" {
+		return w.stats, errors.New(w.guardMsg)
+	}
+	// 全部库根都读不到 = 这次什么都没读到（网盘掉线的典型）：文件一个都没删
+	//（闸一只会保护读不到的子树，闸二在这里不一定会触发，比如库里本来就没几个文件），
+	// 但也绝不能说「成功」—— 那会让人以为库真的空了。
+	if len(w.unreadableRoots) >= len(lib.Paths) {
+		return w.stats, fmt.Errorf("全部 %d 个根路径都读不到（网络盘掉线或权限问题？）：本次没有删除任何文件，请检查挂载后重扫",
+			len(lib.Paths))
+	}
 	return w.stats, nil
 }
 
@@ -250,6 +283,18 @@ type walker struct {
 	// dirMetaChecked 记录重扫时已补过目录级 nfo 的条目（同上，避免重复查库）。
 	dirMetaChecked map[int64]bool
 
+	// 本轮读不到的路径（网盘掉线时 WalkDir 会在根或子目录上报错）。
+	//
+	// 它存在的唯一理由：**「本轮没看见」不等于「文件没了」**。
+	// 读不到的子树一律不参与删除判定，否则一次掉线就把人家的库清空了。
+	unreadable []string
+	// unreadableRoots 是「整棵读不到」的库根；全都读不到时本次扫描直接判失败。
+	unreadableRoots map[string]bool
+
+	// guardMsg 非空表示「扫描跑完了但结果不可信」（安全阀拦下了删除）：
+	// 扫描状态会被标成失败，并把这句人话写进 error 里给界面看。
+	guardMsg string
+
 	processed  int
 	lastReport time.Time
 }
@@ -258,7 +303,54 @@ func (w *walker) issue(severity, path, msg string) {
 	if len(w.issues) >= maxIssues {
 		return
 	}
-	w.issues = append(w.issues, store.ScanIssue{Severity: severity, Path: path, Message: msg})
+	// 这里做一次净化：文本可能来自文件系统，也可能内嵌在系统调用的错误信息里
+	// （`open /mnt/media/…: Host is down` 这种会把文件名原样带进来），而库是 UTF-8 的。
+	// 集中在这一处，后面所有 w.issue(...) 的调用点就不用各自留神。
+	w.issues = append(w.issues, store.ScanIssue{
+		Severity: severity,
+		Path:     textutil.Valid(path),
+		Message:  textutil.Valid(msg),
+	})
+}
+
+// noteUnreadable 记下「本轮读不到」的位置。
+//
+// 网盘掉线时它在库根上报错（`lstat /mnt/media/…: host is down`），掉权限时在某个
+// 子目录上报错。两种情况都要记：它下面的文件本轮「没看见」，但那不等于文件没了。
+func (w *walker) noteUnreadable(root, path string) {
+	if path == root {
+		w.unreadableRoots[root] = true
+	}
+	w.unreadable = append(w.unreadable, path)
+}
+
+// underUnreadable 判断某个已入库的路径是否落在本轮读不到的位置下。
+//
+// 前缀比较而不是精确匹配：读不到的是**整棵**目录，它下面的文件同样没被看到。
+func (w *walker) underUnreadable(path string) bool {
+	for _, p := range w.unreadable {
+		if path == p || strings.HasPrefix(path, p+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// badNameReason 回答「这个目录项的名字能不能进数据库」，空串表示能。
+//
+// 为什么要单独判断：库是 UTF-8 的，路径里只要有非法字节就写不进去。而坏的不只是
+// 这一个文件 —— 扫描问题是**整批**写的，2026-09-25 实测一条坏路径就让整批失败、
+// 扫描被判成「失败」，后面几百条问题全部丢失（界面只留下失败前面写进去的 63 条）。
+// 所以宁可在遍历时就把它挑出来跳过，连探测/播放都别去试。
+//
+// 坏名字的十六进制写进说明里：界面只能把非法字节显示成 U+FFFD，看不出到底是什么，
+// 给了十六进制，用户可以照着 `ls | xxd` 找到那个文件（改名后重扫即可入库）。
+func badNameReason(name string) string {
+	if utf8.ValidString(name) {
+		return ""
+	}
+	return fmt.Sprintf("文件名含非 UTF-8 字节（%s），已跳过：数据库是 UTF-8，存不下这个路径；把文件改名后重扫即可",
+		textutil.FirstInvalid(name))
 }
 
 func (w *walker) report(phase, current string) {
@@ -317,6 +409,7 @@ func (w *walker) takeMoveCandidate(size, mtimeNS int64) (store.LibraryFile, bool
 func (w *walker) walkPath(ctx context.Context, root string) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			w.noteUnreadable(root, path)
 			w.issue("error", path, "访问失败: "+err.Error())
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
@@ -325,6 +418,16 @@ func (w *walker) walkPath(ctx context.Context, root string) error {
 		}
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
+		}
+
+		// 名字不是合法 UTF-8 的目录项：不入库（也跳过整棵目录）——
+		// 详见 badNameReason 的注释，这是「一条坏名字搞挂整个扫描」的修复点。
+		if reason := badNameReason(d.Name()); reason != "" {
+			w.issue("warning", path, reason)
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 
 		dir := filepath.Dir(path)
@@ -459,10 +562,30 @@ func (w *walker) handleVideo(ctx context.Context, dir, path string, d fs.DirEntr
 
 	root := w.rootOf(path)
 
-	// ---- 快速路径：路径已存在且指纹未变
+	// ---- 快速路径：路径已存在
 	if ex, ok := w.existingByPath[path]; ok {
 		w.seen[ex.ID] = true
 		w.itemByPath[path] = ex.ItemID
+
+		// 这一行以前被扫成「消失」过（最典型的成因：网盘掉线时整库软删），
+		// 现在文件又见到了 → 必须**复活**它。
+		//
+		// 不能当新文件去插：media_files.path 上有唯一约束（墓碑行也占着那个路径），
+		// 插进去只会撞约束，换来一条「该路径已被其它条目占用」的假警告 —— 而文件
+		// 永远回不来，每轮重扫都重报一次（2026-09-25 实测：38461 个文件被这么钉死）。
+		if ex.DeletedAt != nil {
+			if err := w.st.ReviveFile(ctx, ex.ID, size, mtime); err != nil {
+				w.issue("error", path, "恢复已删除的文件记录失败: "+err.Error())
+				return
+			}
+			w.stats.RevivedFiles++
+			if ex.SizeBytes != size || ex.MtimeNS != mtime {
+				// 内容也变了：按「变化」处理（探测状态已在 ReviveFile 里退回 pending）
+				w.applyMetadata(ctx, path, ex.ItemID)
+			}
+			return
+		}
+
 		if ex.SizeBytes == size && ex.MtimeNS == mtime {
 			w.stats.Unchanged++
 			if w.opts.RefreshMetadata {
@@ -1029,23 +1152,98 @@ func (w *walker) linkImages(ctx context.Context) {
 
 // ---------------------------------------------------------------- 收尾
 
-func (w *walker) finish(ctx context.Context) error {
-	// 1) 未在本轮出现的文件 → 软删除
-	gone := make([]int64, 0)
+// deletePlan 是「本轮该删哪些文件」的结论。
+//
+// 单独拎成纯函数（只读 walker 状态、不碰数据库）是为了能直接单测：这两道闸关系到
+// 「一次掉盘会不会把整库清空」，不能只靠真盘上试。
+type deletePlan struct {
+	// gone 是真要软删的文件行 id（guard 非空时一定是空）。
+	gone []int64
+	// skippedUnreadable 是因「所在目录本轮读不到」而没参与判定的文件数。
+	skippedUnreadable int
+	// wouldDelete 是本轮「本该删」的总数（guard 非空时这就是被拦下的量）。
+	wouldDelete int
+	// alive 是本库本轮开头的存活文件数（比例闸的分母）。
+	alive int
+	// guard 非空表示比例闸拦下：一个都不删，扫描要被判失败。
+	guard string
+}
+
+func (w *walker) planDeletions() deletePlan {
+	var p deletePlan
 	for _, ex := range w.existingByPath {
-		if !w.seen[ex.ID] {
-			gone = append(gone, ex.ID)
+		if ex.DeletedAt != nil {
+			continue // 已经是墓碑了，不用再删；这行要留着给「复活」用
+		}
+		p.alive++
+		if w.seen[ex.ID] {
+			continue
+		}
+		// 闸一：读不到的子树下的文件不参与删除判定。
+		if w.underUnreadable(ex.Path) {
+			p.skippedUnreadable++
+			continue
+		}
+		p.gone = append(p.gone, ex.ID)
+	}
+	sort.Slice(p.gone, func(i, j int) bool { return p.gone[i] < p.gone[j] })
+
+	// 闸二：比例闸。整棵挂载掉线（目录读成空的）就是「要删掉接近 100%」这种形态。
+	// 只在规模够大时生效 —— 小库本来就是「删两个就少一半」，按比例卡会把正常删除也拦下。
+	//
+	// 阀值语义：0 = 用内置默认，负数 = 不限制（真要删掉大部分文件时的出路），
+	// 正数 = 自定义比例。
+	limit := w.opts.MaxDeleteRatio
+	if limit == 0 {
+		limit = defaultMaxDeleteRatio
+	}
+	if n := len(p.gone); n >= minFilesForDeleteGuard && p.alive > 0 && limit > 0 {
+		if ratio := float64(n) / float64(p.alive); ratio > limit {
+			p.guard = fmt.Sprintf(
+				"本次要删 %d 个文件（占存活 %d 个的 %.0f%%），超过 [scan] max_delete_ratio=%.2f 的安全阀，已全部跳过：通常意味着网盘/共享掉线或挂载点变空。确认文件真没了，再把该值调大（负数 = 不限制）后重扫",
+				n, p.alive, ratio*100, limit)
+			// 统计仍要报出「本该删多少」；但 gone 清空 —— 它是一个「可以安全交给
+			// MarkFilesDeleted」的承诺，不能留半个需要调用方自己记得别用。
+			p.wouldDelete = n
+			p.gone = nil
 		}
 	}
-	sort.Slice(gone, func(i, j int) bool { return gone[i] < gone[j] })
+	return p
+}
 
-	deleted, err := w.st.MarkFilesDeleted(ctx, gone)
+func (w *walker) finish(ctx context.Context) error {
+	// 1) 未在本轮出现的文件 → 软删除。
+	//
+	// 两道闸（见 planDeletions），任何一道拦下就**一个都不删**。这不是保守，是必须：
+	// 网络盘挂载会掉线，而掉线时「本轮没看见」根本不等于「文件没了」
+	//（2026-09-25 实测：一次掉线把 38437 个文件标成删除，扫描还报成功）。
+	plan := w.planDeletions()
+
+	if plan.guard != "" {
+		w.guardMsg = plan.guard
+		// 被拦下的量也要报出来，否则界面上看不出「本来要删多少」
+		w.stats.SkippedDeletions = plan.wouldDelete + plan.skippedUnreadable
+		w.issue("error", "", plan.guard)
+		return w.writeIssues(ctx)
+	}
+	w.stats.SkippedDeletions = plan.skippedUnreadable
+	if plan.skippedUnreadable > 0 {
+		w.issue("warning", "", fmt.Sprintf(
+			"有 %d 个文件位于本轮读不到的目录下（挂载掉线/权限？），已跳过删除判定 —— 读不到不等于文件没了；检查挂载后重扫",
+			plan.skippedUnreadable))
+	}
+
+	deleted, err := w.st.MarkFilesDeleted(ctx, plan.gone)
 	if err != nil {
 		return err
 	}
 	w.stats.DeletedFiles = int(deleted)
 
-	// 2) 写回问题清单
+	return w.writeIssues(ctx)
+}
+
+// writeIssues 把本轮问题清单写回数据库（finish 的两条路径共用）。
+func (w *walker) writeIssues(ctx context.Context) error {
 	if err := w.st.AddScanIssues(ctx, w.opts.ScanRunID, w.lib.ID, w.issues); err != nil {
 		return err
 	}

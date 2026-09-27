@@ -1,12 +1,248 @@
 package scanner
 
 import (
+	"fmt"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
+	"github.com/hakureiyuyuko/lmby/internal/store"
 )
 
+// newGuardWalker 造一个「库里有 n 个文件」的 walker，便于单测删除计划。
+//
+// seen / tombstones 是 1-based 的下标集合：前者 = 本轮在磁盘上看见了，
+// 后者 = 这行早就是墓碑（软删过）。路径统一是 /media/root/Fxxx.mkv。
+func newGuardWalker(n int, seen, tombstones []int, opts Options) *walker {
+	w := &walker{
+		existingByPath:  map[string]store.LibraryFile{},
+		seen:            map[int64]bool{},
+		unreadableRoots: map[string]bool{},
+		opts:            opts,
+	}
+	seenSet := map[int]bool{}
+	for _, i := range seen {
+		seenSet[i] = true
+	}
+	tombSet := map[int]bool{}
+	for _, i := range tombstones {
+		tombSet[i] = true
+	}
+	for i := 1; i <= n; i++ {
+		f := store.LibraryFile{
+			ID: int64(i), ItemID: int64(i), Path: guardTestPath(i), SizeBytes: 1000, MtimeNS: 1,
+		}
+		if tombSet[i] {
+			deleted := time.Unix(1, 0)
+			f.DeletedAt = &deleted
+		}
+		w.existingByPath[f.Path] = f
+		if seenSet[i] {
+			w.seen[int64(i)] = true
+		}
+	}
+	return w
+}
+
+func guardTestPath(i int) string { return fmt.Sprintf("/media/root/F%03d.mkv", i) }
+
+// TestPlanDeletionsNormal 是正常增删：没看见的就该删，不该触发任何闸。
+func TestPlanDeletionsNormal(t *testing.T) {
+	// 30 个文件，看见了 28 个（要删 2 个 = 6.7% < 20% 的阀值）
+	seen := make([]int, 0, 28)
+	for i := 1; i <= 28; i++ {
+		seen = append(seen, i)
+	}
+	w := newGuardWalker(30, seen, nil, Options{})
+	p := w.planDeletions()
+	if p.guard != "" {
+		t.Fatalf("正常删除不该触发安全阀：%s", p.guard)
+	}
+	if len(p.gone) != 2 {
+		t.Fatalf("应删 2 个，实际 %d", len(p.gone))
+	}
+	if p.alive != 30 {
+		t.Fatalf("存活数应为 30，实际 %d", p.alive)
+	}
+}
+
+// TestPlanDeletionsRatioGuard 是 2026-09-25 那次事故的回归点：
+// 「网盘掉线→目录读成空的」表现为「要删掉接近 100%」，必须一个都不删。
+func TestPlanDeletionsRatioGuard(t *testing.T) {
+	w := newGuardWalker(100, nil, nil, Options{}) // 一个都没看见
+	p := w.planDeletions()
+	if p.guard == "" {
+		t.Fatal("100% 删除必须被安全阀拦下")
+	}
+	if len(p.gone) != 0 {
+		t.Fatalf("拦截后一个都不该删，实际 %d", len(p.gone))
+	}
+	if p.wouldDelete != 100 {
+		t.Fatalf("仍要报出「本该删 100 个」，实际 %d", p.wouldDelete)
+	}
+	if p.alive != 100 {
+		t.Fatalf("存活数应为 100，实际 %d", p.alive)
+	}
+
+	// 恰好等于阀值不算超（20% 不拦，21% 拦）
+	seen := make([]int, 0, 80)
+	for i := 1; i <= 80; i++ {
+		seen = append(seen, i)
+	}
+	if p := newGuardWalker(100, seen, nil, Options{}).planDeletions(); p.guard != "" {
+		t.Fatalf("正好 20%% 不该被拦：%s", p.guard)
+	}
+	seen = seen[:79]
+	if p := newGuardWalker(100, seen, nil, Options{}).planDeletions(); p.guard == "" {
+		t.Fatal("21%% 应当被拦")
+	}
+}
+
+// TestPlanDeletionsSmallLibraryNotGuarded 守住「小库不该被比例卡住」：
+// 家庭照片库删两个就少一半，那是正常运维，不是掉盘。
+func TestPlanDeletionsSmallLibraryNotGuarded(t *testing.T) {
+	w := newGuardWalker(4, nil, nil, Options{}) // 4 个全没看见，比例 100%
+	p := w.planDeletions()
+	if p.guard != "" {
+		t.Fatalf("未达到 minFilesForDeleteGuard(%d) 不该拦：%s", minFilesForDeleteGuard, p.guard)
+	}
+	if len(p.gone) != 4 {
+		t.Fatalf("应删 4 个，实际 %d", len(p.gone))
+	}
+}
+
+// TestPlanDeletionsRatioConfigurable 守住「真要删掉大部分文件时的出路」。
+func TestPlanDeletionsRatioConfigurable(t *testing.T) {
+	// 负数 = 不限制
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: -1}).planDeletions(); p.guard != "" {
+		t.Fatalf("设为负数应当不限制：%s", p.guard)
+	}
+	// 明确调大
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: 0.9}).planDeletions(); p.guard == "" {
+		t.Fatal("100% > 0.9 仍应被拦")
+	}
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: 1.5}).planDeletions(); p.guard != "" {
+		t.Fatalf("阀值 1.5 时 100%% 不该被拦：%s", p.guard)
+	}
+}
+
+// TestPlanDeletionsUnreadableSubtree 守住闸一：读不到的目录下的文件不参与删除判定
+// （掉权限、子目录挂载掉线都属于这种形态），而且记数要能报给用户。
+func TestPlanDeletionsUnreadableSubtree(t *testing.T) {
+	w := newGuardWalker(10, []int{1, 2}, nil, Options{})
+	w.unreadable = []string{"/media/root"} // 整个根都读不到
+	p := w.planDeletions()
+	if len(p.gone) != 0 {
+		t.Fatalf("读不到的根下面的文件不该被删，实际要删 %d 个", len(p.gone))
+	}
+	if p.skippedUnreadable != 8 {
+		t.Fatalf("应记 8 个被跳过，实际 %d", p.skippedUnreadable)
+	}
+}
+
+// TestUnderUnreadablePrefix 守住前缀语义：/a/b 保护 /a/b/c，但**不**保护 /a/bc ——
+// 用朴素 HasPrefix 就会把「隔壁同名开头的目录」也保护起来，那会漏删真删掉的文件。
+func TestUnderUnreadablePrefix(t *testing.T) {
+	w := &walker{unreadable: []string{"/mnt/media/「W」/「连载动画」"}}
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/mnt/media/「W」/「连载动画」", true},
+		{"/mnt/media/「W」/「连载动画」/某番 (2023)/S01E01.mkv", true},
+		{"/mnt/media/「W」/「连载动画2」/某番 (2023)/S01E01.mkv", false},
+		{"/mnt/media/「W」/「完结动画」/某番 (2023)/S01E01.mkv", false},
+	}
+	for _, c := range cases {
+		if got := w.underUnreadable(c.path); got != c.want {
+			t.Errorf("underUnreadable(%q) = %v，期望 %v", c.path, got, c.want)
+		}
+	}
+}
+
+// TestPlanDeletionsIgnoresTombstones 守住「墓碑不重复删、也不该算进存活数」：
+// 存活数是比例闸的分母，把墓碑算进去会把比例冲淡、安全阀形同虚设。
+func TestPlanDeletionsIgnoresTombstones(t *testing.T) {
+	// 100 行里 50 行是墓碑；存活 50 个，本轮一个都没看见 → 100% 必须被拦
+	tomb := make([]int, 0, 50)
+	for i := 1; i <= 50; i++ {
+		tomb = append(tomb, i)
+	}
+	w := newGuardWalker(100, nil, tomb, Options{})
+	p := w.planDeletions()
+	if p.alive != 50 {
+		t.Fatalf("存活数应为 50（不含墓碑），实际 %d", p.alive)
+	}
+	if p.guard == "" {
+		t.Fatal("存活 50 个全没看见，应当被安全阀拦下")
+	}
+}
+
+// TestBadNameReason 是 2026-09-25 那次事故的回归测试。
+//
+// 背景：库是 UTF-8 的，而 SMB / 网盘共享上的文件名不保证是 UTF-8。以前这种名字
+// 会一路带进数据库：先让那个文件插不进 media_files，再让**整批扫描问题**写失败 ——
+// 扫描于是被判成「失败」，后面几百条问题全丢（实测只留下失败前写进去的 63 条）。
+// 现在在遍历时就把它们挑出来跳过，所以这个判断必须可靠。
+func TestBadNameReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		wantNote string // 空串 = 应当被判为「没问题」
+	}{
+		{"中文目录名", "「Z」折纸Se丶", ""},
+		{"带年份的剧集目录", "致不灭的你 (2021)", ""},
+		{"emoji", "🎬 特典", ""},
+		{"组合字符", "バクロ", ""},
+		{"空名字", "", ""},
+		{"CIFS 上真实存在的坏字节", "x\xde y.mkv", "0xde 0x20"},
+		{"被切断的三字节汉字", "\xe3\x80", "0xe3 0x80"},
+		{"合法名字后面跟着坏字节", "白色相簿\xff", "0xff"},
+	}
+	for _, c := range cases {
+		got := badNameReason(c.in)
+		if c.wantNote == "" {
+			if got != "" {
+				t.Errorf("%s：合法名字不该被判为坏名字，实际 %q", c.name, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, c.wantNote) {
+			t.Errorf("%s：说明里应带上坏字节的十六进制 %s，实际 %q", c.name, c.wantNote, got)
+		}
+		// 说明本身要写进数据库，所以必须是合法 UTF-8 —— 否则「提示」本身就会把扫描搞挂。
+		if !utf8.ValidString(got) {
+			t.Errorf("%s：说明本身不是合法 UTF-8：%q", c.name, got)
+		}
+	}
+}
+
+// TestIssueSanitizes 守住「问题清单是入库前的最后一道」：
+// 即使某个调用点忘了净化，写进 w.issues 的文本也必须是合法 UTF-8。
+func TestIssueSanitizes(t *testing.T) {
+	w := &walker{}
+	// 真实的错误信息会把文件名原样带进来（内核/ffprobe 都可能）
+	w.issue("warning", "/mnt/media/x\xde y.mkv", "访问失败: open /mnt/media/x\xde y.mkv: Host is down")
+
+	if len(w.issues) != 1 {
+		t.Fatalf("应当记录 1 条问题，实际 %d", len(w.issues))
+	}
+	got := w.issues[0]
+	if got.Severity != "warning" {
+		t.Errorf("严重级别应原样保留，实际 %q", got.Severity)
+	}
+	if !utf8.ValidString(got.Path) || !utf8.ValidString(got.Message) {
+		t.Errorf("入库前必须净化：path=%q message=%q", got.Path, got.Message)
+	}
+	if !strings.Contains(got.Path, "\uFFFD") {
+		t.Errorf("坏字节应换成 U+FFFD（看得出这里坏过），实际 %q", got.Path)
+	}
+}
+
+// 空 nfo 不能把条目钉成 nfo 状态，否则那条就永远不会被刮削。
 // TestNFOHasMetadata 守住「什么样的 nfo 算人工元数据」：
 // 空 nfo 不能把条目钉成 nfo 状态，否则那条就永远不会被刮削。
 func TestNFOHasMetadata(t *testing.T) {

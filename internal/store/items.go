@@ -97,6 +97,13 @@ type LibraryFile struct {
 	SizeBytes  int64
 	MtimeNS    int64
 	ProbeState string
+	// DeletedAt 非空表示这一行是个「墓碑」（以前扫不见被软删，行还在）。
+	//
+	// 扫描器需要它：同一个路径又出现在磁盘上时，要**复活**这一行而不是当新文件
+	// 去插 —— 插入会撞 path 唯一约束，只能换来一条「该路径已被其它条目占用」的
+	// 假警告，文件永远回不来（2026-09-25 实测：挂载掉线整库软删后，38461 个
+	// 文件就这么被钉死，每轮重扫都重报一次）。
+	DeletedAt *time.Time
 }
 
 // ---------------------------------------------------------------- 条目读写
@@ -418,13 +425,16 @@ func (s *Store) MatchCandidates(ctx context.Context, itemID int64) (json.RawMess
 
 // ---------------------------------------------------------------- 文件读写
 
-// ListLibraryFiles 读取一个库下所有仍有效的文件行（增量扫描的输入）。
+// ListLibraryFiles 读取一个库下所有文件行（增量扫描的输入）。
+//
+// **含已软删的行**（`DeletedAt` 非空）：扫描器要能看出「这条路径以前有、后来被
+// 扫成消失了」，否则文件回来时会被当新文件去插，撞 path 唯一约束。
 func (s *Store) ListLibraryFiles(ctx context.Context, libraryID int64) ([]LibraryFile, error) {
 	rows, err := s.pool.Query(ctx,
-		`select f.id, f.item_id, f.path, f.size_bytes, f.mtime_ns, f.probe_state
+		`select f.id, f.item_id, f.path, f.size_bytes, f.mtime_ns, f.probe_state, f.deleted_at
 		 from media_files f
 		 join media_items i on i.id = f.item_id
-		 where i.library_id = $1 and f.deleted_at is null`, libraryID)
+		 where i.library_id = $1`, libraryID)
 	if err != nil {
 		return nil, fmt.Errorf("读取库文件列表失败: %w", err)
 	}
@@ -433,7 +443,7 @@ func (s *Store) ListLibraryFiles(ctx context.Context, libraryID int64) ([]Librar
 	var out []LibraryFile
 	for rows.Next() {
 		var f LibraryFile
-		if err := rows.Scan(&f.ID, &f.ItemID, &f.Path, &f.SizeBytes, &f.MtimeNS, &f.ProbeState); err != nil {
+		if err := rows.Scan(&f.ID, &f.ItemID, &f.Path, &f.SizeBytes, &f.MtimeNS, &f.ProbeState, &f.DeletedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -462,6 +472,9 @@ func (s *Store) InsertFile(ctx context.Context, itemID int64, path string, size,
 }
 
 // UpdateFileChanged 文件内容变化时更新指纹，并把探测状态重置为待探测。
+// UpdateFileChanged 记录文件内容变化（指纹变了）并重新排队探测。
+//
+// 顺带清 deleted_at：这条路也可能是在「复活」一个软删过的文件。
 func (s *Store) UpdateFileChanged(ctx context.Context, fileID int64, size, mtimeNS int64) error {
 	_, err := s.pool.Exec(ctx,
 		`update media_files
@@ -469,6 +482,25 @@ func (s *Store) UpdateFileChanged(ctx context.Context, fileID int64, size, mtime
 		     deleted_at = null, updated_at = now()
 		 where id = $1`, fileID, size, mtimeNS)
 	return err
+}
+
+// ReviveFile 复活一条被软删过的文件行（同一路径又出现在磁盘上）。
+//
+// 指纹变了就把探测状态退回 pending（内容变了，流信息得重读）；没变则保持原状态，
+// 不白跑一遍 ffprobe。
+func (s *Store) ReviveFile(ctx context.Context, fileID int64, size, mtimeNS int64) error {
+	_, err := s.pool.Exec(ctx,
+		`update media_files
+		 set deleted_at = null,
+		     size_bytes = $2, mtime_ns = $3,
+		     probe_state = case when size_bytes = $2 and mtime_ns = $3 then probe_state else 'pending' end,
+		     probe_error = case when size_bytes = $2 and mtime_ns = $3 then probe_error else '' end,
+		     updated_at = now()
+		 where id = $1`, fileID, size, mtimeNS)
+	if err != nil {
+		return fmt.Errorf("恢复文件记录失败: %w", err)
+	}
+	return nil
 }
 
 // MoveFile 把文件行改挂到新路径（移动识别：保留条目与播放进度）。

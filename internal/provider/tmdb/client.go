@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/hakureiyuyuko/lmby/internal/provider"
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // DefaultBaseURL 是 API 根地址。
@@ -235,7 +236,7 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, out an
 		case resp.StatusCode == http.StatusUnauthorized:
 			return errors.New("TMDB 鉴权失败：Read Access Token / API Key 无效")
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-			lastErr = fmt.Errorf("TMDB 返回 %d: %s", resp.StatusCode, truncate(string(body), 160))
+			lastErr = fmt.Errorf("TMDB 返回 %d: %s", resp.StatusCode, textutil.Truncate(strings.TrimSpace(string(body)), 160))
 			wait := backoff(attempt)
 			if s := resp.Header.Get("Retry-After"); s != "" {
 				if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
@@ -247,7 +248,7 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, out an
 			}
 			continue
 		default:
-			return fmt.Errorf("TMDB 返回 %d: %s", resp.StatusCode, truncate(string(body), 160))
+			return fmt.Errorf("TMDB 返回 %d: %s", resp.StatusCode, textutil.Truncate(strings.TrimSpace(string(body)), 160))
 		}
 	}
 	return fmt.Errorf("TMDB 请求多次失败: %w", lastErr)
@@ -868,12 +869,4 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
-}
-
-func truncate(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }

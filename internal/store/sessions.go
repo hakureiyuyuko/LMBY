@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/hakureiyuyuko/lmby/internal/textutil"
 )
 
 // Session 是一条登录会话。ID 存的是令牌的 sha256，不是令牌明文。
@@ -43,7 +45,7 @@ func (s *Store) CreateSession(ctx context.Context, id string, userID int64, ttl 
 	_, err := s.pool.Exec(ctx,
 		`insert into sessions (id, user_id, expires_at, user_agent, ip)
 		 values ($1, $2, now() + make_interval(secs => $3), $4, nullif($5, '')::inet)`,
-		id, userID, int(ttl.Seconds()), truncate(userAgent, 400), ip)
+		id, userID, int(ttl.Seconds()), textutil.Truncate(userAgent, 400), ip)
 	if err != nil {
 		return fmt.Errorf("创建会话失败: %w", err)
 	}
@@ -157,13 +159,10 @@ func (s *Store) CleanupSessions(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// truncate 按字节安全地截断字符串（用于 User-Agent 这类不受控输入）。
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max]
-}
+// 注意：以前这里有个按字节截断的 truncate（`s[:n]`，注释还写着「按字节安全」——
+// 对 UTF-8 并不安全）。现在统一用 textutil.Truncate：它按 rune 边界切，
+// 不会切出非法字节（User-Agent 长了正好切在汉字中间，以前的后果是
+// 会话写不进库、登录直接失败）。
 
 // CountUserSessions 数某个用户当前有几个有效会话（用户管理界面显示用）。
 func (s *Store) CountUserSessions(ctx context.Context, userID int64) (int, error) {

@@ -530,6 +530,29 @@ function LibraryDetailCard({ libraryId }: { libraryId: number }) {
             <dd>
               {lastScan.stats?.images ?? 0} / {lastScan.stats?.issues ?? 0}
             </dd>
+            {/* 下面三行平时不出现，只在「这一轮结果可能不完整/有文件回来」时冒出来：
+                复活 = 以前被扫成消失、这次又见到的文件；另两项是掉盘相关的安全阀计数，
+                标红是为了让人一眼看到「这次的结果不能全信」。 */}
+            {(lastScan.stats?.revivedFiles ?? 0) > 0 && (
+              <>
+                <dt>{t('复活')}</dt>
+                <dd>{lastScan.stats?.revivedFiles ?? 0}</dd>
+              </>
+            )}
+            {(lastScan.stats?.unreadableRoots ?? 0) > 0 && (
+              <>
+                <dt>{t('读不到的根路径')}</dt>
+                <dd style={{ color: 'var(--danger)' }}>{lastScan.stats?.unreadableRoots ?? 0}</dd>
+              </>
+            )}
+            {(lastScan.stats?.skippedDeletions ?? 0) > 0 && (
+              <>
+                <dt>{t('跳过删除')}</dt>
+                <dd style={{ color: 'var(--danger)' }}>
+                  {t('{n} 个（目录读不到，或超过安全阀）', { n: lastScan.stats?.skippedDeletions ?? 0 })}
+                </dd>
+              </>
+            )}
             {lastScan.error && (
               <>
                 <dt>{t('错误')}</dt>
