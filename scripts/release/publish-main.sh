@@ -44,16 +44,29 @@ echo "== 1. 装交付 README =="
 #     发布时把它装成 README.md（源文件本身不随交付携带）。
 # 先做这一步再做删除：这样一来 docs/README.release.md 也能留在 DROP_FILES 里兜底。
 # 另外，dev → main 的合并里 README.md 可能冲突 —— 随便取哪边都行，这里会覆盖掉。
-if [[ -f docs/README.release.md ]]; then
+SRC_README=docs/README.release.md
+TMP_README=""
+if [[ ! -f "$SRC_README" ]] && git cat-file -e dev:"$SRC_README" 2>/dev/null; then
+  # 源文件不在工作区，但 dev 上有：这是**第二次以后**发版的常态 ——
+  # 「合并 dev → main」时，它会被判成「main 侧删除」（dev 上没再改过它），
+  # 于是工作区里没有它。交付 README 不能因此退回开发者版（v1.0.2 差点这么发出去），
+  # 直接从 dev 取。
+  TMP_README=$(mktemp)
+  git show dev:"$SRC_README" > "$TMP_README"
+  SRC_README="$TMP_README"
+  echo "   工作区里没有 docs/README.release.md（被合并算成 main 侧删除），已从 dev 取"
+fi
+if [[ -f "$SRC_README" ]]; then
   if [[ $DRY == 1 ]]; then
-    echo "   会用 docs/README.release.md 覆盖 README.md，然后删掉那个源文件"
+    echo "   会用 $SRC_README 覆盖 README.md"
   else
-    cp docs/README.release.md README.md
-    echo "   已用 docs/README.release.md 覆盖 README.md（$(wc -l < README.md) 行）"
+    cp "$SRC_README" README.md
+    echo "   已用交付 README 覆盖 README.md（$(wc -l < README.md) 行）"
   fi
 else
-  echo "   注意：没有 docs/README.release.md，跳过（README.md 保持原样）"
+  echo "   注意：dev 上也没有 docs/README.release.md，跳过（README.md 保持原样）"
 fi
+[[ -n "$TMP_README" ]] && rm -f "$TMP_README"
 
 echo
 echo "== 2. 删掉不随交付携带的文档与验收脚本 =="
