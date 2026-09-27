@@ -42,6 +42,11 @@ type Manager struct {
 	// minFileSize 是「小于该字节数不当视频」的下限（0 = 用 scanner 的内置默认）。
 	// 由 main 从 config 的 [scan] min_file_size 注入。
 	minFileSize int64
+
+	// maxDeleteRatio 是「一次扫描最多能删掉存活文件的比例」安全阀
+	//（<=0 = 用 scanner 的内置默认；负数 = 不限制）。
+	// 由 main 从 config 的 [scan] max_delete_ratio 注入。
+	maxDeleteRatio float64
 }
 
 // SetMinFileSize 设置文件大小下限（0 = 用 scanner 的内置默认）。
@@ -49,6 +54,9 @@ type Manager struct {
 // 用 setter 而不是改构造函数：这只是一个旋钮，不想为它把 main/api 的
 // 构造链动一遍（跟 images.SetOverlay / scrape.SetOverlay 一个路子）。
 func (m *Manager) SetMinFileSize(n int64) { m.minFileSize = n }
+
+// SetMaxDeleteRatio 设置删除比例安全阀（<=0 = 用 scanner 的内置默认，负数 = 不限制）。
+func (m *Manager) SetMaxDeleteRatio(r float64) { m.maxDeleteRatio = r }
 
 // NewManager 创建扫描管理器。
 func NewManager(st *store.Store, log *slog.Logger) *Manager {
@@ -128,6 +136,8 @@ func (m *Manager) run(ctx context.Context, lib store.Library, runID int64, trigg
 		RefreshMetadata: refreshMetadata,
 		// 「小于该字节数不当视频」的下限由配置给（未配置时由 scanner 用内置默认）
 		MinFileSize: m.minFileSize,
+		// 删除比例安全阀：网盘掉线时挡住「把整库当成消失了」（<=0 用内置默认）
+		MaxDeleteRatio: m.maxDeleteRatio,
 		OnProgress: func(p scanner.Progress) {
 			m.mu.Lock()
 			if r, ok := m.current[lib.ID]; ok {
@@ -239,16 +249,20 @@ func statsMap(s scanner.Stats) map[string]any {
 		"movedFiles":   s.MovedFiles,
 		"deletedFiles": s.DeletedFiles,
 		"unchanged":    s.Unchanged,
-		"itemsNew":     s.ItemsNew,
-		"seriesNew":    s.SeriesNew,
-		"seasonsNew":   s.SeasonsNew,
-		"episodesNew":  s.EpisodesNew,
-		"moviesNew":    s.MoviesNew,
-		"nfoRead":      s.NFORead,
-		"images":       s.Images,
-		"subtitles":    s.Subtitles,
-		"unrecognized": s.Unrecognized,
-		"issues":       s.Issues,
-		"elapsedMs":    s.ElapsedMS,
+		// 复活 = 以前被扫成消失、这轮又见到的文件；跳过删除 = 安全阀/读不到导致的「本该删但没删」。
+		"revivedFiles":     s.RevivedFiles,
+		"skippedDeletions": s.SkippedDeletions,
+		"unreadableRoots":  s.UnreadableRoots,
+		"itemsNew":         s.ItemsNew,
+		"seriesNew":        s.SeriesNew,
+		"seasonsNew":       s.SeasonsNew,
+		"episodesNew":      s.EpisodesNew,
+		"moviesNew":        s.MoviesNew,
+		"nfoRead":          s.NFORead,
+		"images":           s.Images,
+		"subtitles":        s.Subtitles,
+		"unrecognized":     s.Unrecognized,
+		"issues":           s.Issues,
+		"elapsedMs":        s.ElapsedMS,
 	}
 }

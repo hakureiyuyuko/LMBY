@@ -1,13 +1,185 @@
 package scanner
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/hakureiyuyuko/lmby/internal/metadata"
 	"github.com/hakureiyuyuko/lmby/internal/parser"
+	"github.com/hakureiyuyuko/lmby/internal/store"
 )
+
+// newGuardWalker 造一个「库里有 n 个文件」的 walker，便于单测删除计划。
+//
+// seen / tombstones 是 1-based 的下标集合：前者 = 本轮在磁盘上看见了，
+// 后者 = 这行早就是墓碑（软删过）。路径统一是 /media/root/Fxxx.mkv。
+func newGuardWalker(n int, seen, tombstones []int, opts Options) *walker {
+	w := &walker{
+		existingByPath:  map[string]store.LibraryFile{},
+		seen:            map[int64]bool{},
+		unreadableRoots: map[string]bool{},
+		opts:            opts,
+	}
+	seenSet := map[int]bool{}
+	for _, i := range seen {
+		seenSet[i] = true
+	}
+	tombSet := map[int]bool{}
+	for _, i := range tombstones {
+		tombSet[i] = true
+	}
+	for i := 1; i <= n; i++ {
+		f := store.LibraryFile{
+			ID: int64(i), ItemID: int64(i), Path: guardTestPath(i), SizeBytes: 1000, MtimeNS: 1,
+		}
+		if tombSet[i] {
+			deleted := time.Unix(1, 0)
+			f.DeletedAt = &deleted
+		}
+		w.existingByPath[f.Path] = f
+		if seenSet[i] {
+			w.seen[int64(i)] = true
+		}
+	}
+	return w
+}
+
+func guardTestPath(i int) string { return fmt.Sprintf("/media/root/F%03d.mkv", i) }
+
+// TestPlanDeletionsNormal 是正常增删：没看见的就该删，不该触发任何闸。
+func TestPlanDeletionsNormal(t *testing.T) {
+	// 30 个文件，看见了 28 个（要删 2 个 = 6.7% < 20% 的阀值）
+	seen := make([]int, 0, 28)
+	for i := 1; i <= 28; i++ {
+		seen = append(seen, i)
+	}
+	w := newGuardWalker(30, seen, nil, Options{})
+	p := w.planDeletions()
+	if p.guard != "" {
+		t.Fatalf("正常删除不该触发安全阀：%s", p.guard)
+	}
+	if len(p.gone) != 2 {
+		t.Fatalf("应删 2 个，实际 %d", len(p.gone))
+	}
+	if p.alive != 30 {
+		t.Fatalf("存活数应为 30，实际 %d", p.alive)
+	}
+}
+
+// TestPlanDeletionsRatioGuard 是 2026-09-25 那次事故的回归点：
+// 「网盘掉线→目录读成空的」表现为「要删掉接近 100%」，必须一个都不删。
+func TestPlanDeletionsRatioGuard(t *testing.T) {
+	w := newGuardWalker(100, nil, nil, Options{}) // 一个都没看见
+	p := w.planDeletions()
+	if p.guard == "" {
+		t.Fatal("100% 删除必须被安全阀拦下")
+	}
+	if len(p.gone) != 0 {
+		t.Fatalf("拦截后一个都不该删，实际 %d", len(p.gone))
+	}
+	if p.wouldDelete != 100 {
+		t.Fatalf("仍要报出「本该删 100 个」，实际 %d", p.wouldDelete)
+	}
+	if p.alive != 100 {
+		t.Fatalf("存活数应为 100，实际 %d", p.alive)
+	}
+
+	// 恰好等于阀值不算超（20% 不拦，21% 拦）
+	seen := make([]int, 0, 80)
+	for i := 1; i <= 80; i++ {
+		seen = append(seen, i)
+	}
+	if p := newGuardWalker(100, seen, nil, Options{}).planDeletions(); p.guard != "" {
+		t.Fatalf("正好 20%% 不该被拦：%s", p.guard)
+	}
+	seen = seen[:79]
+	if p := newGuardWalker(100, seen, nil, Options{}).planDeletions(); p.guard == "" {
+		t.Fatal("21%% 应当被拦")
+	}
+}
+
+// TestPlanDeletionsSmallLibraryNotGuarded 守住「小库不该被比例卡住」：
+// 家庭照片库删两个就少一半，那是正常运维，不是掉盘。
+func TestPlanDeletionsSmallLibraryNotGuarded(t *testing.T) {
+	w := newGuardWalker(4, nil, nil, Options{}) // 4 个全没看见，比例 100%
+	p := w.planDeletions()
+	if p.guard != "" {
+		t.Fatalf("未达到 minFilesForDeleteGuard(%d) 不该拦：%s", minFilesForDeleteGuard, p.guard)
+	}
+	if len(p.gone) != 4 {
+		t.Fatalf("应删 4 个，实际 %d", len(p.gone))
+	}
+}
+
+// TestPlanDeletionsRatioConfigurable 守住「真要删掉大部分文件时的出路」。
+func TestPlanDeletionsRatioConfigurable(t *testing.T) {
+	// 负数 = 不限制
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: -1}).planDeletions(); p.guard != "" {
+		t.Fatalf("设为负数应当不限制：%s", p.guard)
+	}
+	// 明确调大
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: 0.9}).planDeletions(); p.guard == "" {
+		t.Fatal("100% > 0.9 仍应被拦")
+	}
+	if p := newGuardWalker(100, nil, nil, Options{MaxDeleteRatio: 1.5}).planDeletions(); p.guard != "" {
+		t.Fatalf("阀值 1.5 时 100%% 不该被拦：%s", p.guard)
+	}
+}
+
+// TestPlanDeletionsUnreadableSubtree 守住闸一：读不到的目录下的文件不参与删除判定
+// （掉权限、子目录挂载掉线都属于这种形态），而且记数要能报给用户。
+func TestPlanDeletionsUnreadableSubtree(t *testing.T) {
+	w := newGuardWalker(10, []int{1, 2}, nil, Options{})
+	w.unreadable = []string{"/media/root"} // 整个根都读不到
+	p := w.planDeletions()
+	if len(p.gone) != 0 {
+		t.Fatalf("读不到的根下面的文件不该被删，实际要删 %d 个", len(p.gone))
+	}
+	if p.skippedUnreadable != 8 {
+		t.Fatalf("应记 8 个被跳过，实际 %d", p.skippedUnreadable)
+	}
+}
+
+// TestUnderUnreadablePrefix 守住前缀语义：/a/b 保护 /a/b/c，但**不**保护 /a/bc ——
+// 用朴素 HasPrefix 就会把「隔壁同名开头的目录」也保护起来，那会漏删真删掉的文件。
+func TestUnderUnreadablePrefix(t *testing.T) {
+	w := &walker{unreadable: []string{"/mnt/media/「W」/「连载动画」"}}
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/mnt/media/「W」/「连载动画」", true},
+		{"/mnt/media/「W」/「连载动画」/某番 (2023)/S01E01.mkv", true},
+		{"/mnt/media/「W」/「连载动画2」/某番 (2023)/S01E01.mkv", false},
+		{"/mnt/media/「W」/「完结动画」/某番 (2023)/S01E01.mkv", false},
+	}
+	for _, c := range cases {
+		if got := w.underUnreadable(c.path); got != c.want {
+			t.Errorf("underUnreadable(%q) = %v，期望 %v", c.path, got, c.want)
+		}
+	}
+}
+
+// TestPlanDeletionsIgnoresTombstones 守住「墓碑不重复删、也不该算进存活数」：
+// 存活数是比例闸的分母，把墓碑算进去会把比例冲淡、安全阀形同虚设。
+func TestPlanDeletionsIgnoresTombstones(t *testing.T) {
+	// 100 行里 50 行是墓碑；存活 50 个，本轮一个都没看见 → 100% 必须被拦
+	tomb := make([]int, 0, 50)
+	for i := 1; i <= 50; i++ {
+		tomb = append(tomb, i)
+	}
+	w := newGuardWalker(100, nil, tomb, Options{})
+	p := w.planDeletions()
+	if p.alive != 50 {
+		t.Fatalf("存活数应为 50（不含墓碑），实际 %d", p.alive)
+	}
+	if p.guard == "" {
+		t.Fatal("存活 50 个全没看见，应当被安全阀拦下")
+	}
+}
 
 // TestBadNameReason 是 2026-09-25 那次事故的回归测试。
 //

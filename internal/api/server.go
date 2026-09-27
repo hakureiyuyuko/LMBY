@@ -87,6 +87,8 @@ func newScanManager(cfg *config.Config, st *store.Store, log *slog.Logger) *scan
 	m := scan.NewManager(st, log)
 	// 0 时留给 scanner 的内置默认（见 scanner.defaultMinFileSize）
 	m.SetMinFileSize(cfg.Scan.MinFileSize)
+	// 同样 0 时用内置默认；0.2 = 「一次扫描最多删掉 20% 存活文件」（见 config.ScanConfig）
+	m.SetMaxDeleteRatio(cfg.Scan.MaxDeleteRatio)
 	return m
 }
 

@@ -242,6 +242,13 @@ type UpdateConfig struct {
 	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
+// defaultMaxDeleteRatio 是「一次扫描最多能删掉存活文件的比例」的默认值。
+//
+// 0.2 的取法：正常增删改远低于这个量级；而「网盘掉线导致整目录读不到」通常是
+// 接近 100%。中间留出很宽的余地，不会误伤正常的媒体运维（真删掉两成以上文件，
+// 本来就该有人看一眼）。
+const defaultMaxDeleteRatio = 0.2
+
 // ScanConfig 是扫描器的小旋钮。
 type ScanConfig struct {
 	// MinFileSize 是「小于该字节数的文件不当视频」的下限（0 = 用内置默认）。
@@ -257,6 +264,17 @@ type ScanConfig struct {
 	// （`libraries.scan_interval_minutes`，界面上可改）。默认 60 秒：
 	// 对「每天扫一次」这种计划精度足够了，也不至于频繁查库。
 	ScheduleTickSeconds int `toml:"schedule_tick_seconds"`
+
+	// MaxDeleteRatio 是「一次扫描最多能删掉存活文件的比例」安全阀（0 = 用内置默认 0.2）。
+	//
+	// 为什么需要：网络盘挂载会掉线。掉线时目录可能**整棵读不到**，也可能读成**空的** ——
+	// 两种情况下「本轮没看见」都不等于「文件没了」。没有这道闸，一次掉线就会把整库
+	// 标记成消失（2026-09-25 实测：38437 个文件被软删、扫描还报成功）。
+	// 超过这个比例就**一个文件都不删**并把扫描判为失败，让人先看一眼。
+	//
+	// 真要删掉大部分文件（比如换了媒体目录），把它设成负数（-1 = 不限制）.
+	// 另外「某个根路径完全读不到」是硬规则，跟这个比例无关，不受它控制。
+	MaxDeleteRatio float64 `toml:"max_delete_ratio"`
 }
 
 // Default 返回带默认值的配置。
@@ -305,6 +323,7 @@ func Default() *Config {
 		// 调度器每 60 秒看一眼有没有库到期。
 		Scan: ScanConfig{
 			ScheduleTickSeconds: 60,
+			MaxDeleteRatio:      defaultMaxDeleteRatio,
 		},
 		// 审计日志：默认保留一年（启动时清理）。
 		Audit: AuditConfig{
