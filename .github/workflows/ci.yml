@@ -89,4 +89,11 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # 钉死版本，不用 latest：
+          #   ① `latest` 每次都要去 GitHub 解析版本清单 + 过 action 缓存服务，而这台
+          #      runner 连 GitHub 的 artifact / cache 服务会「ESTAB 之后不再回数据」
+          #      （同 setup-go 那个坑，见上面注释），实测会挂 6 分钟以上再失败；
+          #   ② 版本钉死后本地开发用同一个版本，lint 结果可复现（本地是 2.13.2）。
+          # 升级时改这里 + 本地同步升级。
+          # 版本写法要带 v 前缀（action 的参数格式），且与 tag 上的 v2.13.2 对应。
+          version: v2.13.2

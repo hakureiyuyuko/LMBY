@@ -63,16 +63,21 @@ type Stats struct {
 	SkippedDeletions int `json:"skippedDeletions"`
 	// UnreadableRoots 是读不到的库根路径数（网盘掉线的典型症状）。
 	UnreadableRoots int `json:"unreadableRoots"`
-	ItemsNew        int `json:"itemsNew"`
-	SeriesNew       int `json:"seriesNew"`
-	SeasonsNew      int `json:"seasonsNew"`
-	EpisodesNew     int `json:"episodesNew"`
-	MoviesNew       int `json:"moviesNew"`
-	NFORead         int `json:"nfoRead"`
-	Images          int `json:"images"`
-	Subtitles       int `json:"subtitles"`
-	Unrecognized    int `json:"unrecognized"`
-	Issues          int `json:"issues"`
+	// ClaimedItems 是本轮「按相似标题认领「的老条目数（标题被元数据改写、
+	// 身份又没补上时走的那一级，见 ensureDedup 的③）。
+	ClaimedItems int `json:"claimedItems"`
+	// BackfilledKeys 是本轮补上扫描身份的老条目数（一次性，之后为 0）。
+	BackfilledKeys int `json:"backfilledKeys"`
+	ItemsNew       int `json:"itemsNew"`
+	SeriesNew      int `json:"seriesNew"`
+	SeasonsNew     int `json:"seasonsNew"`
+	EpisodesNew    int `json:"episodesNew"`
+	MoviesNew      int `json:"moviesNew"`
+	NFORead        int `json:"nfoRead"`
+	Images         int `json:"images"`
+	Subtitles      int `json:"subtitles"`
+	Unrecognized   int `json:"unrecognized"`
+	Issues         int `json:"issues"`
 	// ProbesEnqueued 是本轮扫描后入队的探测任务数。
 	ProbesEnqueued int64 `json:"probesEnqueued"`
 	ElapsedMS      int64 `json:"elapsedMs"`
@@ -163,6 +168,10 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 	if err := w.loadExisting(ctx); err != nil {
 		return w.stats, err
 	}
+
+	// 给迁移前建的老条目补扫描身份（一次性、可重入）。
+	// 必须在遍历之前：否则第一轮仍按「标题 + 年份」查，而那个键可能已经被元数据改过。
+	w.backfillScanKeys(ctx)
 
 	for _, p := range lib.Paths {
 		if err := w.walkPath(ctx, strings.TrimSuffix(p.Path, "/")); err != nil {
@@ -283,8 +292,7 @@ type walker struct {
 	// dirMetaChecked 记录重扫时已补过目录级 nfo 的条目（同上，避免重复查库）。
 	dirMetaChecked map[int64]bool
 
-	// 本轮读不到的路径（网盘掉线时 WalkDir 会在根或子目录上报错）。
-	//
+	// 本轮读不到的路径（网盘掉线时 WalkDir 会在根或子目录上报错）。	//
 	// 它存在的唯一理由：**「本轮没看见」不等于「文件没了」**。
 	// 读不到的子树一律不参与删除判定，否则一次掉线就把人家的库清空了。
 	unreadable []string
@@ -297,6 +305,9 @@ type walker struct {
 
 	processed  int
 	lastReport time.Time
+
+	// identityIdx 是「认领老条目」用的候选表（kind → 条目），用时才拉一次。
+	identityIdx map[string][]identityCandidate
 }
 
 func (w *walker) issue(severity, path, msg string) {
@@ -837,11 +848,26 @@ func (w *walker) ensureExtraItem(ctx context.Context, path, dir string, res pars
 
 // ensureDedup 按（库, 标题, 年份）找或建 series/movie 条目。
 func (w *walker) ensureDedup(ctx context.Context, cache map[string]int64, kind, title string, year int) (int64, bool, error) {
-	key := strings.ToLower(title) + "|" + itoa(year)
+	key := scanKey(title, year)
+	if key == "" {
+		// 标题解析不出来（极端情况）：退回老键，行为与以前一致
+		key = strings.ToLower(strings.TrimSpace(title)) + "|" + itoa(year)
+	}
 	if id, ok := cache[key]; ok {
 		return id, false, nil
 	}
 
+	// ① 扫描身份：稳定键，元数据怎么改标题 / 年份都不影响它。
+	//    命中说明「这个目录以前见过」，绝不会再造一份（这正是本次修的 bug）。
+	if id, err := w.st.FindItemByScanKey(ctx, w.lib.ID, kind, key); err == nil {
+		cache[key] = id
+		return id, false, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return 0, false, err
+	}
+
+	// ② 按（标题, 年份）精确找：兼容迁移前建的老条目（那时还没 scan_key），
+	//    命中后顺手把身份补上，下次就走 ① 了。
 	var (
 		id  int64
 		err error
@@ -851,27 +877,115 @@ func (w *walker) ensureDedup(ctx context.Context, cache map[string]int64, kind, 
 	} else {
 		id, err = w.st.FindSeriesID(ctx, w.lib.ID, title, int32Ptr(year))
 	}
-
-	created := false
-	if errors.Is(err, store.ErrNotFound) {
-		id, err = w.st.InsertItem(ctx, store.NewItem{
-			LibraryID: w.lib.ID, Kind: kind, Title: title, Year: int32Ptr(year),
-		})
-		if err == nil {
-			created = true
-			switch kind {
-			case "movie":
-				w.stats.MoviesNew++
-			case "series":
-				w.stats.SeriesNew++
-			}
-		}
+	if err == nil {
+		w.setScanKey(ctx, id, key)
+		cache[key] = id
+		return id, false, nil
 	}
-	if err != nil {
+	if !errors.Is(err, store.ErrNotFound) {
 		return 0, false, err
 	}
-	cache[key] = id
-	return id, created, nil
+
+	// ③ 标题已被元数据改写、身份也没补上的老条目：
+	//    只在「恰好一个候选像同一部」时认领它，宁可漏认也不错认。
+	if c, ok := w.claimCandidate(kind, title, year); ok {
+		w.setScanKey(ctx, c.ID, key)
+		cache[key] = c.ID
+		w.stats.ClaimedItems++
+		return c.ID, false, nil
+	}
+
+	// ④ 真的没见过 → 新建（带着身份建）
+	id, err = w.st.InsertItem(ctx, store.NewItem{
+		LibraryID: w.lib.ID, Kind: kind, Title: title, Year: int32Ptr(year), ScanKey: key,
+	})
+	if err == nil {
+		switch kind {
+		case "movie":
+			w.stats.MoviesNew++
+		case "series":
+			w.stats.SeriesNew++
+		}
+		cache[key] = id
+		return id, true, nil
+	}
+	return 0, false, err
+}
+
+// setScanKey 补写条目的扫描身份。
+//
+// 失败**不让本轮扫描失败**：身份补不上只是退到「按标题查」的老行为，
+// 下一轮还会走 ②③ 再补一次。
+func (w *walker) setScanKey(ctx context.Context, itemID int64, key string) {
+	_ = w.st.SetItemScanKey(ctx, itemID, key)
+}
+
+// claimCandidate 在库里已有的剧集 / 电影中找「唯一像同一部」的那一个（查找顺序第③级）。
+//
+// 候选表只在第一次需要时拉一次，整轮扫描复用。
+//
+// 只考虑**还没有身份**的条目：已经有 scan_key 的说明它被某个目录认领过，就是另一部，
+// 不该被这个目录抢走（否则「同一部作品分散在两个目录」会互相抢）。
+func (w *walker) claimCandidate(kind, title string, year int) (identityCandidate, bool) {
+	if w.identityIdx == nil {
+		idx := map[string][]identityCandidate{}
+		if list, err := w.st.ListItemIdentities(context.Background(), w.lib.ID); err == nil {
+			for _, it := range list {
+				idx[it.Kind] = append(idx[it.Kind], identityCandidate{
+					ID: it.ID, Title: it.Title, Year: it.Year, ScanKey: it.ScanKey,
+				})
+			}
+		}
+		w.identityIdx = idx
+	}
+	var cands []identityCandidate
+	for _, c := range w.identityIdx[kind] {
+		if c.ScanKey == "" {
+			cands = append(cands, c)
+		}
+	}
+	return pickClaim(cands, title, year)
+}
+
+// backfillScanKeys 给还没有扫描身份的老条目补上身份（一次性、可重入）。
+//
+// 必须在遍历**之前**跑：否则第一轮仍然按「标题 + 年份」去查，而那个键可能已经被
+// nfo / 刮削改过 —— 那就又造重复了。
+func (w *walker) backfillScanKeys(ctx context.Context) {
+	rows, err := w.st.PendingScanKeyItems(ctx, w.lib.ID)
+	if err != nil {
+		w.issue("warning", "", "读取待补扫描身份的条目失败: "+err.Error())
+		return
+	}
+	for _, r := range rows {
+		key := w.scanKeyForPath(r.Kind, r.SamplePath)
+		if key == "" {
+			continue
+		}
+		if err := w.st.SetItemScanKey(ctx, r.ItemID, key); err != nil {
+			w.issue("warning", "", "回填扫描身份失败: "+err.Error())
+			continue
+		}
+		w.stats.BackfilledKeys++
+	}
+}
+
+// scanKeyForPath 按扫描器建库时的同一套算法，从文件路径反推条目身份。
+//
+// 必须与 ensureEpisodeItem / ensureMovieItem 一致（同样的 resolve + ParseVideo 入参），
+// 否则回填出来的键与之后遍历时算出来的键对不上，等于白补。
+func (w *walker) scanKeyForPath(kind, path string) string {
+	dir := filepath.Dir(path)
+	if kind != "series" && kind != "movie" {
+		return ""
+	}
+	res := parser.ParseVideo(path, w.resolve(w.rootOf(path), dir).hint(w.lib.Kind))
+	title := res.Title
+	if title == "" {
+		// 与 ensureEpisodeItem / ensureMovieItem 的兜底一致：用目录名
+		title = filepath.Base(dir)
+	}
+	return scanKey(title, res.Year)
 }
 
 // seriesDirOf 找剧集目录（季目录的父目录），用于把目录级图片挂到剧集上。
