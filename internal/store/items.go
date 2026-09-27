@@ -65,6 +65,9 @@ type NewItem struct {
 	ExtraType  string
 	Title      string
 	Year       *int32
+	// ScanKey 是扫描器的身份（见 migrations/0019_item_scan_key.sql）。
+	// 只有剧集 / 电影这类「顶层」条目需要它；季与集传空。
+	ScanKey string
 }
 
 // ItemMeta 是从 nfo 或刮削结果得到的元数据集合。
@@ -114,15 +117,121 @@ func (s *Store) InsertItem(ctx context.Context, in NewItem) (int64, error) {
 	err := s.pool.QueryRow(ctx,
 		`insert into media_items
 		   (library_id, kind, parent_id, series_id, season_number, episode_number,
-		    episode_end, extra_type, title, year)
-		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		    episode_end, extra_type, title, year, scan_key)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 returning id`,
 		in.LibraryID, in.Kind, in.ParentID, in.SeriesID, in.SeasonNum,
-		in.EpisodeNum, in.EpisodeEnd, in.ExtraType, in.Title, in.Year).Scan(&id)
+		in.EpisodeNum, in.EpisodeEnd, in.ExtraType, in.Title, in.Year, in.ScanKey).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("插入条目失败: %w", err)
 	}
 	return id, nil
+}
+
+// FindItemByScanKey 按扫描器身份查条目（查找顺序的第①级）。
+//
+// 为什么优先级最高：它是**稳定**的 —— 元数据改标题 / 改年份都不影响它。
+func (s *Store) FindItemByScanKey(ctx context.Context, libraryID int64, kind, key string) (int64, error) {
+	if key == "" {
+		return 0, ErrNotFound
+	}
+	var id int64
+	err := s.pool.QueryRow(ctx,
+		`select id from media_items
+		 where library_id = $1 and kind = $2 and scan_key = $3
+		 limit 1`, libraryID, kind, key).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("查询条目失败: %w", err)
+	}
+	return id, nil
+}
+
+// SetItemScanKey 补写扫描器身份（认领老条目 / 回填时用）。
+//
+// **只由扫描器调用** —— 元数据那几条写库路径（applyItemMetaSQL / 刮削 / 人工编辑）
+// 一律不碰 scan_key，否则身份又跟着展示字段跑了。
+func (s *Store) SetItemScanKey(ctx context.Context, itemID int64, key string) error {
+	if key == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`update media_items set scan_key = $2, updated_at = now() where id = $1`, itemID, key)
+	if err != nil {
+		return fmt.Errorf("写入扫描身份失败: %w", err)
+	}
+	return nil
+}
+
+// ItemIdentity 是「认领候选」用的最小条目信息。
+type ItemIdentity struct {
+	ID      int64
+	Kind    string
+	Title   string
+	Year    *int32
+	ScanKey string
+}
+
+// ListItemIdentities 取出一个库里所有剧集 / 电影的身份信息（认领候选）。
+//
+// 一张库里的顶层条目最多几干条，一次查询拿回来在内存里比对比逐条 SQL 模糊查询可靠得多
+// （标题相似度是 Go 侧算的 —— SQL 里做不了 CJK 的字符类处理）。
+func (s *Store) ListItemIdentities(ctx context.Context, libraryID int64) ([]ItemIdentity, error) {
+	rows, err := s.pool.Query(ctx,
+		`select id, kind, title, year, scan_key from media_items
+		 where library_id = $1 and kind in ('series','movie') and deleted_at is null`, libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("读取条目身份失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ItemIdentity
+	for rows.Next() {
+		var it ItemIdentity
+		if err := rows.Scan(&it.ID, &it.Kind, &it.Title, &it.Year, &it.ScanKey); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// ScanKeyBackfill 是「待补 scan_key」的一条：顶层条目 + 它的一个样本文件路径。
+type ScanKeyBackfill struct {
+	ItemID     int64
+	Kind       string
+	SamplePath string
+}
+
+// PendingScanKeyItems 找出还没有扫描身份（scan_key 为空）但有文件的剧集 / 电影。
+//
+// 样本路径用来反推扫描器当初会用的那个身份：剧集取它任一集的文件所在目录，
+// 电影取它自己的文件路径 —— 都与扫描器建库时的解析输入一致。
+func (s *Store) PendingScanKeyItems(ctx context.Context, libraryID int64) ([]ScanKeyBackfill, error) {
+	rows, err := s.pool.Query(ctx,
+		`select i.id, i.kind, min(f.path)
+		 from media_items i
+		 join media_items c on (c.series_id = i.id or c.id = i.id)
+		 join media_files f on f.item_id = c.id
+		 where i.library_id = $1 and i.kind in ('series','movie')
+		   and i.scan_key = '' and i.deleted_at is null
+		 group by i.id, i.kind`, libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("读取待补身份条目失败: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ScanKeyBackfill
+	for rows.Next() {
+		var r ScanKeyBackfill
+		if err := rows.Scan(&r.ItemID, &r.Kind, &r.SamplePath); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // applyItemMetaSQL 是写入元数据的语句（供 nfo 导入、刮削与人工指定候选使用）。
