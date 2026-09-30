@@ -96,6 +96,63 @@ func TestBestOfKindPriority(t *testing.T) {
 	}
 }
 
+// TestBestOfKindKindAliases 钉住「宽幅图两种叫法互相可见」这条规则。
+//
+// 背景（真实现场的症状）：扫描器把 fanart.jpg / backdrop.jpg 一律登记成 kind=fanart，
+// 而界面请求的是 kind=backdrop。改名之前这里是严格相等匹配，本地那张宽幅图
+// 永远命不中 —— 表现就是「明明有图，还是去 TMDB 回源」。
+func TestBestOfKindKindAliases(t *testing.T) {
+	localFanart := store.Image{ID: 4, Kind: "fanart", Path: "/m/fanart.jpg", Source: store.ImageSourceLocal}
+	localBackdrop := store.Image{ID: 5, Kind: "backdrop", Path: "/m/backdrop.jpg", Source: store.ImageSourceLocal}
+	remoteBackdrop := store.Image{ID: 6, Kind: "backdrop", Path: "/cache/bd.jpg", Source: store.ImageSourceRemote}
+	remoteFanart := store.Image{ID: 7, Kind: "fanart", Path: "/cache/fa.jpg", Source: store.ImageSourceRemote}
+
+	cases := []struct {
+		name   string
+		rows   []store.Image
+		kind   string
+		wantID int64
+	}{
+		{"本地 fanart 能被 backdrop 请求命中", []store.Image{localFanart}, "backdrop", 4},
+		{"本地 backdrop 能被 fanart 请求命中", []store.Image{localBackdrop}, "fanart", 5},
+		{"本地 fanart 压过远程 backdrop（本地优先不受别名影响）", []store.Image{localFanart, remoteBackdrop}, "backdrop", 4},
+		{"都是远程时 backdrop 请求优先本名", []store.Image{remoteFanart, remoteBackdrop}, "backdrop", 6},
+		{"都是远程时 fanart 请求优先本名", []store.Image{remoteFanart, remoteBackdrop}, "fanart", 7},
+	}
+	for _, c := range cases {
+		got := bestOfKind(c.rows, c.kind)
+		if got == nil || got.ID != c.wantID {
+			t.Errorf("%s：bestOfKind(%s) = %+v，期望 id=%d", c.name, c.kind, got, c.wantID)
+		}
+	}
+}
+
+// TestKindCandidates 别名展开本身（表里没写的 kind 只认自己）。
+func TestKindCandidates(t *testing.T) {
+	cases := []struct {
+		kind string
+		want []string
+	}{
+		{"backdrop", []string{"backdrop", "fanart"}},
+		{"fanart", []string{"fanart", "backdrop"}},
+		{"poster", []string{"poster"}},
+		{"thumb", []string{"thumb"}},
+	}
+	for _, c := range cases {
+		got := kindCandidates(c.kind)
+		if len(got) != len(c.want) {
+			t.Errorf("kindCandidates(%s) = %v，期望 %v", c.kind, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("kindCandidates(%s) = %v，期望 %v", c.kind, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestRenderScalesAndCaches(t *testing.T) {
 	dir := t.TempDir()
 	pipe, err := newPipeline(dir, 32, testLogger())
@@ -261,6 +318,42 @@ func TestServicePrefersLocalOverRemote(t *testing.T) {
 	}
 	if fetched != 0 {
 		t.Errorf("本地有图就不该回源，实际请求了 %d 次", fetched)
+	}
+}
+
+// TestServiceBackdropUsesLocalFanart 是上面那个 bug 的端到端复现：
+// 目录里只有 fanart.jpg（扫描器登记成 kind=fanart），界面请求 backdrop 时
+// 必须直接把本地图给出去，一次都不该打到 provider。
+func TestServiceBackdropUsesLocalFanart(t *testing.T) {
+	cacheDir := t.TempDir()
+	local := filepath.Join(cacheDir, "fanart.png")
+	writePNG(t, local, 1600, 900)
+
+	var fetched int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched++
+		http.Error(w, "不该被调用", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	st := &fakeStore{
+		item:   &store.Item{ID: 7, Kind: "series", ProviderIDs: map[string]string{"tmdb": "198375"}},
+		images: []store.Image{{ID: 1, ItemID: 7, Kind: "fanart", Path: local, Source: store.ImageSourceLocal}},
+	}
+	svc, err := NewService(st, &fakeProvider{posterPath: "/p.png", imageBase: srv.URL}, filepath.Join(cacheDir, "images"), 32, testLogger())
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	out, err := svc.Open(context.Background(), st.item, "backdrop", Request{Width: 800})
+	if err != nil {
+		t.Fatalf("Open(backdrop): %v", err)
+	}
+	if out.Width != 800 || out.Height != 450 {
+		t.Errorf("本地 fanart 当 backdrop 输出 = %dx%d，期望 800x450", out.Width, out.Height)
+	}
+	if fetched != 0 {
+		t.Errorf("本地有宽幅图就不该回源，实际请求了 %d 次", fetched)
 	}
 }
 
