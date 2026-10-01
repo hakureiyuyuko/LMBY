@@ -88,7 +88,7 @@ HEVC 4K HDR YUV420P10 60fps 50Mbps《杜比视界测试》.mkv
 | `<视频名>-poster.jpg` | 同目录同名视频 | 后缀决定类别 |
 | `<视频名>-thumb.jpg` `S01E01-thumb.jpg` | 同名的集 | → `thumb` |
 | `<视频名>.jpg`（无后缀） | 同名视频 | 按缩略图处理 |
-| `<视频名>.ass` `.srt` `.sup` | 同名视频 | 外挂字幕（M1 只统计，不建条目） |
+| `<视频名>.ass` `.srt` `.sup` | 同名视频 | 外挂字幕。文本格式（ass/ssa/srt/vtt）会归属到同名视频并落 `subtitles` 表；位图（sup/sub/idx）只计数 |
 | `Backdrops/` 里的图 | 跳过 | 整棵目录跳过，避免和图库重复 |
 
 ## 4. 必须忽略的干扰项

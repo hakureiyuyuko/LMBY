@@ -281,14 +281,14 @@ type playStateResponse struct {
 	// SubtitleFormat：vtt（浏览器原生轨道）| ass（前端 libass 渲染，保留特效）。
 	SubtitleFormat string `json:"subtitleFormat,omitempty"`
 	// SubtitleState：ready（已可挂上）/ preparing（内嵌字幕还在抽，前端轮询）。
-	SubtitleState   string         `json:"subtitleState,omitempty"`
+	SubtitleState string `json:"subtitleState,omitempty"`
 	// WindowEndSeconds：转封装模式下这一段预生成窗口的结束位置（秒）。
 	//
 	// 播放器靠它判断「该续下一段了」：不能用 video.seekable.end ——
 	// hls.js 的可用区间只是「已加载的那几个分片」，播放中永远是「当前时间 + 几秒」，
 	// 拿它做判据会一开播就疯狂续窗口。
 	WindowEndSeconds float64 `json:"windowEndSeconds,omitempty"`
-	ItemID          int64          `json:"itemId"`
+	ItemID           int64   `json:"itemId"`
 	// FileID 是这一次实际用的文件（条目下有多个版本时，能看出放的是哪一版）
 	FileID          int64          `json:"fileId,omitempty"`
 	Title           string         `json:"title,omitempty"`
@@ -366,9 +366,16 @@ func (s *Server) handleStartPlayback(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, "读取条目文件失败", err)
 		return
 	}
+	// 外挂字幕同样要进决策输入 —— 否则界面能列出序号 1000+ 的轨道，
+	// 起播却因为这份 candidates 里没有它而拿不到字幕地址。
+	extSubs := s.externalSubtitleStreams(r.Context(), item.ID)
 	candidates := make([]playback.File, 0, len(files))
 	for _, f := range files {
-		candidates = append(candidates, playbackFile(f))
+		pf := playbackFile(f)
+		if len(extSubs) > 0 {
+			pf.Subtitle = append(pf.Subtitle, extSubs...)
+		}
+		candidates = append(candidates, pf)
 	}
 	// 多版本：指定了 fileId 就把候选缩到那一个（找不到就如实报 404，
 	// 而不是默默放另一版 —— 用户明确选了哪一版，静默改掉比报错更糟）。
@@ -1008,7 +1015,7 @@ func (s *Server) handlePlayPlaylist(w http.ResponseWriter, r *http.Request) {
 // 客户端会拿播放列表 URL 作基准拼接。
 //
 // 为什么**不能**允许缓存：换一段窗口（seek）时分片文件名是一模一样的
-//（都是从 seg_00000.m4s 开始），而内容完全不同。若允许浏览器缓存，
+// （都是从 seg_00000.m4s 开始），而内容完全不同。若允许浏览器缓存，
 // seek 之后 hls.js 再要 seg_00000.m4s 就会拿回上一段的字节 ——
 // 表现是「拖到 1:30 却从头开始放」，而且时间轴显示的是新位置（实测踩到）。
 // 分片是“写一次、读一次”的临时文件，禁缓存没有任何代伷。
@@ -1098,6 +1105,11 @@ func (s *Server) handlePlaySubtitle(w http.ResponseWriter, r *http.Request) {
 //
 // 三种结果：已就绪（返回路径）/ 还在抽（ErrSubtitlePending）/ 抽失败（返回错误）。
 func (s *Server) subtitleFile(ctx context.Context, ps *playSession, streamIndex int, suffix string) (string, error) {
+	// 外挂字幕不是容器里的流：序号在合成基数以上，直接读文件，不走 ffmpeg 抽流。
+	if streamIndex >= subtitleExternalIndexBase {
+		return s.externalSubtitleFile(ctx, ps, streamIndex, suffix)
+	}
+
 	dir := filepath.Join(s.cfg.StreamsDirPath(), "subs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -1339,6 +1351,8 @@ func (s *Server) handleItemPlaylist(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(files))
 	for _, f := range files {
 		pf := playbackFile(f)
+		// 外挂字幕接在内嵌流后面：界面照旧按 subtitleStreamIndex 选轨道。
+		pf.Subtitle = append(pf.Subtitle, s.externalSubtitleStreams(r.Context(), item.ID)...)
 		out = append(out, map[string]any{
 			"fileId":        f.ID,
 			"container":     f.Container,

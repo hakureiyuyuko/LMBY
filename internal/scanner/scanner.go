@@ -160,6 +160,8 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 		movieItemByDir:   map[string]int64{},
 		imagesByDir:      map[string][]imageEntry{},
 		imagesSeen:       map[int64]map[string]bool{},
+		subsByDir:        map[string][]subtitleEntry{},
+		subsSeen:         map[int64][]string{},
 		metaApplied:      map[int64]bool{},
 		dirMetaChecked:   map[int64]bool{},
 		unreadableRoots:  map[string]bool{},
@@ -183,6 +185,7 @@ func Scan(ctx context.Context, st *store.Store, lib store.Library, opts Options)
 	}
 
 	w.linkImages(ctx)
+	w.linkSubtitles(ctx)
 
 	// 扫描结束后统一入队探测任务。
 	//
@@ -286,6 +289,9 @@ type walker struct {
 
 	imagesByDir map[string][]imageEntry
 	imagesSeen  map[int64]map[string]bool
+	// 外挂字幕：同样先按目录攒、遍历结束后再解析 —— 字幕挂给谁要等本目录的视频都建出条目才知道。
+	subsByDir map[string][]subtitleEntry
+	subsSeen  map[int64][]string
 	// metaApplied 记录本轮已经写过元数据的条目。
 	// 剧集目录的 tvshow.nfo 会被每一集各触发一次，没这个会重复读 130 遍。
 	metaApplied map[int64]bool
@@ -470,6 +476,11 @@ func (w *walker) walkPath(ctx context.Context, root string) error {
 			}
 		case parser.IsSubtitle(path):
 			w.stats.Subtitles++
+			// 文本字幕（ass/ssa/srt/vtt）攒起来，遍历结束后归属到同名视频；
+			// 位图字幕（sup/sub/idx…）要烧录才能看，本版只计数。
+			if parser.IsTextSubtitle(path) {
+				w.collectSubtitle(dir, path, d)
+			}
 		case parser.IsAudio(path):
 			// 音乐库已砍：识别但跳过
 		case parser.ShouldIgnore(path):

@@ -93,7 +93,10 @@
       当前 `media_files.probe_state` 已经预置为 `pending`，接上队列即可开跑。
 - [ ] **文件系统事件（inotify）与定时扫描** → 改到 M6/M7；目前扫描是手动触发。
       网络挂载本来不触发 inotify，真正需要的是轮询，和定时任务一起做更划算。
-- [ ] **外挂字幕与视频的关联** → 改到 M2（现在只统计数量，不建关联关系）。
+- [x] **外挂字幕与视频的关联** —— 扫描时按「完整视频主干」前缀匹配归属（`parser.ParseSubtitle`），
+      落 `subtitles` 表（迁移 0020）；播放器把它当**合成轨道**（序号 1000+）接在内嵌流后面，
+      ass/ssa 原样给 libass、srt 转 WebVTT、GB18030 用 iconv 转 UTF-8。
+      验收：`scripts/dev/verify-subs.sh`。
 
 ---
 
@@ -496,7 +499,7 @@ POST  /api/v1/items/{id}/scrape   {"force":true} 给这一条排一次刮削（�
 - [x] CPU 基线：libx264/libx265（preset/CRF/最大码率）—— 本机实测 `veryfast` 只有 0.9x 实时，所以它只是兜底
 - [x] 硬件后端落地：**VAAPI 真机验证**（硬解硬编 11.8x）；QSV/NVENC/VideoToolbox/AMF 参数照 Jellyfin 写、**未真跑**
 - [x] 音频：AAC/多声道 downmix、能直通就直通
-- [x] 字幕：文本 → WebVTT（外挂还没做）；ASS/SSA → 前端 libass；**图形字幕(PGS/VOBSUB) → burn-in**（外挂字幕上传未做）
+- [x] 字幕：文本 → WebVTT；ASS/SSA → 前端 libass；**图形字幕(PGS/VOBSUB) → burn-in**（外挂侧只做文本格式，位图 sup/sub/idx 仍未做；上传也未做）
 - [x] HDR：HDR10/HLG → SDR tone mapping（走软件链，`tonemap_vaapi` 在本机 iHD 上实测用不了）；DV P5 → HDR10 策略未做
 - [x] **节流与回收**：预生成 N 片 → `SIGSTOP` ffmpeg → 分片被消费时 `SIGCONT`；空闲 TTL 回收进程 + 清理分片目录（**禁用 `-re`**）
 - [x] 会话复用（同 item + 同编码参数共享一路）+ 并发上限（队列/抢占未做）
