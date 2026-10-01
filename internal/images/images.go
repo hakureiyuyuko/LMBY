@@ -145,6 +145,14 @@ func (s *Service) pick(ctx context.Context, item *store.Item, kind string) (*sto
 	if img := bestOfKind(rows, kind); img != nil {
 		return img, nil
 	}
+	// 剧集自己没有封面：回落到所属剧的同类图。
+	//
+	// 「继续观看」这类卡片是竖版海报位，而剧集目录里只有 16:9 的 -thumb.jpg，
+	// 用户想看的是「这部剧的封面」—— 所以回落目标是剧身那张图，不是剧集截图。
+	// 不做这一步，剧集要 poster 就永远本地不命中 → 回源 → 没配元数据源时前端只剩灰底。
+	if img := s.pickFromParent(ctx, item, kind); img != nil {
+		return img, nil
+	}
 
 	// 本地没有这一类图：向 provider 要一张（拿到就直接可用）
 	fetched, err := s.fetchOnce(ctx, item, kind)
@@ -153,6 +161,27 @@ func (s *Service) pick(ctx context.Context, item *store.Item, kind string) (*sto
 		return nil, nil
 	}
 	return fetched, nil
+}
+
+// pickFromParent 在子条目（剧集）上回落到所属剧的图。
+//
+// 只有「挂在剧身上才有意义」的 kind 才回落：poster / fanart / backdrop / banner / logo。
+// thumb 不回落 —— 那是剧集自己的截图，拿剧的海报顶上只会误导；
+// 前端在 thumb 取不到时会自己退到 poster，那条路现在也通了。
+func (s *Service) pickFromParent(ctx context.Context, item *store.Item, kind string) *store.Image {
+	if item == nil || item.SeriesID == nil || *item.SeriesID == 0 || *item.SeriesID == item.ID {
+		return nil
+	}
+	switch kind {
+	case "poster", "fanart", "backdrop", "banner", "logo":
+	default:
+		return nil
+	}
+	rows, err := s.st.ListImages(ctx, *item.SeriesID)
+	if err != nil {
+		return nil
+	}
+	return bestOfKind(rows, kind)
 }
 
 // imageURL 拼出取图地址。
@@ -214,16 +243,53 @@ func rankOf(list []string, name string) (int, bool) {
 	return 0, false
 }
 
+// kindAliases 是「同一个角色的不同叫法」之间的别名表。
+//
+// 为什么需要：扫描器把宽幅图（fanart.jpg / backdrop.jpg / background.jpg / art.jpg）
+// 一律登记成 kind=fanart（见 internal/scanner 的 dirLevelImageKind），而界面请求的是
+// kind=backdrop、TMDB 回源回来的也记成 backdrop。两边名字不一致时按「严格相等」去查，
+// 本地那张 fanart.jpg 就永远命不中 —— 症状正是「明明有宽幅图，界面还是去回源」，
+// hero 与详情页背景只能退回竖版海报。
+//
+// 表里的顺序就是优先级（本名在前）；没有列进来的 kind 只认自己。
+var kindAliases = map[string][]string{
+	"fanart":   {"fanart", "backdrop"},
+	"backdrop": {"backdrop", "fanart"},
+}
+
+// kindCandidates 把请求的 kind 展开成一批能用的候选 kind（本名在前）。
+func kindCandidates(kind string) []string {
+	if cands, ok := kindAliases[kind]; ok {
+		return cands
+	}
+	return []string{kind}
+}
+
+// kindRank 返回 imgKind 在候选表里的名次（0 = 本名）；不在表里返回 ok=false。
+func kindRank(candidates []string, imgKind string) (int, bool) {
+	for i, s := range candidates {
+		if s == imgKind {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // bestOfKind 在同一类图里挑最合适的一张。
+//
+// key 的每一段就是一层优先级：来源（本地 > 手选 > 远程）→ kind 名次（本名优先，
+// 别名次之）→ 文件名标准度（poster.jpg 优于 whatever.jpg）→ id（让结果稳定）。
 func bestOfKind(rows []store.Image, kind string) *store.Image {
+	candidates := kindCandidates(kind)
 	var best *store.Image
-	bestKey := [3]int{0, 0, 0}
+	bestKey := [4]int{0, 0, 0, 0}
 	for i := range rows {
 		img := &rows[i]
-		if img.Kind != kind {
+		kRank, ok := kindRank(candidates, img.Kind)
+		if !ok {
 			continue
 		}
-		key := [3]int{sourceRank(img.Source), stemRank(kind, img.Path), int(img.ID)}
+		key := [4]int{sourceRank(img.Source), kRank, stemRank(kind, img.Path), int(img.ID)}
 		if best == nil || less(key, bestKey) {
 			best, bestKey = img, key
 		}
@@ -231,7 +297,7 @@ func bestOfKind(rows []store.Image, kind string) *store.Image {
 	return best
 }
 
-func less(a, b [3]int) bool {
+func less(a, b [4]int) bool {
 	for i := range a {
 		if a[i] != b[i] {
 			return a[i] < b[i]
