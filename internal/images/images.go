@@ -145,6 +145,14 @@ func (s *Service) pick(ctx context.Context, item *store.Item, kind string) (*sto
 	if img := bestOfKind(rows, kind); img != nil {
 		return img, nil
 	}
+	// 剧集自己没有封面：回落到所属剧的同类图。
+	//
+	// 「继续观看」这类卡片是竖版海报位，而剧集目录里只有 16:9 的 -thumb.jpg，
+	// 用户想看的是「这部剧的封面」—— 所以回落目标是剧身那张图，不是剧集截图。
+	// 不做这一步，剧集要 poster 就永远本地不命中 → 回源 → 没配元数据源时前端只剩灰底。
+	if img := s.pickFromParent(ctx, item, kind); img != nil {
+		return img, nil
+	}
 
 	// 本地没有这一类图：向 provider 要一张（拿到就直接可用）
 	fetched, err := s.fetchOnce(ctx, item, kind)
@@ -153,6 +161,27 @@ func (s *Service) pick(ctx context.Context, item *store.Item, kind string) (*sto
 		return nil, nil
 	}
 	return fetched, nil
+}
+
+// pickFromParent 在子条目（剧集）上回落到所属剧的图。
+//
+// 只有「挂在剧身上才有意义」的 kind 才回落：poster / fanart / backdrop / banner / logo。
+// thumb 不回落 —— 那是剧集自己的截图，拿剧的海报顶上只会误导；
+// 前端在 thumb 取不到时会自己退到 poster，那条路现在也通了。
+func (s *Service) pickFromParent(ctx context.Context, item *store.Item, kind string) *store.Image {
+	if item == nil || item.SeriesID == nil || *item.SeriesID == 0 || *item.SeriesID == item.ID {
+		return nil
+	}
+	switch kind {
+	case "poster", "fanart", "backdrop", "banner", "logo":
+	default:
+		return nil
+	}
+	rows, err := s.st.ListImages(ctx, *item.SeriesID)
+	if err != nil {
+		return nil
+	}
+	return bestOfKind(rows, kind)
 }
 
 // imageURL 拼出取图地址。
