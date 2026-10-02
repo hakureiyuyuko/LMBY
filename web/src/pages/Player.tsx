@@ -79,7 +79,7 @@ function absUrl(p: string): string {
  *   1）它拿到 202 里的 JSON 会在 worker 里直接崩掉，而且看不到可读错误；
  *   2）自己取回文本还能把失败原因告诉用户。
  */
-async function fetchSubtitleText(url: string, tries = 45): Promise<string> {
+async function fetchSubtitleText(url: string, tries = 800): Promise<string> {
   for (let i = 0; i < tries; i++) {
     const r = await fetch(url, { credentials: 'same-origin' });
     if (r.status === 202) {
@@ -254,6 +254,13 @@ export function Player() {
   const [subReady, setSubReady] = useState(false);
   // 用户明确选了字幕、但服务端还在抽（首次播这个文件）：先不放画面，等字幕好了自动开。
   const [subPreparing, setSubPreparing] = useState(false);
+  // 抽取可能要几分钟（网络盘上的源文件要整遍读），显示已等时长，免得用户以为卡死。
+  const [subWaitSec, setSubWaitSec] = useState(0);
+  useEffect(() => {
+  	if (!subPreparing) { setSubWaitSec(0); return; }
+  	const timer = setInterval(() => setSubWaitSec((n) => n + 1), 1000);
+  	return () => clearInterval(timer);
+  }, [subPreparing]);
   // 当前该显示的字幕文本（自己按绝对时间挑 cue，不交给原生 <track> 渲染）。
   const [subLines, setSubLines] = useState<string[]>([]);
   // 这个文件内封的字体（mkv 附件）的地址，交给 libass 渲染 \fn 引用的特效字体。
@@ -1061,8 +1068,11 @@ export function Player() {
             <div className="player-wait-spin" />
             <h3>{t('字幕正在准备…')}</h3>
             <p className="muted">
-              {t('这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。')}
+              {t('这个文件的内封字幕要现从容器里抽出来。源文件在网络盘上时要把整部读一遍，可能要好几分钟。抽好后会自动开始播放。')}
             </p>
+            {subWaitSec > 0 && (
+              <p className="muted">{t('已等待 {n} 秒…').replace('{n}', String(subWaitSec))}</p>
+            )}
           </div>
         )}
 

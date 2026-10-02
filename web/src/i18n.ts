@@ -1102,8 +1102,9 @@ const en: Record<string, string> = {
   // ---------------------------------------------------------------- 播放器
   '载入中…': 'Loading…',
   '字幕正在准备…': 'Preparing subtitles…',
-  '这个文件的内封字幕要现抽出来，第一次会慢一些（几十秒）。等它好了会自动开始播放，之后再看同一部就会立刻加载。':
-    'Embedded subtitles for this file are extracted on first play, which can take a little while (tens of seconds). Playback starts automatically once they are ready, and the same title loads instantly afterwards.',
+  '这个文件的内封字幕要现从容器里抽出来。源文件在网络盘上时要把整部读一遍，可能要好几分钟。抽好后会自动开始播放。':
+    'Embedded subtitles must be extracted first. On a network drive that means reading the whole file — it can take several minutes. Playback starts automatically once ready.',
+  '已等待 {n} 秒…': 'Waiting {n}s…',
   '正在准备播放…': 'Preparing playback…',
   '这个条目现在放不了': 'This title cannot be played right now',
   '重新开始': 'Start over',
