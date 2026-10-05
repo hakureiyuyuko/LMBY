@@ -952,8 +952,8 @@ const en: Record<string, string> = {
     'To import or refresh a playlist or probe dead sources, open the “Live sources” tab in Settings.',
   '元数据共享改进计划': 'Metadata sharing program',
   '加入元数据共享改进计划': 'Join the metadata sharing program',
-  '加入后，本机刮削好的元数据会贡献给社区元数据库 KeqDB，用来改进元数据匹配。贡献会先进待审队列，由 KeqDB 管理员审核后才进公开库；随时可以关闭。':
-    'If joined, metadata scraped by this instance is contributed to KeqDB, a community metadata database, to improve metadata matching. Contributions go into a review queue and only enter the public database after a KeqDB admin approves them. You can turn this off at any time.',
+  '加入后，KeqDB 会作为首选元数据源（优先于 TMDB，找不到再回退 TMDB）。元数据贡献（上传）功能正在接入；随时可以关闭。':
+    'If joined, KeqDB becomes the preferred metadata source (queried before TMDB, falling back to it when nothing matches). Metadata contribution (upload) is being wired up. You can turn this off at any time.',
   '实例 token': 'Instance token',
   '已设置（要替换就输入新的）': 'Set (enter a new one to replace)',
   '实例 token 由 KeqDB 后台签发（形如 keq_…），加密后存在本机数据库，不回显、也不会传到别处。':

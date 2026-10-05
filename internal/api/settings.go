@@ -205,6 +205,8 @@ func (s *Server) handleUpdateSharingSettings(w http.ResponseWriter, r *http.Requ
 			s.serverError(w, "保存元数据共享开关失败", err)
 			return
 		}
+		// 同步内存里的值：创削源选路（KeqDB 优先）每次请求都读它。
+		s.settings.SetSharingEnabled(cur.Enabled)
 		s.audit(ctx, r, "settings.update", "sharing.metadata", map[string]any{
 			"enabled": cur.Enabled,
 		})

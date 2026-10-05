@@ -45,6 +45,9 @@ type Config struct {
 	Language     string // 默认 zh-CN
 	BaseURL      string
 	ImageBaseURL string
+	// Name 是 provider 标识（缓存键与日志用）。空 = "tmdb"。
+	// KeqDB 用的是同一套 TMDB v3 形状的接口，靠它分开缓存（provider_cache.provider）。
+	Name string
 	// MaxConcurrent 是同时在飞的请求数上限。
 	MaxConcurrent int
 	// MinInterval 是两次请求之间的最小间隔。
@@ -95,7 +98,12 @@ func New(cfg Config) *Client {
 }
 
 // Name 实现 provider.Client。
-func (c *Client) Name() string { return "tmdb" }
+func (c *Client) Name() string {
+	if c.cfg.Name != "" {
+		return c.cfg.Name
+	}
+	return "tmdb"
+}
 
 // ImageURL 拼接图片地址。size 例如 w500 / original。
 func (c *Client) ImageURL(path, size string) string {
