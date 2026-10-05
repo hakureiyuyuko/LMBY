@@ -216,6 +216,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
 	// 审计日志（持久）：谁在什么时候做了什么。同样只给管理员。
 	mux.Handle("GET /api/v1/audit", s.requireAdmin(s.handleListAudit))
+
+	// 观看统计（设置页）：谁看了什么、什么最热。
+	mux.Handle("GET /api/v1/stats/watch", s.requireAdmin(s.handleWatchStats))
+	mux.Handle("GET /api/v1/stats/watch/records", s.requireAdmin(s.handleWatchRecords))
 	// 维护：缓存占用与清理（设置 → 缓存与清理）。
 	mux.Handle("GET /api/v1/maintenance", s.requireAdmin(s.handleMaintenance))
 	mux.Handle("POST /api/v1/maintenance/clean", s.requireAdmin(s.handleMaintenanceClean))
@@ -224,6 +228,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/settings/bot-key", s.requireAdmin(s.handleCreateBotKey))
 	mux.Handle("DELETE /api/v1/settings/bot-key", s.requireAdmin(s.handleDeleteBotKey))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
+	mux.Handle("PUT /api/v1/settings/sharing", s.requireAdmin(s.handleUpdateSharingSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
 
@@ -263,6 +268,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/items/{id}", s.requireAuth(s.handleGetItem))
 	mux.Handle("PATCH /api/v1/items/{id}", s.requireAuth(s.handleUpdateItem))
 	mux.Handle("POST /api/v1/items/{id}/scrape", s.requireAuth(s.handleEnqueueItemScrape))
+
+	// 贡献到 KeqDB（LMBY 的配套社区元数据库）：管理员手动上传该条目，
+	// 以及查本实例的贡献状态。
+	mux.Handle("POST /api/v1/items/{id}/contribute", s.requireAdmin(s.handleContributeItem))
+	mux.Handle("GET /api/v1/stats/sharing", s.requireAdmin(s.handleSharingStatus))
 
 	// ---- 图片 ----
 	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))

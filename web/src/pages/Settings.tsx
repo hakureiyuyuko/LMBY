@@ -9,6 +9,7 @@ import { TranscodePanel } from '../components/TranscodePanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { ScanPlanPanel } from '../components/ScanPlanPanel';
 import { AuditPanel } from '../components/AuditPanel';
+import { WatchStatsPanel } from '../components/WatchStatsPanel';
 import { MaintenancePanel } from '../components/MaintenancePanel';
 import { AboutPanel } from '../components/AboutPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
@@ -131,6 +132,12 @@ export function Settings() {
             {t('审计日志')}
           </NavLink>
           <NavLink
+            to="/settings/watch"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('观看统计')}
+          </NavLink>
+          <NavLink
             to="/settings/maintenance"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
@@ -176,6 +183,11 @@ export function SettingsScan() {
 /** 设置页签：审计日志（持久的问责记录，见 internal/api/audit.go）。 */
 export function SettingsAudit() {
   return <AuditPanel />;
+}
+
+/** 设置页签：观看统计（谁看了什么、什么最热，见 internal/api/watchstats.go）。 */
+export function SettingsWatch() {
+  return <WatchStatsPanel />;
 }
 
 /** 设置页签：缓存与清理（只碰缓存，见 internal/api/maintenance.go）。 */
@@ -226,6 +238,14 @@ export function SettingsOverview() {
   const [health, setHealth] = useState<Health | null>(null);
   const [test, setTest] = useState<ProviderTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  // 「加入元数据共享改进计划」：开关 + KeqDB 实例 token。
+  // 只存凭据、不上传任何数据；token 加密入库、永不回显，所以是独立输入框。
+  // （KeqDB 是配套项目，服务地址内建写死，不在这里配。）
+  const [sharing, setSharing] = useState(false);
+  const [keqToken, setKeqToken] = useState('');
+  const [keqHasToken, setKeqHasToken] = useState(false);
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [sharingMsg, setSharingMsg] = useState('');
 
   const load = useCallback(async () => {
     if (!isAdmin) return;
@@ -233,6 +253,8 @@ export function SettingsOverview() {
       const d = await api.settings();
       setData(d);
       setLanguage(d.tmdb.language);
+      setSharing(d.sharing.enabled);
+      setKeqHasToken(d.sharing.keqdb.hasToken);
       setError('');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t('读取设置失败'));
@@ -242,6 +264,43 @@ export function SettingsOverview() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 勾选/取消「元数据共享改进计划」：立刻写库（没做二次确认 —— 它随时可改回来）。
+  const saveSharing = useCallback(
+    async (enabled: boolean) => {
+      setSharingBusy(true);
+      setSharingMsg('');
+      try {
+        const r = await api.updateSharing({ enabled });
+        setSharing(r.sharing.enabled);
+        setKeqHasToken(r.sharing.keqdb.hasToken);
+        setSharingMsg(t('已保存'));
+      } catch (e) {
+        setSharingMsg(e instanceof ApiError ? e.message : t('保存失败'));
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [t],
+  );
+
+  // 保存 KeqDB 实例 token。留空 = 不改（不是清空 —— 要清空得另做按钮）。
+  const saveKeqDB = useCallback(async () => {
+    const token = keqToken.trim();
+    if (!token) return;
+    setSharingBusy(true);
+    setSharingMsg('');
+    try {
+      const r = await api.updateSharing({ token });
+      setKeqHasToken(r.sharing.keqdb.hasToken);
+      setKeqToken(''); // 提交后清空输入框（不回显）
+      setSharingMsg(t('已保存'));
+    } catch (e) {
+      setSharingMsg(e instanceof ApiError ? e.message : t('保存失败'));
+    } finally {
+      setSharingBusy(false);
+    }
+  }, [t, keqToken]);
 
   // 服务状态（M6 从首页底部搬过来）：读不到就不显示，不挡设置页的其他内容
   useEffect(() => {
@@ -462,6 +521,49 @@ export function SettingsOverview() {
             )}
           </>
         )}
+      </div>
+
+      <div className="card">
+        <h2>{t('元数据共享改进计划')}</h2>
+        <p className="hint">
+          {t('加入后，KeqDB 会作为首选元数据源（优先于 TMDB，找不到再回退 TMDB）；本机条目也能贡献给它 —— 管理员在条目详情页点「贡献到 KeqDB」即可。随时可以关闭。')}
+        </p>
+        <label className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={sharing}
+            disabled={sharingBusy}
+            onChange={(e) => void saveSharing(e.target.checked)}
+          />
+          <span>{t('加入元数据共享改进计划')}</span>
+        </label>
+
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+          <label className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="small">{t('实例 token')}</span>
+            <input
+              type="password"
+              value={keqToken}
+              disabled={sharingBusy}
+              autoComplete="off"
+              placeholder={keqHasToken ? t('已设置（要替换就输入新的）') : 'keq_…'}
+              onChange={(e) => setKeqToken(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={sharingBusy}
+            onClick={() => void saveKeqDB()}
+          >
+            {t('保存')}
+          </button>
+        </div>
+        <p className="faint small">
+          {t('实例 token 由 KeqDB 后台签发（形如 keq_…），加密后存在本机数据库，不回显、也不会传到别处。')}{' '}
+          {keqHasToken ? t('当前：已配置') : t('当前：未配置')}
+        </p>
+        {sharingMsg && <p className="faint small">{sharingMsg}</p>}
       </div>
 
       <div className="card">

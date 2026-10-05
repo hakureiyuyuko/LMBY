@@ -50,6 +50,7 @@ type Config struct {
 	Backup   BackupConfig   `toml:"backup"`
 	FFmpeg   FFmpegConfig   `toml:"ffmpeg"`
 	Tasks    TasksConfig    `toml:"tasks"`
+	Sharing  SharingConfig  `toml:"sharing"`
 	TMDB     TMDBConfig     `toml:"tmdb"`
 	Images   ImagesConfig   `toml:"images"`
 	Playback PlaybackConfig `toml:"playback"`
@@ -188,6 +189,14 @@ type TMDBConfig struct {
 	// Language 是优先语言，FallbackLanguage 在优先语言缺数据时补。
 	Language         string `toml:"language"`
 	FallbackLanguage string `toml:"fallback_language"`
+}
+
+// SharingConfig 是元数据共享（贡献给配套项目 KeqDB）的配置。
+//
+// 服务地址**默认写死在代码里**（settings.DefaultKeqDBBaseURL）；这里只留一个
+// 覆盖口子，用于内网联调（生产域名还没解析时先指向测试地址）。
+type SharingConfig struct {
+	KeqDBBaseURL string `toml:"keqdb_base_url"`
 }
 
 // TasksConfig 是后台任务队列的配置。
@@ -391,6 +400,7 @@ func applyEnv(cfg *Config) error {
 	setStr(&cfg.TMDB.ReadToken, "LMBY_TMDB_READ_TOKEN")
 	setStr(&cfg.TMDB.APIKey, "LMBY_TMDB_API_KEY")
 	setStr(&cfg.TMDB.Language, "LMBY_TMDB_LANGUAGE")
+	setStr(&cfg.Sharing.KeqDBBaseURL, "LMBY_SHARING_KEQDB_BASE_URL")
 	setStr(&cfg.FFmpeg.Path, "LMBY_FFMPEG_PATH")
 	setStr(&cfg.FFmpeg.ProbePath, "LMBY_FFPROBE_PATH")
 	setStr(&cfg.Playback.StreamsDir, "LMBY_PLAYBACK_STREAMS_DIR")

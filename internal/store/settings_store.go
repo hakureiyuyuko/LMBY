@@ -83,3 +83,64 @@ func (s *Store) GetTMDBCredentials(ctx context.Context) (*TMDBCredentials, bool,
 func (s *Store) SaveTMDBCredentials(ctx context.Context, creds TMDBCredentials) error {
 	return s.SetSetting(ctx, SettingKeyTMDBCredentials, creds)
 }
+
+// SettingKeyMetadataSharing 是「加入元数据共享改进计划」开关在 settings 表里的键。
+const SettingKeyMetadataSharing = "sharing.metadata"
+
+// MetadataSharing 是共享开关的值。
+//
+// 目前**只有开关本身**：真正的上传功能在**另一个项目**里开发中，这里先把
+// 用户的意愿记下来（将来那边来读这个值），不发送任何数据。
+type MetadataSharing struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GetMetadataSharing 读共享开关（没存过 = 没加入，返回 false）。
+func (s *Store) GetMetadataSharing(ctx context.Context) (MetadataSharing, error) {
+	raw, found, err := s.GetSetting(ctx, SettingKeyMetadataSharing)
+	if err != nil || !found {
+		return MetadataSharing{}, err
+	}
+	var v MetadataSharing
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return MetadataSharing{}, fmt.Errorf("解析元数据共享开关失败: %w", err)
+	}
+	return v, nil
+}
+
+// SetMetadataSharing 写共享开关。
+func (s *Store) SetMetadataSharing(ctx context.Context, v MetadataSharing) error {
+	return s.SetSetting(ctx, SettingKeyMetadataSharing, v)
+}
+
+// SettingKeyKeqDB 是贡献目标站（KeqDB）连接配置在 settings 表里的键。
+const SettingKeyKeqDB = "sharing.keqdb"
+
+// KeqDBConfig 是共享目标站的连接配置。
+//
+// 只存 token（密文，见 internal/secrets 的 Seal/Open）—— 与 TMDB 凭据同一套规矩：
+// 明文只在内存里、绝不回显。
+//
+// **不存服务地址**：KeqDB 是 LMBY 的配套项目，地址是内建常量
+// （settings.DefaultKeqDBBaseURL），不该让每个实例各填一个。
+type KeqDBConfig struct {
+	Token string `json:"token,omitempty"`
+}
+
+// GetKeqDBConfig 读 KeqDB 连接配置（没存过 = 空）。
+func (s *Store) GetKeqDBConfig(ctx context.Context) (KeqDBConfig, error) {
+	raw, found, err := s.GetSetting(ctx, SettingKeyKeqDB)
+	if err != nil || !found {
+		return KeqDBConfig{}, err
+	}
+	var v KeqDBConfig
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return KeqDBConfig{}, fmt.Errorf("解析 KeqDB 配置失败: %w", err)
+	}
+	return v, nil
+}
+
+// SetKeqDBConfig 写 KeqDB 连接配置。
+func (s *Store) SetKeqDBConfig(ctx context.Context, v KeqDBConfig) error {
+	return s.SetSetting(ctx, SettingKeyKeqDB, v)
+}

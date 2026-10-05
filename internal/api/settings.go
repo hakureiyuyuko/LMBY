@@ -32,7 +32,27 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 	cur := s.settings.TMDB()
 	fallback := s.settings.Fallback()
+	sharing, err := s.store.GetMetadataSharing(ctx)
+	if err != nil {
+		s.serverError(w, "读取元数据共享开关失败", err)
+		return
+	}
+	keq, err := s.settings.KeqDB(ctx)
+	if err != nil {
+		s.serverError(w, "读取 KeqDB 共享配置失败", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		// 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）凭据。
+		// KeqDB 是配套项目，地址内建写死 —— 这里只关心凭据配了没；
+		// token **不回显**，只回 hasToken。
+		"sharing": map[string]any{
+			"enabled": sharing.Enabled,
+			"keqdb": map[string]any{
+				"hasToken":  keq.Token != "",
+				"encrypted": s.settings.Encrypted(),
+			},
+		},
 		"tmdb": map[string]any{
 			"configured":   cur.Configured(),
 			"hasReadToken": cur.ReadToken != "",
@@ -147,6 +167,82 @@ func (s *Server) handleResetTMDBSettings(w http.ResponseWriter, r *http.Request)
 			"hasApiKey":    cur.APIKey != "",
 			"language":     cur.Language,
 			"fromDb":       cur.FromDB,
+		},
+	})
+}
+
+// sharingSettingsRequest 是保存「元数据共享改进计划」的请求体。
+//
+// 三个字段都是指针：nil = 不改（界面上没动这一项），指向空串 = 清掉 ——
+// token 不可能回显，所以「没填」与「要清空」必须是两种不同的意图。
+type sharingSettingsRequest struct {
+	Enabled *bool   `json:"enabled"`
+	Token   *string `json:"token"`
+}
+
+// handleUpdateSharingSettings 保存共享开关与 KeqDB 连接配置。
+//
+// 仍然**只存配置、不发送任何数据**：贡献逻辑在 KeqDB 侧对接
+// （见其 docs/INTEGRATION-LMBY.md 的 §5），这里把开关、服务地址、
+// 实例 token 准备好。token 加密入库、永不回显。
+func (s *Server) handleUpdateSharingSettings(w http.ResponseWriter, r *http.Request) {
+	var req sharingSettingsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	ctx, cancel := contextWithTimeout(r, 10*time.Second)
+	defer cancel()
+
+	if req.Enabled != nil {
+		cur, err := s.store.GetMetadataSharing(ctx)
+		if err != nil {
+			s.serverError(w, "读取元数据共享开关失败", err)
+			return
+		}
+		cur.Enabled = *req.Enabled
+		if err := s.store.SetMetadataSharing(ctx, cur); err != nil {
+			s.serverError(w, "保存元数据共享开关失败", err)
+			return
+		}
+		// 同步内存里的值：创削源选路（KeqDB 优先）每次请求都读它。
+		s.settings.SetSharingEnabled(cur.Enabled)
+		s.audit(ctx, r, "settings.update", "sharing.metadata", map[string]any{
+			"enabled": cur.Enabled,
+		})
+		s.log.Info("已保存元数据共享开关", "enabled", cur.Enabled, "username", usernameOf(r))
+	}
+
+	if req.Token != nil {
+		keq, err := s.settings.ApplyKeqDB(ctx, settings.KeqDBPatch{Token: req.Token})
+		if err != nil {
+			s.serverError(w, "保存 KeqDB 共享凭据失败", err)
+			return
+		}
+		// 审计**不记 token**，只记「配了没有」。
+		s.audit(ctx, r, "settings.update", "sharing.keqdb", map[string]any{
+			"hasToken": keq.Token != "",
+		})
+	}
+
+	sharing, err := s.store.GetMetadataSharing(ctx)
+	if err != nil {
+		s.serverError(w, "读取元数据共享开关失败", err)
+		return
+	}
+	keq, err := s.settings.KeqDB(ctx)
+	if err != nil {
+		s.serverError(w, "读取 KeqDB 共享配置失败", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"sharing": map[string]any{
+			"enabled": sharing.Enabled,
+			"keqdb": map[string]any{
+				"hasToken":  keq.Token != "",
+				"encrypted": s.settings.Encrypted(),
+			},
 		},
 	})
 }

@@ -18,7 +18,7 @@ import { Player } from './pages/Player';
 import { Posters } from './pages/Posters';
 import { Search } from './pages/Search';
 import { Sessions } from './pages/Sessions';
-import { Settings, SettingsAbout, SettingsAudit, SettingsLiveTV, SettingsLogs, SettingsMaintenance, SettingsOverview, SettingsScan, SettingsTranscode } from './pages/Settings';
+import { Settings, SettingsAbout, SettingsAudit, SettingsLiveTV, SettingsLogs, SettingsMaintenance, SettingsOverview, SettingsScan, SettingsTranscode, SettingsWatch } from './pages/Settings';
 import { Users } from './pages/Users';
 import { Setup } from './pages/Setup';
 import { ThemeProvider, readStoredMode, useTheme } from './theme';
@@ -110,6 +110,7 @@ function AppRoutes() {
           <Route path="livetv" element={<SettingsLiveTV />} />
           <Route path="users" element={<Users />} />
           <Route path="audit" element={<SettingsAudit />} />
+          <Route path="watch" element={<SettingsWatch />} />
           <Route path="maintenance" element={<SettingsMaintenance />} />
           <Route path="about" element={<SettingsAbout />} />
         </Route>

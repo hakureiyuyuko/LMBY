@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hakureiyuyuko/lmby/internal/secrets"
 	"github.com/hakureiyuyuko/lmby/internal/store"
@@ -66,6 +67,15 @@ type Service struct {
 
 	// onChange 在设置变化后调用（main 用它把新凭据推给 TMDB 客户端）
 	onChange func(TMDB)
+
+	// sharing 是「加入元数据共享改进计划」开关的内存副本：创削源选路
+	// （KeqDB 优先于 TMDB）要在每次请求里读它，不能每次都查库。
+	// 权威值仍在 settings 表：启动时 Load、保存时 SetSharingEnabled。
+	sharing atomic.Bool
+
+	// keqBaseURL 是 KeqDB 的服务地址（配套项目常量，或配置/环境变量覆盖）。
+	// 启动时定一次，之后只读。
+	keqBaseURL string
 }
 
 // New 构造服务。cipher 可以为 nil —— 那就退化成明文存储（会打一条警告）。
@@ -87,6 +97,12 @@ func (s *Service) SetOnChange(fn func(TMDB)) { s.onChange = fn }
 
 // Load 从数据库装载设置（启动时调一次）。数据库里没有就用配置兜底。
 func (s *Service) Load(ctx context.Context) (TMDB, error) {
+	if sh, err := s.st.GetMetadataSharing(ctx); err != nil {
+		s.log.Warn("读取元数据共享开关失败（先按关闭处理）", "err", err)
+	} else {
+		s.sharing.Store(sh.Enabled)
+	}
+
 	creds, found, err := s.st.GetTMDBCredentials(ctx)
 	if err != nil {
 		return s.TMDB(), err
@@ -128,6 +144,21 @@ func (s *Service) Fallback() TMDB { return s.fallback }
 
 // Encrypted 表示密钥字段是否会被加密存储。
 func (s *Service) Encrypted() bool { return s.cipher != nil }
+
+// SharingEnabled 报告「加入元数据共享改进计划」是否打开。
+//
+// 供创削源选路用（KeqDB 优先于 TMDB）：它会被**每次请求**读到，所以走内存
+// 而不是查库；权威值仍是 settings 表。
+func (s *Service) SharingEnabled() bool { return s.sharing.Load() }
+
+// SetSharingEnabled 更新内存里的共享开关（保存设置后调用；值已同时写库）。
+func (s *Service) SetSharingEnabled(v bool) { s.sharing.Store(v) }
+
+// SetKeqDBBaseURL 记录 KeqDB 的服务地址（启动时设置一次）。
+func (s *Service) SetKeqDBBaseURL(u string) { s.keqBaseURL = u }
+
+// KeqDBBaseURL 返回 KeqDB 的服务地址。
+func (s *Service) KeqDBBaseURL() string { return s.keqBaseURL }
 
 // Apply 应用一次补丁：更新内存、加密后写库、通知回调。
 //

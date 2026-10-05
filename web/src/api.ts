@@ -175,6 +175,22 @@ export const api = {
     return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
   },
 
+  // 观看统计（只给管理员）：谁看了什么、什么最热。
+  watchStats: (params: { top?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.top) sp.set('top', String(params.top));
+    const qs = sp.toString();
+    return request<WatchStatsPayload>(`/api/v1/stats/watch${qs ? `?${qs}` : ''}`);
+  },
+  watchRecords: (params: { userId?: number; limit?: number; offset?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.userId) sp.set('userId', String(params.userId));
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return request<WatchRecordsPayload>(`/api/v1/stats/watch/records${qs ? `?${qs}` : ''}`);
+  },
+
   // 管理 API 密钥（给 bot / 脚本用的长期凭据；只能开用户管理那几个接口）。
   botKey: () =>
     request<{ configured: boolean; prefix?: string; createdAt?: string }>('/api/v1/settings/bot-key'),
@@ -379,6 +395,17 @@ export const api = {
     }),
   resetTMDBSettings: () =>
     request<{ ok: boolean; tmdb: TMDBSettings }>('/api/v1/settings/tmdb', { method: 'DELETE' }),
+  /**
+   * 保存「元数据共享改进计划」：开关 / 实例 token。
+   *
+   * 字段都可选：不传 = 不改；传空串 = 清掉（token 不可能回显，所以「不改」
+   * 与「清空」必须能区分）。目前只存配置，不上传任何数据。
+   */
+  updateSharing: (body: { enabled?: boolean; token?: string }) =>
+    request<{ ok: boolean; sharing: SharingSettings }>('/api/v1/settings/sharing', {
+      method: 'PUT',
+      ...json(body),
+    }),
   testProvider: (q?: string) =>
     request<ProviderTestResult>(
       `/api/v1/provider/test${q ? `?q=${encodeURIComponent(q)}` : ''}`,
@@ -641,6 +668,28 @@ export const api = {
       method: 'POST',
       ...json({ force }),
     }),
+  /** 把条目贡献给 KeqDB（只给管理员；剧集/季会自动带上它所属的剧）。 */
+  contributeItem: (id: number) =>
+    request<{
+      ok: boolean;
+      contribution: { id: number; state: string; deduped: boolean; message: string };
+    }>(`/api/v1/items/${id}/contribute`, { method: 'POST' }),
+  /** 查本实例在 KeqDB 的贡献状态（已上传 / 已采纳 / 被驳回）。 */
+  sharingStatus: () =>
+    request<{
+      configured: boolean;
+      tokenValid?: boolean;
+      instance?: {
+        id: number;
+        name: string;
+        disabled: boolean;
+        uploads: number;
+        approved: number;
+        rejected: number;
+      };
+      sitePending?: number;
+      error?: string;
+    }>('/api/v1/stats/sharing'),
 
   // ---------------------------------------------------------------- 人工匹配
   itemMatch: (id: number) => request<MatchDetail>(`/api/v1/items/${id}/match`),
@@ -912,7 +961,26 @@ export interface SystemInfo {
 
 export interface SettingsPayload {
   tmdb: TMDBSettings;
+  /** 「加入元数据共享改进计划」开关（没存过时后端也回 { enabled: false }）。 */
+  sharing: SharingSettings;
   system: SystemInfo;
+}
+
+/**
+ * KeqDB（贡献目标站）的凭据状态。**token 永不回显**，只回 hasToken。
+ *
+ * 服务地址是 LMBY 配套项目里写死的常量，前端不需要知道、也改不了。
+ */
+export interface KeqDBSharing {
+  hasToken: boolean;
+  /** 服务端是否配置了加密密钥（没配时 token 是明文存的）。 */
+  encrypted: boolean;
+}
+
+/** 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。 */
+export interface SharingSettings {
+  enabled: boolean;
+  keqdb: KeqDBSharing;
 }
 
 /** 「测试连接」的结果。 */
@@ -1349,6 +1417,68 @@ export type AuditEntry = {
 
 export type AuditPayload = {
   entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/** 观看统计总览（`GET /api/v1/stats/watch`）。 */
+export type WatchTotals = {
+  /** 所有用户加起来的总播放次数。 */
+  totalPlays: number;
+  /** 被看过的条目数。 */
+  watchedItems: number;
+  /** 有观看记录的用户数。 */
+  activeUsers: number;
+  lastPlayedAt?: string;
+};
+
+/** 「看得最多的影片」排行里的一条。剧集**按整剧聚合**（数字 = 这部剧所有集加起来）。 */
+export type WatchedItem = {
+  itemId: number;
+  title: string;
+  kind: string;
+  plays: number;
+  viewers: number;
+  lastPlayedAt?: string;
+};
+
+/** 「看得最多的用户」排行里的一条。 */
+export type Watcher = {
+  userId: number;
+  username: string;
+  displayName: string;
+  plays: number;
+  items: number;
+  lastPlayedAt?: string;
+};
+
+export type WatchStatsPayload = {
+  totals: WatchTotals;
+  topItems: WatchedItem[];
+  topUsers: Watcher[];
+};
+
+/** 「谁看了什么」明细里的一条（`GET /api/v1/stats/watch/records`）。 */
+export type WatchRecord = {
+  userId: number;
+  username: string;
+  displayName: string;
+  itemId: number;
+  title: string;
+  kind: string;
+  seriesTitle?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  plays: number;
+  positionTicks: number;
+  durationTicks: number;
+  played: boolean;
+  lastPlayedAt?: string;
+};
+
+export type WatchRecordsPayload = {
+  records: WatchRecord[];
   total: number;
   limit: number;
   offset: number;

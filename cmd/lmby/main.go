@@ -495,16 +495,41 @@ func cmdServe(args []string) error {
 	//
 	// 注意：**即使当下没有凭据也要构造** —— 设置页可以在运行期把 Key 填进来，
 	// 那时候这个客户端必须已经被各服务拿在手里（见 settingsSvc.SetOnChange）。
-	cached, tmdbClient := newTMDBProvider(st, settingsSvc.TMDB().ReadToken,
+	tmdbCached, tmdbClient := newTMDBProvider(st, settingsSvc.TMDB().ReadToken,
 		settingsSvc.TMDB().APIKey, settingsSvc.TMDB().Language)
+
+	// KeqDB（LMBY 的配套社区元数据库）：接口与 TMDB v3 同形，所以**复用 tmdb 客户端**，
+	// 只换 BaseURL 与 provider 名（缓存键随之分开，见 provider/cache.go）。
+	keqBase := strings.TrimRight(strings.TrimSpace(cfg.Sharing.KeqDBBaseURL), "/")
+	if keqBase == "" {
+		keqBase = settings.DefaultKeqDBBaseURL
+	}
+	settingsSvc.SetKeqDBBaseURL(keqBase)
+	keqClient := tmdb.New(tmdb.Config{
+		BaseURL:      keqBase + "/3",
+		ImageBaseURL: keqBase + "/t/p",
+		Language:     settingsSvc.TMDB().Language,
+		Name:         "keqdb",
+	})
+	keqCached := provider.NewCached(keqClient, st, provider.DefaultTTLs())
+
 	settingsSvc.SetOnChange(func(t settings.TMDB) {
 		tmdbClient.SetCredentials(t.ReadToken, t.APIKey, t.Language)
+		// KeqDB 的读接口公开无鉴权，只需要跟着改语言。
+		keqClient.SetCredentials("", "", t.Language)
 		log.Info("TMDB 凭据已更新（无需重启）", "language", t.Language,
 			"auth", authMode(config.TMDBConfig{ReadToken: t.ReadToken, APIKey: t.APIKey}))
 	})
 
-	scraper := scrape.NewHandler(st, cached, log)
+	// 创削取数源：开关打开时 KeqDB 优先、它没有的再回退 TMDB（internal/provider/priority.go）。
+	log.Info("元数据共享源已就绪（开关打开时 KeqDB 优先于 TMDB）",
+		"keqdb", keqBase, "enabled", settingsSvc.SharingEnabled())
+	scrapeSource := provider.NewPriority(keqCached, tmdbCached, settingsSvc.SharingEnabled, log)
+	scraper := scrape.NewHandler(st, scrapeSource, log)
 	pool.Register(scraper)
+
+	// 人工匹配等交互式查询走同一套优先级，但**不带缓存**（要的是实时结果）。
+	metaSource := provider.NewPriority(keqClient, tmdbClient, settingsSvc.SharingEnabled, log)
 
 	// 只读媒体库的叠加层：库目录一个字节不写，刮削产物（元数据快照 + 图片）
 	// 落在这里（数据目录下、每库一块，不参与图片缓存淘汰）。
@@ -523,7 +548,9 @@ func cmdServe(args []string) error {
 	go pool.Run(ctx)
 
 	// 图片管线：本地图只读，回源图与缩放缓存落在数据目录
-	imgSvc, err := images.NewService(st, cached, cfg.ImagesCacheDir(), cfg.Images.MaxCacheMB, log)
+	// 图片回源也要用这套优先级：库里可能有 KeqDB 抓来的内容寻址路径，
+	// 那种只能用 KeqDB 的域名取（ImageURL 按路径形状选域名）。
+	imgSvc, err := images.NewService(st, metaSource, cfg.ImagesCacheDir(), cfg.Images.MaxCacheMB, log)
 	if err != nil {
 		return err
 	}
@@ -572,7 +599,7 @@ func cmdServe(args []string) error {
 
 	// 传**未包缓存的**客户端给 API：设置页的「测试连接」必须真打一次网络，
 	// 否则缓存命中时它会回「通着」—— 而用户正是想验证凭据能不能用（实测踩到）。
-	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, tmdbClient, streams, encStore, cipher)
+	srv := api.New(cfg, st, log, ff, imgSvc, scraper, settingsSvc, metaSource, streams, encStore, cipher)
 	srv.SetOverlay(ovSvc)
 	// 接入「最近日志」缓冲：设置 → 日志 页读它。
 	srv.SetLogBuffer(logBuf)

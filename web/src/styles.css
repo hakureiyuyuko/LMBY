@@ -1074,6 +1074,61 @@ th {
   border-radius: var(--radius-sm);
 }
 
+/* 播放页底部：体验资源（特效字幕字体 / 渲染器）的下载进度。
+   只在真在下的时候才渲染（见 Player.tsx），所以这里不用管「隐藏」态。 */
+.player-dl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.player-dl-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.player-dl-track {
+  flex: 1 1 120px;
+  min-width: 80px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.player-dl-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+/* 服务端没给 Content-Length（算不出百分比）：走不确定态动画。 */
+.player-dl-unknown .player-dl-fill {
+  width: 35% !important;
+  animation: player-dl-move 1.1s ease-in-out infinite;
+}
+
+@keyframes player-dl-move {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.player-dl-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
 .player-hint {
   margin: 0;
 }
@@ -2552,4 +2607,64 @@ th {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---------------------------------------------------------------- 观看统计（设置页） */
+
+/* 顶部三个数字卡（总播放次数 / 看过的影片 / 看过的用户）。 */
+.stat-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin: 12px 0;
+}
+
+.stat-card {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+}
+
+.stat-num {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 两个排行并排（窄屏自动堆叠）。 */
+.stat-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--gap);
+  margin-bottom: 20px;
+}
+
+.stat-cols h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+/* 表格里「像链接的按钮」（点排行里的用户名去筛明细）。 */
+.linklike {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.linklike:hover {
+  text-decoration: underline;
 }

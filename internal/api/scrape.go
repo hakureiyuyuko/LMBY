@@ -133,9 +133,13 @@ func (s *Server) handleResetFailedScrapes(w http.ResponseWriter, r *http.Request
 //
 // 看的是**运行期设置**而不是启动时的配置：设置页里刚填的 TMDB Key 也要算数，
 // 否则用户保存完凭据，刮削接口还回 409，很容易让人以为没保存上。
+// scrapeConfigured 报告有没有可用的元数据源。
+//
+// 两个源任一可用就行：TMDB（配了凭据）或 KeqDB（共享开关开着 ——
+// 它的读接口公开无鉴权）。否则启用 KeqDB 之后反而刮不动。
 func (s *Server) scrapeConfigured() bool {
 	if s.settings != nil {
-		return s.settings.Configured()
+		return s.settings.Configured() || s.settings.SharingEnabled()
 	}
 	return s.cfg.TMDB.ReadToken != "" || s.cfg.TMDB.APIKey != ""
 }
