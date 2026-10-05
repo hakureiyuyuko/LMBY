@@ -396,12 +396,12 @@ export const api = {
   resetTMDBSettings: () =>
     request<{ ok: boolean; tmdb: TMDBSettings }>('/api/v1/settings/tmdb', { method: 'DELETE' }),
   /**
-   * 保存「元数据共享改进计划」：开关 / 服务地址 / 实例 token。
+   * 保存「元数据共享改进计划」：开关 / 实例 token。
    *
    * 字段都可选：不传 = 不改；传空串 = 清掉（token 不可能回显，所以「不改」
    * 与「清空」必须能区分）。目前只存配置，不上传任何数据。
    */
-  updateSharing: (body: { enabled?: boolean; baseUrl?: string; token?: string }) =>
+  updateSharing: (body: { enabled?: boolean; token?: string }) =>
     request<{ ok: boolean; sharing: SharingSettings }>('/api/v1/settings/sharing', {
       method: 'PUT',
       ...json(body),
@@ -944,14 +944,15 @@ export interface SettingsPayload {
   system: SystemInfo;
 }
 
-/** KeqDB（贡献目标站）的连接配置状态。**token 永不回显**，只回 hasToken。 */
+/**
+ * KeqDB（贡献目标站）的凭据状态。**token 永不回显**，只回 hasToken。
+ *
+ * 服务地址是 LMBY 配套项目里写死的常量，前端不需要知道、也改不了。
+ */
 export interface KeqDBSharing {
-  baseUrl: string;
   hasToken: boolean;
   /** 服务端是否配置了加密密钥（没配时 token 是明文存的）。 */
   encrypted: boolean;
-  /** 是否来自数据库（而不是默认值）。 */
-  fromDb: boolean;
 }
 
 /** 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。 */

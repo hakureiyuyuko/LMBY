@@ -118,11 +118,13 @@ const SettingKeyKeqDB = "sharing.keqdb"
 
 // KeqDBConfig 是共享目标站的连接配置。
 //
-// Token 存的是**密文**（见 internal/secrets 的 Seal/Open）—— 与 TMDB 凭据同一套规矩：
-// 明文只在内存里、绝不回显；BaseURL 是明文（它不是秘密）。
+// 只存 token（密文，见 internal/secrets 的 Seal/Open）—— 与 TMDB 凭据同一套规矩：
+// 明文只在内存里、绝不回显。
+//
+// **不存服务地址**：KeqDB 是 LMBY 的配套项目，地址是内建常量
+// （settings.DefaultKeqDBBaseURL），不该让每个实例各填一个。
 type KeqDBConfig struct {
-	BaseURL string `json:"baseUrl,omitempty"`
-	Token   string `json:"token,omitempty"`
+	Token string `json:"token,omitempty"`
 }
 
 // GetKeqDBConfig 读 KeqDB 连接配置（没存过 = 空）。

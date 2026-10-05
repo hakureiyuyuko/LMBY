@@ -242,10 +242,10 @@ export function SettingsOverview() {
   const [health, setHealth] = useState<Health | null>(null);
   const [test, setTest] = useState<ProviderTestResult | null>(null);
   const [testing, setTesting] = useState(false);
-  // 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。
-  // 只存配置、不上传任何数据；token 加密入库、永不回显，所以是独立输入框。
+  // 「加入元数据共享改进计划」：开关 + KeqDB 实例 token。
+  // 只存凭据、不上传任何数据；token 加密入库、永不回显，所以是独立输入框。
+  // （KeqDB 是配套项目，服务地址内建写死，不在这里配。）
   const [sharing, setSharing] = useState(false);
-  const [keqBaseUrl, setKeqBaseUrl] = useState('');
   const [keqToken, setKeqToken] = useState('');
   const [keqHasToken, setKeqHasToken] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
@@ -258,7 +258,6 @@ export function SettingsOverview() {
       setData(d);
       setLanguage(d.tmdb.language);
       setSharing(d.sharing.enabled);
-      setKeqBaseUrl(d.sharing.keqdb.baseUrl);
       setKeqHasToken(d.sharing.keqdb.hasToken);
       setError('');
     } catch (e) {
@@ -278,7 +277,6 @@ export function SettingsOverview() {
       try {
         const r = await api.updateSharing({ enabled });
         setSharing(r.sharing.enabled);
-        setKeqBaseUrl(r.sharing.keqdb.baseUrl);
         setKeqHasToken(r.sharing.keqdb.hasToken);
         setSharingMsg(t('已保存'));
       } catch (e) {
@@ -290,15 +288,14 @@ export function SettingsOverview() {
     [t],
   );
 
-  // 保存 KeqDB 连接配置。token 留空 = 不改（不是清空 —— 要清空得另做按钮）。
+  // 保存 KeqDB 实例 token。留空 = 不改（不是清空 —— 要清空得另做按钮）。
   const saveKeqDB = useCallback(async () => {
+    const token = keqToken.trim();
+    if (!token) return;
     setSharingBusy(true);
     setSharingMsg('');
     try {
-      const body: { baseUrl?: string; token?: string } = { baseUrl: keqBaseUrl };
-      if (keqToken.trim()) body.token = keqToken.trim();
-      const r = await api.updateSharing(body);
-      setKeqBaseUrl(r.sharing.keqdb.baseUrl);
+      const r = await api.updateSharing({ token });
       setKeqHasToken(r.sharing.keqdb.hasToken);
       setKeqToken(''); // 提交后清空输入框（不回显）
       setSharingMsg(t('已保存'));
@@ -307,7 +304,7 @@ export function SettingsOverview() {
     } finally {
       setSharingBusy(false);
     }
-  }, [t, keqBaseUrl, keqToken]);
+  }, [t, keqToken]);
 
   // 服务状态（M6 从首页底部搬过来）：读不到就不显示，不挡设置页的其他内容
   useEffect(() => {
@@ -552,17 +549,6 @@ export function SettingsOverview() {
         </label>
 
         <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
-          <label className="row" style={{ gap: 6, alignItems: 'center' }}>
-            <span className="small">{t('服务地址')}</span>
-            <input
-              type="url"
-              value={keqBaseUrl}
-              disabled={sharingBusy}
-              placeholder="https://keqdb.kyarucloud.moe"
-              style={{ minWidth: 280 }}
-              onChange={(e) => setKeqBaseUrl(e.target.value)}
-            />
-          </label>
           <label className="row" style={{ gap: 6, alignItems: 'center' }}>
             <span className="small">{t('实例 token')}</span>
             <input

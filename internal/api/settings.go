@@ -43,15 +43,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		// 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。
+		// 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）凭据。
+		// KeqDB 是配套项目，地址内建写死 —— 这里只关心凭据配了没；
 		// token **不回显**，只回 hasToken。
 		"sharing": map[string]any{
 			"enabled": sharing.Enabled,
 			"keqdb": map[string]any{
-				"baseUrl":   keq.BaseURL,
 				"hasToken":  keq.Token != "",
 				"encrypted": s.settings.Encrypted(),
-				"fromDb":    keq.FromDB,
 			},
 		},
 		"tmdb": map[string]any{
@@ -178,7 +177,6 @@ func (s *Server) handleResetTMDBSettings(w http.ResponseWriter, r *http.Request)
 // token 不可能回显，所以「没填」与「要清空」必须是两种不同的意图。
 type sharingSettingsRequest struct {
 	Enabled *bool   `json:"enabled"`
-	BaseURL *string `json:"baseUrl"`
 	Token   *string `json:"token"`
 }
 
@@ -213,18 +211,15 @@ func (s *Server) handleUpdateSharingSettings(w http.ResponseWriter, r *http.Requ
 		s.log.Info("已保存元数据共享开关", "enabled", cur.Enabled, "username", usernameOf(r))
 	}
 
-	if req.BaseURL != nil || req.Token != nil {
-		keq, err := s.settings.ApplyKeqDB(ctx, settings.KeqDBPatch{
-			BaseURL: req.BaseURL,
-			Token:   req.Token,
-		})
+	if req.Token != nil {
+		keq, err := s.settings.ApplyKeqDB(ctx, settings.KeqDBPatch{Token: req.Token})
 		if err != nil {
-			s.serverError(w, "保存 KeqDB 共享配置失败", err)
+			s.serverError(w, "保存 KeqDB 共享凭据失败", err)
 			return
 		}
-		// 审计**不记 token**，只记「配了没有、地址是什么」。
+		// 审计**不记 token**，只记「配了没有」。
 		s.audit(ctx, r, "settings.update", "sharing.keqdb", map[string]any{
-			"baseUrl": keq.BaseURL, "hasToken": keq.Token != "",
+			"hasToken": keq.Token != "",
 		})
 	}
 
@@ -243,10 +238,8 @@ func (s *Server) handleUpdateSharingSettings(w http.ResponseWriter, r *http.Requ
 		"sharing": map[string]any{
 			"enabled": sharing.Enabled,
 			"keqdb": map[string]any{
-				"baseUrl":   keq.BaseURL,
 				"hasToken":  keq.Token != "",
 				"encrypted": s.settings.Encrypted(),
-				"fromDb":    keq.FromDB,
 			},
 		},
 	})
