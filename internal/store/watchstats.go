@@ -23,14 +23,14 @@ type WatchTotals struct {
 	LastPlayedAt *time.Time `json:"lastPlayedAt,omitempty"`
 }
 
-// WatchedItem 是「看得最多的影片」排行里的一条（剧集按单集算）。
+// WatchedItem 是「看得最多的影片」排行里的一条。
+//
+// **剧集按整剧聚合**：一集也算它所属的剧（`coalesce(mi.series_id, mi.id)`），
+// 所以剧集的数字是「这部剧所有集加起来」。电影没有 series_id，就是它自己。
 type WatchedItem struct {
-	ItemID       int64      `json:"itemId"`
+	ItemID       int64      `json:"itemId"` // 电影 id 或剧 id（点进去看详情）
 	Title        string     `json:"title"`
-	Kind         string     `json:"kind"`
-	SeriesTitle  string     `json:"seriesTitle,omitempty"`
-	SeasonNum    *int32     `json:"seasonNumber,omitempty"`
-	EpisodeNum   *int32     `json:"episodeNumber,omitempty"`
+	Kind         string     `json:"kind"` // movie | series
 	Plays        int64      `json:"plays"`
 	Viewers      int64      `json:"viewers"`
 	LastPlayedAt *time.Time `json:"lastPlayedAt,omitempty"`
@@ -80,23 +80,25 @@ func (s *Store) WatchTotals(ctx context.Context) (WatchTotals, error) {
 	return t, nil
 }
 
-// TopWatchedItems 按总播放次数排「最热影片」（并列时看有多少不同的人看过）。
+// TopWatchedItems 按总播放次数排「最热影片」，**剧集按整剧聚合**
+// （并列时看有多少不同的人看过）。
 func (s *Store) TopWatchedItems(ctx context.Context, limit int) ([]WatchedItem, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+	// 剧集归到它所属的剧（coalesce(series_id, id)）：一集也算这部剧；
+	// 电影没有 series_id，就是它自己。
 	rows, err := s.pool.Query(ctx,
-		`select mi.id, mi.title, mi.kind, coalesce(ser.title, ''),
-		        mi.season_number, mi.episode_number,
+		`select g.id, g.title, g.kind,
 		        sum(pp.play_count)::bigint, count(distinct pp.user_id)::bigint,
 		        max(pp.last_played_at)
 		 from playback_progress pp
 		 join media_items mi on mi.id = pp.item_id
-		 left join media_items ser on ser.id = mi.series_id
+		 join media_items g on g.id = coalesce(mi.series_id, mi.id)
 		 where pp.play_count > 0
-		 group by mi.id, mi.title, mi.kind, ser.title, mi.season_number, mi.episode_number
+		 group by g.id, g.title, g.kind
 		 order by sum(pp.play_count) desc, count(distinct pp.user_id) desc,
-		          max(pp.last_played_at) desc nulls last, mi.id
+		          max(pp.last_played_at) desc nulls last, g.id
 		 limit $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("统计热门影片失败: %w", err)
@@ -106,8 +108,8 @@ func (s *Store) TopWatchedItems(ctx context.Context, limit int) ([]WatchedItem, 
 	out := make([]WatchedItem, 0, limit)
 	for rows.Next() {
 		var w WatchedItem
-		if err := rows.Scan(&w.ItemID, &w.Title, &w.Kind, &w.SeriesTitle,
-			&w.SeasonNum, &w.EpisodeNum, &w.Plays, &w.Viewers, &w.LastPlayedAt); err != nil {
+		if err := rows.Scan(&w.ItemID, &w.Title, &w.Kind,
+			&w.Plays, &w.Viewers, &w.LastPlayedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

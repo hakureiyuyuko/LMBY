@@ -1381,14 +1381,11 @@ export type WatchTotals = {
   lastPlayedAt?: string;
 };
 
-/** 「看得最多的影片」排行里的一条（剧集按单集）。 */
+/** 「看得最多的影片」排行里的一条。剧集**按整剧聚合**（数字 = 这部剧所有集加起来）。 */
 export type WatchedItem = {
   itemId: number;
   title: string;
   kind: string;
-  seriesTitle?: string;
-  seasonNumber?: number;
-  episodeNumber?: number;
   plays: number;
   viewers: number;
   lastPlayedAt?: string;
