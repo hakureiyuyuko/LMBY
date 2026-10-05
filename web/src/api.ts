@@ -668,6 +668,28 @@ export const api = {
       method: 'POST',
       ...json({ force }),
     }),
+  /** 把条目贡献给 KeqDB（只给管理员；剧集/季会自动带上它所属的剧）。 */
+  contributeItem: (id: number) =>
+    request<{
+      ok: boolean;
+      contribution: { id: number; state: string; deduped: boolean; message: string };
+    }>(`/api/v1/items/${id}/contribute`, { method: 'POST' }),
+  /** 查本实例在 KeqDB 的贡献状态（已上传 / 已采纳 / 被驳回）。 */
+  sharingStatus: () =>
+    request<{
+      configured: boolean;
+      tokenValid?: boolean;
+      instance?: {
+        id: number;
+        name: string;
+        disabled: boolean;
+        uploads: number;
+        approved: number;
+        rejected: number;
+      };
+      sitePending?: number;
+      error?: string;
+    }>('/api/v1/stats/sharing'),
 
   // ---------------------------------------------------------------- 人工匹配
   itemMatch: (id: number) => request<MatchDetail>(`/api/v1/items/${id}/match`),

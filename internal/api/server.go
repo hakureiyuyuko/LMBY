@@ -269,6 +269,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PATCH /api/v1/items/{id}", s.requireAuth(s.handleUpdateItem))
 	mux.Handle("POST /api/v1/items/{id}/scrape", s.requireAuth(s.handleEnqueueItemScrape))
 
+	// 贡献到 KeqDB（LMBY 的配套社区元数据库）：管理员手动上传该条目，
+	// 以及查本实例的贡献状态。
+	mux.Handle("POST /api/v1/items/{id}/contribute", s.requireAdmin(s.handleContributeItem))
+	mux.Handle("GET /api/v1/stats/sharing", s.requireAdmin(s.handleSharingStatus))
+
 	// ---- 图片 ----
 	mux.Handle("GET /api/v1/items/{id}/images", s.requireAuth(s.handleListImages))
 	mux.Handle("GET /api/v1/items/{id}/images/{kind}", s.requireAuth(s.handleItemImage))

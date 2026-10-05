@@ -72,6 +72,10 @@ type Service struct {
 	// （KeqDB 优先于 TMDB）要在每次请求里读它，不能每次都查库。
 	// 权威值仍在 settings 表：启动时 Load、保存时 SetSharingEnabled。
 	sharing atomic.Bool
+
+	// keqBaseURL 是 KeqDB 的服务地址（配套项目常量，或配置/环境变量覆盖）。
+	// 启动时定一次，之后只读。
+	keqBaseURL string
 }
 
 // New 构造服务。cipher 可以为 nil —— 那就退化成明文存储（会打一条警告）。
@@ -149,6 +153,12 @@ func (s *Service) SharingEnabled() bool { return s.sharing.Load() }
 
 // SetSharingEnabled 更新内存里的共享开关（保存设置后调用；值已同时写库）。
 func (s *Service) SetSharingEnabled(v bool) { s.sharing.Store(v) }
+
+// SetKeqDBBaseURL 记录 KeqDB 的服务地址（启动时设置一次）。
+func (s *Service) SetKeqDBBaseURL(u string) { s.keqBaseURL = u }
+
+// KeqDBBaseURL 返回 KeqDB 的服务地址。
+func (s *Service) KeqDBBaseURL() string { return s.keqBaseURL }
 
 // Apply 应用一次补丁：更新内存、加密后写库、通知回调。
 //

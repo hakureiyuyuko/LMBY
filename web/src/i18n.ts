@@ -960,6 +960,14 @@ const en: Record<string, string> = {
     'The instance token is issued by the KeqDB backend (looks like keq_…). It is stored encrypted in this instance’s database, never shown back, and never sent anywhere else.',
   '当前：已配置': 'Currently: configured',
   '当前：未配置': 'Currently: not configured',
+
+  // ---------------------------------------------------------------- 贡献到 KeqDB
+  '贡献到 KeqDB': 'Contribute to KeqDB',
+  '已提交，等待审核': 'Submitted — waiting for review',
+  'KeqDB 已有这份数据（去重）': 'KeqDB already has this data (deduplicated)',
+  '提交失败，请稍后重试': 'Submit failed, please try again later',
+  '把这条目的元数据贡献给 KeqDB（LMBY 的配套社区元数据库）':
+    'Contribute this item’s metadata to KeqDB (LMBY’s companion community database)',
   '只读库叠加层': 'Read-only library overlay',
   '只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}':
     'Scraped artifacts of read-only libraries (network drives / read-only mounts) live here: one tree per library under the data directory, never inside the media folders. Path: {root}',

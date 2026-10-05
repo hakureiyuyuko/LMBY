@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, api } from '../api';
 import { t, useI18n } from '../i18n';
+import { useAuth } from '../auth';
 import { roleLabel } from '../people';
 import type {
   ChildSummary,
@@ -90,6 +91,26 @@ export function Detail() {
   const [version, setVersion] = useState<number | null>(null);
   // 收藏状态（按账号）：单独一个接口，不混进条目本体（见 internal/api/lists.go 的说明）
   const [fav, setFav] = useState<FavoriteState | null>(null);
+
+  // 贡献到 KeqDB（只给管理员）：手动上传这一个条目。
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
+  const [contribBusy, setContribBusy] = useState(false);
+  const [contribMsg, setContribMsg] = useState('');
+  const contribute = useCallback(async () => {
+    setContribBusy(true);
+    setContribMsg('');
+    try {
+      const r = await api.contributeItem(itemId);
+      setContribMsg(
+        r.contribution.deduped ? t('KeqDB 已有这份数据（去重）') : t('已提交，等待审核'),
+      );
+    } catch (e) {
+      setContribMsg(e instanceof ApiError ? e.message : t('提交失败，请稍后重试'));
+    } finally {
+      setContribBusy(false);
+    }
+  }, [itemId, t]);
   // 「加入列表」面板：只在真点开时才去拉列表（绝大多数访问不看这个面板）
   const [listPanel, setListPanel] = useState(false);
   const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
@@ -366,6 +387,18 @@ export function Detail() {
               <Link className="btn" to={`/items/${it.id}`}>
                 {t('编辑元数据')}
               </Link>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={contribBusy}
+                  title={t('把这条目的元数据贡献给 KeqDB（LMBY 的配套社区元数据库）')}
+                  onClick={() => void contribute()}
+                >
+                  {contribBusy ? t('提交中…') : t('贡献到 KeqDB')}
+                </button>
+              )}
+              {contribMsg && <span className="small">{contribMsg}</span>}
               <Link className="btn btn-ghost" to={`/library/${it.libraryId}`}>
                 {t('回海报墙')}
               </Link>

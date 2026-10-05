@@ -504,6 +504,7 @@ func cmdServe(args []string) error {
 	if keqBase == "" {
 		keqBase = settings.DefaultKeqDBBaseURL
 	}
+	settingsSvc.SetKeqDBBaseURL(keqBase)
 	keqClient := tmdb.New(tmdb.Config{
 		BaseURL:      keqBase + "/3",
 		ImageBaseURL: keqBase + "/t/p",
