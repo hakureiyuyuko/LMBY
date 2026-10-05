@@ -952,8 +952,15 @@ const en: Record<string, string> = {
     'To import or refresh a playlist or probe dead sources, open the “Live sources” tab in Settings.',
   '元数据共享改进计划': 'Metadata sharing program',
   '加入元数据共享改进计划': 'Join the metadata sharing program',
-  '加入后，本机的影片元数据会用于改进元数据匹配（上传到另一个项目）。该功能仍在开发中 —— 现在勾选只是先记下你的选择，暂时不会上传任何数据。':
-    'If joined, this library’s movie metadata will be used to improve metadata matching (uploaded to another project). The feature is still in development — checking the box only records your choice for now; no data is uploaded yet.',
+  '加入后，本机刮削好的元数据会贡献给社区元数据库 KeqDB，用来改进元数据匹配。贡献会先进待审队列，由 KeqDB 管理员审核后才进公开库；随时可以关闭。':
+    'If joined, metadata scraped by this instance is contributed to KeqDB, a community metadata database, to improve metadata matching. Contributions go into a review queue and only enter the public database after a KeqDB admin approves them. You can turn this off at any time.',
+  '服务地址': 'Server',
+  '实例 token': 'Instance token',
+  '已设置（要替换就输入新的）': 'Set (enter a new one to replace)',
+  '实例 token 由 KeqDB 后台签发（形如 keq_…），加密后存在本机数据库，不回显、也不会传到别处。':
+    'The instance token is issued by the KeqDB backend (looks like keq_…). It is stored encrypted in this instance’s database, never shown back, and never sent anywhere else.',
+  '当前：已配置': 'Currently: configured',
+  '当前：未配置': 'Currently: not configured',
   '只读库叠加层': 'Read-only library overlay',
   '只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}':
     'Scraped artifacts of read-only libraries (network drives / read-only mounts) live here: one tree per library under the data directory, never inside the media folders. Path: {root}',

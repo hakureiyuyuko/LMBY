@@ -395,11 +395,16 @@ export const api = {
     }),
   resetTMDBSettings: () =>
     request<{ ok: boolean; tmdb: TMDBSettings }>('/api/v1/settings/tmdb', { method: 'DELETE' }),
-  /** 保存「元数据共享改进计划」开关（目前只存值，不上传任何数据）。 */
-  updateSharing: (enabled: boolean) =>
+  /**
+   * 保存「元数据共享改进计划」：开关 / 服务地址 / 实例 token。
+   *
+   * 字段都可选：不传 = 不改；传空串 = 清掉（token 不可能回显，所以「不改」
+   * 与「清空」必须能区分）。目前只存配置，不上传任何数据。
+   */
+  updateSharing: (body: { enabled?: boolean; baseUrl?: string; token?: string }) =>
     request<{ ok: boolean; sharing: SharingSettings }>('/api/v1/settings/sharing', {
       method: 'PUT',
-      ...json({ enabled }),
+      ...json(body),
     }),
   testProvider: (q?: string) =>
     request<ProviderTestResult>(
@@ -939,9 +944,20 @@ export interface SettingsPayload {
   system: SystemInfo;
 }
 
-/** 「加入元数据共享改进计划」开关的值。目前只存意愿，上传功能在另一个项目里开发。 */
+/** KeqDB（贡献目标站）的连接配置状态。**token 永不回显**，只回 hasToken。 */
+export interface KeqDBSharing {
+  baseUrl: string;
+  hasToken: boolean;
+  /** 服务端是否配置了加密密钥（没配时 token 是明文存的）。 */
+  encrypted: boolean;
+  /** 是否来自数据库（而不是默认值）。 */
+  fromDb: boolean;
+}
+
+/** 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。 */
 export interface SharingSettings {
   enabled: boolean;
+  keqdb: KeqDBSharing;
 }
 
 /** 「测试连接」的结果。 */

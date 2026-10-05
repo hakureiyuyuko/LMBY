@@ -242,8 +242,12 @@ export function SettingsOverview() {
   const [health, setHealth] = useState<Health | null>(null);
   const [test, setTest] = useState<ProviderTestResult | null>(null);
   const [testing, setTesting] = useState(false);
-  // 「加入元数据共享改进计划」开关：保存即写库。目前只存意愿，不上传任何数据。
+  // 「加入元数据共享改进计划」：开关 + 目标站（KeqDB）连接配置。
+  // 只存配置、不上传任何数据；token 加密入库、永不回显，所以是独立输入框。
   const [sharing, setSharing] = useState(false);
+  const [keqBaseUrl, setKeqBaseUrl] = useState('');
+  const [keqToken, setKeqToken] = useState('');
+  const [keqHasToken, setKeqHasToken] = useState(false);
   const [sharingBusy, setSharingBusy] = useState(false);
   const [sharingMsg, setSharingMsg] = useState('');
 
@@ -254,6 +258,8 @@ export function SettingsOverview() {
       setData(d);
       setLanguage(d.tmdb.language);
       setSharing(d.sharing.enabled);
+      setKeqBaseUrl(d.sharing.keqdb.baseUrl);
+      setKeqHasToken(d.sharing.keqdb.hasToken);
       setError('');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t('读取设置失败'));
@@ -270,8 +276,10 @@ export function SettingsOverview() {
       setSharingBusy(true);
       setSharingMsg('');
       try {
-        const r = await api.updateSharing(enabled);
+        const r = await api.updateSharing({ enabled });
         setSharing(r.sharing.enabled);
+        setKeqBaseUrl(r.sharing.keqdb.baseUrl);
+        setKeqHasToken(r.sharing.keqdb.hasToken);
         setSharingMsg(t('已保存'));
       } catch (e) {
         setSharingMsg(e instanceof ApiError ? e.message : t('保存失败'));
@@ -281,6 +289,25 @@ export function SettingsOverview() {
     },
     [t],
   );
+
+  // 保存 KeqDB 连接配置。token 留空 = 不改（不是清空 —— 要清空得另做按钮）。
+  const saveKeqDB = useCallback(async () => {
+    setSharingBusy(true);
+    setSharingMsg('');
+    try {
+      const body: { baseUrl?: string; token?: string } = { baseUrl: keqBaseUrl };
+      if (keqToken.trim()) body.token = keqToken.trim();
+      const r = await api.updateSharing(body);
+      setKeqBaseUrl(r.sharing.keqdb.baseUrl);
+      setKeqHasToken(r.sharing.keqdb.hasToken);
+      setKeqToken(''); // 提交后清空输入框（不回显）
+      setSharingMsg(t('已保存'));
+    } catch (e) {
+      setSharingMsg(e instanceof ApiError ? e.message : t('保存失败'));
+    } finally {
+      setSharingBusy(false);
+    }
+  }, [t, keqBaseUrl, keqToken]);
 
   // 服务状态（M6 从首页底部搬过来）：读不到就不显示，不挡设置页的其他内容
   useEffect(() => {
@@ -512,7 +539,7 @@ export function SettingsOverview() {
       <div className="card">
         <h2>{t('元数据共享改进计划')}</h2>
         <p className="hint">
-          {t('加入后，本机的影片元数据会用于改进元数据匹配（上传到另一个项目）。该功能仍在开发中 —— 现在勾选只是先记下你的选择，暂时不会上传任何数据。')}
+          {t('加入后，本机刮削好的元数据会贡献给社区元数据库 KeqDB，用来改进元数据匹配。贡献会先进待审队列，由 KeqDB 管理员审核后才进公开库；随时可以关闭。')}
         </p>
         <label className="row" style={{ gap: 8, alignItems: 'center' }}>
           <input
@@ -523,6 +550,43 @@ export function SettingsOverview() {
           />
           <span>{t('加入元数据共享改进计划')}</span>
         </label>
+
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+          <label className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="small">{t('服务地址')}</span>
+            <input
+              type="url"
+              value={keqBaseUrl}
+              disabled={sharingBusy}
+              placeholder="https://keqdb.kyarucloud.moe"
+              style={{ minWidth: 280 }}
+              onChange={(e) => setKeqBaseUrl(e.target.value)}
+            />
+          </label>
+          <label className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="small">{t('实例 token')}</span>
+            <input
+              type="password"
+              value={keqToken}
+              disabled={sharingBusy}
+              autoComplete="off"
+              placeholder={keqHasToken ? t('已设置（要替换就输入新的）') : 'keq_…'}
+              onChange={(e) => setKeqToken(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={sharingBusy}
+            onClick={() => void saveKeqDB()}
+          >
+            {t('保存')}
+          </button>
+        </div>
+        <p className="faint small">
+          {t('实例 token 由 KeqDB 后台签发（形如 keq_…），加密后存在本机数据库，不回显、也不会传到别处。')}{' '}
+          {keqHasToken ? t('当前：已配置') : t('当前：未配置')}
+        </p>
         {sharingMsg && <p className="faint small">{sharingMsg}</p>}
       </div>
 

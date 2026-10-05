@@ -112,3 +112,33 @@ func (s *Store) GetMetadataSharing(ctx context.Context) (MetadataSharing, error)
 func (s *Store) SetMetadataSharing(ctx context.Context, v MetadataSharing) error {
 	return s.SetSetting(ctx, SettingKeyMetadataSharing, v)
 }
+
+// SettingKeyKeqDB 是贡献目标站（KeqDB）连接配置在 settings 表里的键。
+const SettingKeyKeqDB = "sharing.keqdb"
+
+// KeqDBConfig 是共享目标站的连接配置。
+//
+// Token 存的是**密文**（见 internal/secrets 的 Seal/Open）—— 与 TMDB 凭据同一套规矩：
+// 明文只在内存里、绝不回显；BaseURL 是明文（它不是秘密）。
+type KeqDBConfig struct {
+	BaseURL string `json:"baseUrl,omitempty"`
+	Token   string `json:"token,omitempty"`
+}
+
+// GetKeqDBConfig 读 KeqDB 连接配置（没存过 = 空）。
+func (s *Store) GetKeqDBConfig(ctx context.Context) (KeqDBConfig, error) {
+	raw, found, err := s.GetSetting(ctx, SettingKeyKeqDB)
+	if err != nil || !found {
+		return KeqDBConfig{}, err
+	}
+	var v KeqDBConfig
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return KeqDBConfig{}, fmt.Errorf("解析 KeqDB 配置失败: %w", err)
+	}
+	return v, nil
+}
+
+// SetKeqDBConfig 写 KeqDB 连接配置。
+func (s *Store) SetKeqDBConfig(ctx context.Context, v KeqDBConfig) error {
+	return s.SetSetting(ctx, SettingKeyKeqDB, v)
+}
