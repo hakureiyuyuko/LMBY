@@ -9,6 +9,7 @@ import { TranscodePanel } from '../components/TranscodePanel';
 import { LogsPanel } from '../components/LogsPanel';
 import { ScanPlanPanel } from '../components/ScanPlanPanel';
 import { AuditPanel } from '../components/AuditPanel';
+import { WatchStatsPanel } from '../components/WatchStatsPanel';
 import { MaintenancePanel } from '../components/MaintenancePanel';
 import { AboutPanel } from '../components/AboutPanel';
 import type { Health, ProviderTestResult, SettingsPayload } from '../api';
@@ -131,6 +132,12 @@ export function Settings() {
             {t('审计日志')}
           </NavLink>
           <NavLink
+            to="/settings/watch"
+            className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
+          >
+            {t('观看统计')}
+          </NavLink>
+          <NavLink
             to="/settings/maintenance"
             className={({ isActive }) => (isActive ? 'tab active' : 'tab')}
           >
@@ -176,6 +183,11 @@ export function SettingsScan() {
 /** 设置页签：审计日志（持久的问责记录，见 internal/api/audit.go）。 */
 export function SettingsAudit() {
   return <AuditPanel />;
+}
+
+/** 设置页签：观看统计（谁看了什么、什么最热，见 internal/api/watchstats.go）。 */
+export function SettingsWatch() {
+  return <WatchStatsPanel />;
 }
 
 /** 设置页签：缓存与清理（只碰缓存，见 internal/api/maintenance.go）。 */

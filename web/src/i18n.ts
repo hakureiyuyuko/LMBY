@@ -1207,6 +1207,27 @@ const en: Record<string, string> = {
   '已是最新版本（{version}）': 'Up to date ({version})',
   '（刚查过，这里是上次的结果）': '(Checked recently — showing the previous result)',
 
+  // ---------------------------------------------------------------- 观看统计（设置页）
+  '观看统计': 'Watch stats',
+  '按播放记录统计：谁看了哪些影片，以及看得最多的影片与用户。数据来自每个人的播放进度，只统计开播过的条目。':
+    'Based on play records: who watched what, plus the most-watched titles and most active users. Built from each user’s playback progress — only titles that were actually started are counted.',
+  '总播放次数': 'Total plays',
+  '被看过的影片': 'Titles watched',
+  '看过的用户': 'Users who watched',
+  '看得最多的影片': 'Most-watched titles',
+  '看得最多的用户': 'Most active users',
+  '影片': 'Title',
+  '次数': 'Plays',
+  '人数': 'Viewers',
+  '影片数': 'Titles',
+  '谁看了什么': 'Who watched what',
+  '全部用户': 'All users',
+  '进度': 'Progress',
+  '最后观看': 'Last watched',
+  '还没有播放记录。': 'No play records yet.',
+  '读取观看统计失败': 'Failed to load watch stats',
+  '读取观看记录失败': 'Failed to load watch records',
+
 };
 /** 中文目录：中文没有「翻译表」，但保留这一层让 `translate` 的语义一致。 */
 const zh: Record<string, string> = {};

@@ -216,6 +216,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs", s.requireAdmin(s.handleLogs))
 	// 审计日志（持久）：谁在什么时候做了什么。同样只给管理员。
 	mux.Handle("GET /api/v1/audit", s.requireAdmin(s.handleListAudit))
+
+	// 观看统计（设置页）：谁看了什么、什么最热。
+	mux.Handle("GET /api/v1/stats/watch", s.requireAdmin(s.handleWatchStats))
+	mux.Handle("GET /api/v1/stats/watch/records", s.requireAdmin(s.handleWatchRecords))
 	// 维护：缓存占用与清理（设置 → 缓存与清理）。
 	mux.Handle("GET /api/v1/maintenance", s.requireAdmin(s.handleMaintenance))
 	mux.Handle("POST /api/v1/maintenance/clean", s.requireAdmin(s.handleMaintenanceClean))

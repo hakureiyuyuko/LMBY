@@ -175,6 +175,22 @@ export const api = {
     return request<AuditPayload>(`/api/v1/audit${qs ? `?${qs}` : ''}`);
   },
 
+  // 观看统计（只给管理员）：谁看了什么、什么最热。
+  watchStats: (params: { top?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.top) sp.set('top', String(params.top));
+    const qs = sp.toString();
+    return request<WatchStatsPayload>(`/api/v1/stats/watch${qs ? `?${qs}` : ''}`);
+  },
+  watchRecords: (params: { userId?: number; limit?: number; offset?: number } = {}) => {
+    const sp = new URLSearchParams();
+    if (params.userId) sp.set('userId', String(params.userId));
+    if (params.limit) sp.set('limit', String(params.limit));
+    if (params.offset) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return request<WatchRecordsPayload>(`/api/v1/stats/watch/records${qs ? `?${qs}` : ''}`);
+  },
+
   // 管理 API 密钥（给 bot / 脚本用的长期凭据；只能开用户管理那几个接口）。
   botKey: () =>
     request<{ configured: boolean; prefix?: string; createdAt?: string }>('/api/v1/settings/bot-key'),
@@ -1349,6 +1365,71 @@ export type AuditEntry = {
 
 export type AuditPayload = {
   entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/** 观看统计总览（`GET /api/v1/stats/watch`）。 */
+export type WatchTotals = {
+  /** 所有用户加起来的总播放次数。 */
+  totalPlays: number;
+  /** 被看过的条目数。 */
+  watchedItems: number;
+  /** 有观看记录的用户数。 */
+  activeUsers: number;
+  lastPlayedAt?: string;
+};
+
+/** 「看得最多的影片」排行里的一条（剧集按单集）。 */
+export type WatchedItem = {
+  itemId: number;
+  title: string;
+  kind: string;
+  seriesTitle?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  plays: number;
+  viewers: number;
+  lastPlayedAt?: string;
+};
+
+/** 「看得最多的用户」排行里的一条。 */
+export type Watcher = {
+  userId: number;
+  username: string;
+  displayName: string;
+  plays: number;
+  items: number;
+  lastPlayedAt?: string;
+};
+
+export type WatchStatsPayload = {
+  totals: WatchTotals;
+  topItems: WatchedItem[];
+  topUsers: Watcher[];
+};
+
+/** 「谁看了什么」明细里的一条（`GET /api/v1/stats/watch/records`）。 */
+export type WatchRecord = {
+  userId: number;
+  username: string;
+  displayName: string;
+  itemId: number;
+  title: string;
+  kind: string;
+  seriesTitle?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  plays: number;
+  positionTicks: number;
+  durationTicks: number;
+  played: boolean;
+  lastPlayedAt?: string;
+};
+
+export type WatchRecordsPayload = {
+  records: WatchRecord[];
   total: number;
   limit: number;
   offset: number;

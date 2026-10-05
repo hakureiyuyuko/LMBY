@@ -2608,3 +2608,63 @@ th {
     transform: rotate(360deg);
   }
 }
+
+/* ---------------------------------------------------------------- 观看统计（设置页） */
+
+/* 顶部三个数字卡（总播放次数 / 看过的影片 / 看过的用户）。 */
+.stat-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin: 12px 0;
+}
+
+.stat-card {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+}
+
+.stat-num {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* 两个排行并排（窄屏自动堆叠）。 */
+.stat-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--gap);
+  margin-bottom: 20px;
+}
+
+.stat-cols h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+/* 表格里「像链接的按钮」（点排行里的用户名去筛明细）。 */
+.linklike {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.linklike:hover {
+  text-decoration: underline;
+}
