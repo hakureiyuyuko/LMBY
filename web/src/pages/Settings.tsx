@@ -536,7 +536,7 @@ export function SettingsOverview() {
       <div className="card">
         <h2>{t('元数据共享改进计划')}</h2>
         <p className="hint">
-          {t('加入后，KeqDB 会作为首选元数据源（优先于 TMDB，找不到再回退 TMDB）。元数据贡献（上传）功能正在接入；随时可以关闭。')}
+          {t('加入后，KeqDB 会作为首选元数据源（优先于 TMDB，找不到再回退 TMDB）；本机条目也能贡献给它 —— 管理员在条目详情页点「贡献到 KeqDB」即可。随时可以关闭。')}
         </p>
         <label className="row" style={{ gap: 8, alignItems: 'center' }}>
           <input
