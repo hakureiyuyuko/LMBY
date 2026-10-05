@@ -83,3 +83,32 @@ func (s *Store) GetTMDBCredentials(ctx context.Context) (*TMDBCredentials, bool,
 func (s *Store) SaveTMDBCredentials(ctx context.Context, creds TMDBCredentials) error {
 	return s.SetSetting(ctx, SettingKeyTMDBCredentials, creds)
 }
+
+// SettingKeyMetadataSharing 是「加入元数据共享改进计划」开关在 settings 表里的键。
+const SettingKeyMetadataSharing = "sharing.metadata"
+
+// MetadataSharing 是共享开关的值。
+//
+// 目前**只有开关本身**：真正的上传功能在**另一个项目**里开发中，这里先把
+// 用户的意愿记下来（将来那边来读这个值），不发送任何数据。
+type MetadataSharing struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GetMetadataSharing 读共享开关（没存过 = 没加入，返回 false）。
+func (s *Store) GetMetadataSharing(ctx context.Context) (MetadataSharing, error) {
+	raw, found, err := s.GetSetting(ctx, SettingKeyMetadataSharing)
+	if err != nil || !found {
+		return MetadataSharing{}, err
+	}
+	var v MetadataSharing
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return MetadataSharing{}, fmt.Errorf("解析元数据共享开关失败: %w", err)
+	}
+	return v, nil
+}
+
+// SetMetadataSharing 写共享开关。
+func (s *Store) SetMetadataSharing(ctx context.Context, v MetadataSharing) error {
+	return s.SetSetting(ctx, SettingKeyMetadataSharing, v)
+}

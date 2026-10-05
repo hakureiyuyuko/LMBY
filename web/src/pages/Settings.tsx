@@ -242,6 +242,10 @@ export function SettingsOverview() {
   const [health, setHealth] = useState<Health | null>(null);
   const [test, setTest] = useState<ProviderTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  // 「加入元数据共享改进计划」开关：保存即写库。目前只存意愿，不上传任何数据。
+  const [sharing, setSharing] = useState(false);
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [sharingMsg, setSharingMsg] = useState('');
 
   const load = useCallback(async () => {
     if (!isAdmin) return;
@@ -249,6 +253,7 @@ export function SettingsOverview() {
       const d = await api.settings();
       setData(d);
       setLanguage(d.tmdb.language);
+      setSharing(d.sharing.enabled);
       setError('');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t('读取设置失败'));
@@ -258,6 +263,24 @@ export function SettingsOverview() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 勾选/取消「元数据共享改进计划」：立刻写库（没做二次确认 —— 它随时可改回来）。
+  const saveSharing = useCallback(
+    async (enabled: boolean) => {
+      setSharingBusy(true);
+      setSharingMsg('');
+      try {
+        const r = await api.updateSharing(enabled);
+        setSharing(r.sharing.enabled);
+        setSharingMsg(t('已保存'));
+      } catch (e) {
+        setSharingMsg(e instanceof ApiError ? e.message : t('保存失败'));
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [t],
+  );
 
   // 服务状态（M6 从首页底部搬过来）：读不到就不显示，不挡设置页的其他内容
   useEffect(() => {
@@ -484,6 +507,23 @@ export function SettingsOverview() {
             )}
           </>
         )}
+      </div>
+
+      <div className="card">
+        <h2>{t('元数据共享改进计划')}</h2>
+        <p className="hint">
+          {t('加入后，本机的影片元数据会用于改进元数据匹配（上传到另一个项目）。该功能仍在开发中 —— 现在勾选只是先记下你的选择，暂时不会上传任何数据。')}
+        </p>
+        <label className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={sharing}
+            disabled={sharingBusy}
+            onChange={(e) => void saveSharing(e.target.checked)}
+          />
+          <span>{t('加入元数据共享改进计划')}</span>
+        </label>
+        {sharingMsg && <p className="faint small">{sharingMsg}</p>}
       </div>
 
       <div className="card">

@@ -395,6 +395,12 @@ export const api = {
     }),
   resetTMDBSettings: () =>
     request<{ ok: boolean; tmdb: TMDBSettings }>('/api/v1/settings/tmdb', { method: 'DELETE' }),
+  /** 保存「元数据共享改进计划」开关（目前只存值，不上传任何数据）。 */
+  updateSharing: (enabled: boolean) =>
+    request<{ ok: boolean; sharing: SharingSettings }>('/api/v1/settings/sharing', {
+      method: 'PUT',
+      ...json({ enabled }),
+    }),
   testProvider: (q?: string) =>
     request<ProviderTestResult>(
       `/api/v1/provider/test${q ? `?q=${encodeURIComponent(q)}` : ''}`,
@@ -928,7 +934,14 @@ export interface SystemInfo {
 
 export interface SettingsPayload {
   tmdb: TMDBSettings;
+  /** 「加入元数据共享改进计划」开关（没存过时后端也回 { enabled: false }）。 */
+  sharing: SharingSettings;
   system: SystemInfo;
+}
+
+/** 「加入元数据共享改进计划」开关的值。目前只存意愿，上传功能在另一个项目里开发。 */
+export interface SharingSettings {
+  enabled: boolean;
 }
 
 /** 「测试连接」的结果。 */

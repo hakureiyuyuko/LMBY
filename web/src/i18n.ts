@@ -950,6 +950,10 @@ const en: Record<string, string> = {
     'This is where live sources are managed (import / refresh / disable) and dead sources are probed; watching channels and switching between them happens on the Live TV page.',
   '要导入 / 刷新播放列表、探测失效源，去设置页的「直播源」页签。':
     'To import or refresh a playlist or probe dead sources, open the “Live sources” tab in Settings.',
+  '元数据共享改进计划': 'Metadata sharing program',
+  '加入元数据共享改进计划': 'Join the metadata sharing program',
+  '加入后，本机的影片元数据会用于改进元数据匹配（上传到另一个项目）。该功能仍在开发中 —— 现在勾选只是先记下你的选择，暂时不会上传任何数据。':
+    'If joined, this library’s movie metadata will be used to improve metadata matching (uploaded to another project). The feature is still in development — checking the box only records your choice for now; no data is uploaded yet.',
   '只读库叠加层': 'Read-only library overlay',
   '只读媒体库（网盘 / 只读挂载）的刮削产物存在这里：数据目录下每库一块，不写媒体目录。目录：{root}':
     'Scraped artifacts of read-only libraries (network drives / read-only mounts) live here: one tree per library under the data directory, never inside the media folders. Path: {root}',

@@ -228,6 +228,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/settings/bot-key", s.requireAdmin(s.handleCreateBotKey))
 	mux.Handle("DELETE /api/v1/settings/bot-key", s.requireAdmin(s.handleDeleteBotKey))
 	mux.Handle("PUT /api/v1/settings/tmdb", s.requireAdmin(s.handleUpdateTMDBSettings))
+	mux.Handle("PUT /api/v1/settings/sharing", s.requireAdmin(s.handleUpdateSharingSettings))
 	mux.Handle("DELETE /api/v1/settings/tmdb", s.requireAdmin(s.handleResetTMDBSettings))
 	mux.Handle("POST /api/v1/provider/test", s.requireAdmin(s.handleTestProvider))
 
