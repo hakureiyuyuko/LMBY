@@ -8,6 +8,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -102,14 +103,16 @@ func TestPriorityDisabledUsesBackupOnly(t *testing.T) {
 	}
 }
 
-func TestPriorityImageURLFollowsSwitch(t *testing.T) {
-	enabled := true
+func TestPriorityImageURLByPathShape(t *testing.T) {
+	// 开关关着也一样：只要路径长得像 KeqDB 的，就得用 KeqDB 的域名取。
+	enabled := false
 	p, _, _ := newPair(&enabled)
-	if got := p.ImageURL("/x.jpg", "w500"); got != "keqdb:w500/x.jpg" {
-		t.Fatalf("启用时图片地址应来自 KeqDB，得到 %q", got)
+
+	keqPath := "/" + strings.Repeat("a", 64) + ".webp"
+	if got := p.ImageURL(keqPath, "w500"); got != "keqdb:w500"+keqPath {
+		t.Fatalf("KeqDB 形状的路径应走 KeqDB 域名（与开关无关），得到 %q", got)
 	}
-	enabled = false
-	if got := p.ImageURL("/x.jpg", "w500"); got != "tmdb:w500/x.jpg" {
-		t.Fatalf("关闭时图片地址应来自 TMDB，得到 %q", got)
+	if got := p.ImageURL("/abc123.jpg", "w500"); got != "tmdb:w500/abc123.jpg" {
+		t.Fatalf("TMDB 形状的路径应走 TMDB，得到 %q", got)
 	}
 }

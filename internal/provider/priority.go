@@ -15,6 +15,7 @@ package provider
 import (
 	"context"
 	"log/slog"
+	"regexp"
 )
 
 // Priority 见包注释。
@@ -142,10 +143,17 @@ func (p *Priority) Credits(ctx context.Context, kind string, id int) (*Credits, 
 	return p.backup.Credits(ctx, kind, id)
 }
 
-// ImageURL 用**当前生效的源**拼：两个源的图片路径不是同一个命名空间
-// （KeqDB 有内容寻址的自有路径），拿错域名拼会 404。
+// keqDBImagePath 匹配 KeqDB 的图片路径：它是**内容寻址**的
+// `/<64 位 hex>.webp`；TMDB 是 `/abc.jpg` 那种。
+var keqDBImagePath = regexp.MustCompile(`^/[0-9a-fA-F]{64}\.webp$`)
+
+// ImageURL 按**路径的形状**选域名，而不是按开关状态。
+//
+// 原因：库里的图片 path 是「抓的时候」那个源给的 —— 开关开了关关了开，
+// 老 path 不会跟着变。KeqDB 的内容寻址 .webp 只能用它自己的域名取，
+// TMDB 的 /abc.jpg 只能用 image.tmdb.org；按开关切会有一半图 404。
 func (p *Priority) ImageURL(path, size string) string {
-	if p.usePrimary() {
+	if keqDBImagePath.MatchString(path) && p.primary != nil {
 		return p.primary.ImageURL(path, size)
 	}
 	return p.backup.ImageURL(path, size)

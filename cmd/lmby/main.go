@@ -548,7 +548,9 @@ func cmdServe(args []string) error {
 	go pool.Run(ctx)
 
 	// 图片管线：本地图只读，回源图与缩放缓存落在数据目录
-	imgSvc, err := images.NewService(st, tmdbCached, cfg.ImagesCacheDir(), cfg.Images.MaxCacheMB, log)
+	// 图片回源也要用这套优先级：库里可能有 KeqDB 抓来的内容寻址路径，
+	// 那种只能用 KeqDB 的域名取（ImageURL 按路径形状选域名）。
+	imgSvc, err := images.NewService(st, metaSource, cfg.ImagesCacheDir(), cfg.Images.MaxCacheMB, log)
 	if err != nil {
 		return err
 	}
