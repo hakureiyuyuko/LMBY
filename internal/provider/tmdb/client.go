@@ -24,6 +24,7 @@ import (
 
 	"github.com/hakureiyuyuko/lmby/internal/provider"
 	"github.com/hakureiyuyuko/lmby/internal/textutil"
+	"github.com/hakureiyuyuko/lmby/internal/version"
 )
 
 // DefaultBaseURL 是 API 根地址。
@@ -48,6 +49,11 @@ type Config struct {
 	// Name 是 provider 标识（缓存键与日志用）。空 = "tmdb"。
 	// KeqDB 用的是同一套 TMDB v3 形状的接口，靠它分开缓存（provider_cache.provider）。
 	Name string
+	// UserAgent 是请求头里的 UA。空 = "LMBY/<版本>"。
+	//
+	// 不要留空沿用 Go 默认值：`Go-http-client/1.1` 会被前置的 Cloudflare 挑战
+	// 直接拦成 403（KeqDB 就在 CF 后面，实测过）。
+	UserAgent string
 	// MaxConcurrent 是同时在飞的请求数上限。
 	MaxConcurrent int
 	// MinInterval 是两次请求之间的最小间隔。
@@ -79,6 +85,9 @@ func New(cfg Config) *Client {
 	}
 	if cfg.Language == "" {
 		cfg.Language = "zh-CN"
+	}
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = "LMBY/" + version.String()
 	}
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = 4
@@ -168,6 +177,7 @@ func (c *Client) newRequest(ctx context.Context, path string, params url.Values)
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.cfg.UserAgent)
 	if readToken != "" {
 		req.Header.Set("Authorization", "Bearer "+readToken)
 	}
