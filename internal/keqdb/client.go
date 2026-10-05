@@ -116,7 +116,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 	if err != nil {
 		return fmt.Errorf("请求 KeqDB 失败: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 
 	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
