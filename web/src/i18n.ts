@@ -1133,6 +1133,8 @@ const en: Record<string, string> = {
   '全屏': 'Fullscreen',
   '快捷键：空格 播放/暂停 · ←/→ 快退快进 10 秒 · F 全屏 · M 静音。':
     'Shortcuts: Space play/pause · ←/→ seek 10s · F fullscreen · M mute.',
+  '正在下载体验资源（特效字幕字体等，首次会慢一些）':
+    'Downloading playback assets (subtitle fonts, etc.) — the first time takes longer',
   '字幕取回失败：HTTP {status}': 'Failed to fetch subtitles: HTTP {status}',
   '字幕抽取超时': 'Subtitle extraction timed out',
   'libass 渲染器加载失败': 'Failed to load the libass renderer',

@@ -2,6 +2,7 @@ import Hls from 'hls.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { fetchWithProgress, prefetchWithProgress, useDownloadProgress } from '../dlprogress';
 import { t, useI18n } from '../i18n';
 import type { ItemPlaylist, PlaybackState, PlaylistNeighbors } from '../api';
 import {
@@ -81,7 +82,7 @@ function absUrl(p: string): string {
  */
 async function fetchSubtitleText(url: string, tries = 800): Promise<string> {
   for (let i = 0; i < tries; i++) {
-    const r = await fetch(url, { credentials: 'same-origin' });
+    const r = await fetchWithProgress(url);
     if (r.status === 202) {
       await new Promise((res) => setTimeout(res, 1500));
       continue;
@@ -268,6 +269,15 @@ export function Player() {
   const [attFonts, setAttFonts] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // 体验资源（特效字幕字体 / 渲染器）的下载进度：只在真在下时显示，见底部进度条。
+  const dl = useDownloadProgress();
+  // 多个资源并发时总进度会被重算（新任务开始 → 分母变大），这里取「到过的最大
+  // 百分比」让它单调推进，免得进度条倒退（看着像出错了）。
+  const dlPctRef = useRef(0);
+  const dlPctRaw = dl.total > 0 ? Math.min(100, Math.round((dl.loaded / dl.total) * 100)) : 0;
+  if (dl.active === 0) dlPctRef.current = 0;
+  else if (dlPctRaw > dlPctRef.current) dlPctRef.current = dlPctRaw;
+  const dlPct = dl.active > 0 ? dlPctRef.current : 0;
   const [loading, setLoading] = useState(true);
   const [position, setPosition] = useState(0);
   const [dragValue, setDragValue] = useState<number | null>(null);
@@ -869,6 +879,15 @@ export function Player() {
           setNotice(t('服务端没配兜底字体（放任意中文字体到 <数据目录>/fonts/fallback.ttf），特效字幕暂时显示不了'));
           return;
         }
+        // 预热「worker 自己偷偷去下」的资源：进度可见，而且下完就进 HTTP 缓存，
+        // worker 随后取用时直接命中 —— 网络只会下一次（失败的它会自己重试）。
+        // 只预热字体：实测 wasm 那支（worker 里 emscripten 的加载路径）**不会**命中
+        // 这份缓存，预热它反而多下一次 2MB，不如直接交给 worker。
+        await Promise.all([
+          prefetchWithProgress(font),
+          ...attFonts.map((u) => prefetchWithProgress(u)),
+        ]);
+        if (cancelled) return;
         // 建实例之前先把可能残留的画布清掉：万一上次是被中途取消的（见下），
         // 残留画布会永远停在上一帧字幕上 → 重影。
         disposeOctopus(null);
@@ -1285,6 +1304,18 @@ export function Player() {
         >
           ⟲
         </button>
+        </div>
+      )}
+
+      {canPlay && dl.active > 0 && (
+        <div className="player-dl" role="status" aria-live="polite">
+          <span className="player-dl-text">
+            {t('正在下载体验资源（特效字幕字体等，首次会慢一些）')}
+          </span>
+          <span className={`player-dl-track${dl.total > 0 ? '' : ' player-dl-unknown'}`}>
+            <span className="player-dl-fill" style={{ width: `${dlPct}%` }} />
+          </span>
+          {dl.total > 0 && <span className="player-dl-pct">{dlPct}%</span>}
         </div>
       )}
 
