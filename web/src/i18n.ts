@@ -356,8 +356,8 @@ const en: Record<string, string> = {
   '元数据刮削': 'Metadata scraping',
   '有本地 nfo 的条目默认不会被刮削（nfo 是当初人工整理的，最权威）；只有没 nfo 的才会去 TMDB 找，找不到或拿不准的进「人工匹配」。':
     'Items with a local nfo are not scraped by default (that nfo was curated by hand and wins); only items without one are looked up on TMDB, and anything missing or uncertain lands in Matching.',
-  '还没配 TMDB 凭据：去「设置」页填一个 Read Access Token（或 API Key）就能开始刮削。':
-    'No TMDB credentials yet: add a Read Access Token (or API key) in Settings and scraping can start.',
+  '还没配元数据源：在「设置」里填 TMDB 凭据，或打开「元数据共享改进计划」用 KeqDB —— 任选一个就能开始刮削。':
+    'No metadata source configured: add TMDB credentials in Settings, or turn on the metadata sharing program to use KeqDB — either one is enough to start scraping.',
   '来自 nfo {n}': 'from nfo {n}',
   '已匹配 {n}': 'Matched {n}',
   '待确认 {n}': 'Review {n}',

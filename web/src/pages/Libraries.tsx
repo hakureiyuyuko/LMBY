@@ -732,7 +732,7 @@ function ScrapeCard({ libraryId, onChange }: { libraryId: number; onChange: () =
 
       {data && !data.configured && (
         <div className="alert alert-error">
-          {t('还没配 TMDB 凭据：去「设置」页填一个 Read Access Token（或 API Key）就能开始刮削。')}
+          {t('还没配元数据源：在「设置」里填 TMDB 凭据，或打开「元数据共享改进计划」用 KeqDB —— 任选一个就能开始刮削。')}
         </div>
       )}
 
