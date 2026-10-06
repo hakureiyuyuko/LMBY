@@ -344,10 +344,10 @@ function CreateLibraryCard({ onCreated }: { onCreated: (lib: LibrarySummary) => 
 // ---------------------------------------------------------------- 编辑（类型 / 根路径）
 
 /**
- * 就地编辑一个媒体库：改类型与根路径。
+ * 就地编辑一个媒体库：名称、类型与根路径。
  *
- * 为什么只给这两项：库名在创建后很少变，而「扫描扫错了一类」与「换了挂载点」
- * 才是真实需求。两者都是**策略**：改类型不影响已入库条目的 kind，
+ * 三项都是**策略**，改完都不动已入库的条目：改名字只是换个显示名
+ * （条目的 library_id 不变）、改类型不影响已入库条目的 kind、
  * 移除根路径也不删已入库的条目 —— 界面上写明了，免得用户以为是「把东西删了」。
  */
 function EditLibraryForm({
@@ -362,11 +362,17 @@ function EditLibraryForm({
   onError: (msg: string) => void;
 }) {
   const { t } = useI18n();
+  const [name, setName] = useState(library.name);
   const [kind, setKind] = useState(library.kind);
   const [paths, setPaths] = useState(library.paths.map((p) => p.path).join('\n'));
   const [busy, setBusy] = useState(false);
 
   async function submit() {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      onError(t('库名不能为空'));
+      return;
+    }
     const list = paths
       .split('\n')
       .map((p) => p.trim())
@@ -377,8 +383,8 @@ function EditLibraryForm({
     }
     setBusy(true);
     try {
-      await api.updateLibrary(library.id, { kind, paths: list });
-      onSaved(t('已保存「{name}」的类型与根路径（重扫后生效）', { name: library.name }));
+      await api.updateLibrary(library.id, { name: trimmedName, kind, paths: list });
+      onSaved(t('已保存「{name}」的名称、类型与根路径（重扫后生效）', { name: trimmedName }));
     } catch (e) {
       onError(e instanceof ApiError ? e.message : t('保存失败'));
     } finally {
@@ -394,6 +400,10 @@ function EditLibraryForm({
         borderTop: '1px dashed var(--border)',
       }}
     >
+      <label className="field">
+        <span>{t('名称')}</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} />
+      </label>
       <label className="field">
         <span>{t('类型')}</span>
         <select value={kind} onChange={(e) => setKind(e.target.value)}>

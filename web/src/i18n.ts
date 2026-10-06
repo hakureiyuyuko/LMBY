@@ -940,8 +940,9 @@ const en: Record<string, string> = {
   '创建并进入': 'Create and continue',
 
   // ---------------------------------------------------------------- 本轮：库编辑 / 叠加层看板 / 直播源收拢
-  '已保存「{name}」的类型与根路径（重扫后生效）':
-    'Saved the type and root paths of “{name}” (takes effect after a rescan)',
+  '已保存「{name}」的名称、类型与根路径（重扫后生效）':
+    'Saved the name, type and root paths of “{name}” (takes effect after a rescan)',
+  '库名不能为空': 'Library name cannot be empty',
   '至少需要一个根路径（想清空请删库）':
     'At least one root path is required (delete the library to remove everything)',
   '改类型只影响以后扫描怎么认条目（已入库的条目不变）；移除一条根路径不会删掉已入库的条目。改动要重扫一次才生效。':
